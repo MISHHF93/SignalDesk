@@ -1,0 +1,116 @@
+import type { Lead } from "@business-dashboard/domain";
+import { describe, expect, it, vi } from "vitest";
+
+import type { IntelligenceCapability } from "./capability";
+import {
+  intelligenceCapabilities,
+  runIntelligenceCapabilities,
+} from "./registry";
+
+const NOW = new Date("2026-08-18T14:00:00.000Z");
+
+const lead: Lead = {
+  id: "lead_001",
+  organizationId: "org_001",
+  contactName: "Alex Rivera",
+  companyName: "Northstar Dental",
+  valueCents: 1_800_000,
+  currency: "USD",
+  owner: { id: "user_001", name: "Sarah Chen" },
+  stage: "Qualified",
+  createdAt: new Date("2026-08-17T17:00:00.000Z"),
+  lastInteractionAt: null,
+  expectedResponseHours: 4,
+  source: {
+    integrationId: "e635f8c7-a8fd-4cca-8e6e-9836d790518a",
+    system: "hubspot",
+    externalRecordId: "hs_90210",
+    sourceVersion: "v1",
+    recordDigestSha256: "a".repeat(64),
+    lastSyncedAt: new Date("2026-08-18T13:56:00.000Z"),
+  },
+};
+
+describe("intelligenceCapabilities", () => {
+  it("registers every real capability", () => {
+    expect(intelligenceCapabilities.map((capability) => capability.id)).toEqual(
+      [
+        "stuck",
+        "lead-risk",
+        "integration-health",
+        "ownership",
+        "overdue-invoice",
+        "overdue-task",
+      ],
+    );
+  });
+});
+
+describe("runIntelligenceCapabilities", () => {
+  it("flattens findings from every registered capability", async () => {
+    const findings = await runIntelligenceCapabilities({
+      lead,
+      now: NOW,
+      overdueInvoices: [],
+      connectedIntegrationSlugs: [],
+      highValueThresholdCents: 1_000_000,
+      overdueTasks: [],
+      workingDaysBitmask: 0b1111111,
+      timeZone: "UTC",
+    });
+    const types = findings.map((finding) => finding.type);
+
+    expect(types).toContain("lead.untouched");
+    expect(types).toContain("lead.follow_up_risk");
+    expect(types).toContain("integration.unconnected");
+    expect(types).not.toContain("lead.ownership_gap");
+  });
+
+  it("still reports connector facts for a real organization with no lead yet", async () => {
+    const findings = await runIntelligenceCapabilities({
+      lead: null,
+      now: NOW,
+      overdueInvoices: [],
+      connectedIntegrationSlugs: [],
+      highValueThresholdCents: 1_000_000,
+      overdueTasks: [],
+      workingDaysBitmask: 0b1111111,
+      timeZone: "UTC",
+    });
+    const types = findings.map((finding) => finding.type);
+
+    expect(types).toEqual(["integration.unconnected"]);
+  });
+
+  it("still returns findings from the other capabilities when one throws", async () => {
+    const brokenCapability = intelligenceCapabilities.find(
+      (capability) => capability.id === "stuck",
+    ) as IntelligenceCapability;
+    const evaluateSpy = vi
+      .spyOn(brokenCapability, "evaluate")
+      .mockRejectedValueOnce(new Error("boom"));
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    const findings = await runIntelligenceCapabilities({
+      lead,
+      now: NOW,
+      overdueInvoices: [],
+      connectedIntegrationSlugs: [],
+      highValueThresholdCents: 1_000_000,
+      overdueTasks: [],
+      workingDaysBitmask: 0b1111111,
+      timeZone: "UTC",
+    });
+    const types = findings.map((finding) => finding.type);
+
+    expect(types).not.toContain("lead.untouched");
+    expect(types).toContain("lead.follow_up_risk");
+    expect(types).toContain("integration.unconnected");
+    expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+
+    evaluateSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+  });
+});

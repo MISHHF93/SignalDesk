@@ -1,0 +1,29 @@
+{
+  "name": "@business-dashboard/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@business-dashboard/application": "workspace:*",
+    "@business-dashboard/integrations": "workspace:*",
+    "@business-dashboard/intelligence": "workspace:*",
+    "@business-dashboard/persistence": "workspace:*",
+    "@business-dashboard/schemas": "workspace:*",
+    "@stripe/react-stripe-js": "6.8.1",
+    "@stripe/stripe-js": "9.13.0",
+    "@supabase/ssr": "0.12.4",
+    "@supabase/supabase-js": "2.112.3",
+    "next": "16.3.1",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "name": "@business-dashboard/integrations",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./hubspot": "./src/hubspot/index.ts",
+    "./slack": "./src/slack/index.ts",
+    "./stripe": "./src/stripe/index.ts",
+    "./stripe-billing": "./src/stripe-billing/index.ts",
+    "./quickbooks": "./src/quickbooks/index.ts",
+    "./gmail": "./src/gmail/index.ts",
+    "./google-calendar": "./src/google-calendar/index.ts",
+    "./microsoft-outlook": "./src/microsoft-outlook/index.ts",
+    "./microsoft-calendar": "./src/microsoft-calendar/index.ts",
+    "./asana": "./src/asana/index.ts",
+    "./linear": "./src/linear/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "stripe": "22.5.0"
+  },
+  "devDependencies": {
+    "@business-dashboard/schemas": "workspace:*"
+  }
+}

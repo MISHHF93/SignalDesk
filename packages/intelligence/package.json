@@ -1,0 +1,18 @@
+{
+  "name": "@business-dashboard/intelligence",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@business-dashboard/domain": "workspace:*",
+    "@business-dashboard/integrations": "workspace:*",
+    "@business-dashboard/schemas": "workspace:*"
+  }
+}
