@@ -1,4 +1,4 @@
-import { listConnectors } from "@business-dashboard/integrations";
+import { listConnectors } from "@signaldesk/integrations";
 
 import type {
   IntelligenceContext,

@@ -1,7 +1,7 @@
 import {
   createBusinessAIOrchestrator,
   createDeterministicProvider,
-} from "@business-dashboard/application";
+} from "@signaldesk/application";
 
 /**
  * The single Business AI Node for this app — everything that touches

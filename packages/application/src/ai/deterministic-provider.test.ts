@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseDashboardIntent,
   type IntelligenceCard,
-} from "@business-dashboard/schemas";
+} from "@signaldesk/schemas";
 
 import { createDeterministicProvider } from "./deterministic-provider";
 

@@ -1,5 +1,5 @@
 {
-  "name": "@business-dashboard/integrations",
+  "name": "@signaldesk/integrations",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -26,6 +26,6 @@
     "stripe": "22.5.0"
   },
   "devDependencies": {
-    "@business-dashboard/schemas": "workspace:*"
+    "@signaldesk/schemas": "workspace:*"
   }
 }

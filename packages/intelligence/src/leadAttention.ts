@@ -2,7 +2,7 @@ import {
   evaluateUntouchedLead,
   type Lead,
   type StuckLeadSignal,
-} from "@business-dashboard/domain";
+} from "@signaldesk/domain";
 
 export type LeadAttentionResult =
   | {

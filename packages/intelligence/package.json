@@ -1,5 +1,5 @@
 {
-  "name": "@business-dashboard/intelligence",
+  "name": "@signaldesk/intelligence",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,8 +11,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@business-dashboard/domain": "workspace:*",
-    "@business-dashboard/integrations": "workspace:*",
-    "@business-dashboard/schemas": "workspace:*"
+    "@signaldesk/domain": "workspace:*",
+    "@signaldesk/integrations": "workspace:*",
+    "@signaldesk/schemas": "workspace:*"
   }
 }

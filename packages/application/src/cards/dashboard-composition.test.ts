@@ -1,5 +1,5 @@
-import type { PrioritizedFinding } from "@business-dashboard/intelligence";
-import { intelligenceCardSchema } from "@business-dashboard/schemas";
+import type { PrioritizedFinding } from "@signaldesk/intelligence";
+import { intelligenceCardSchema } from "@signaldesk/schemas";
 import { describe, expect, it } from "vitest";
 
 import { composeCards } from "./dashboard-composition";

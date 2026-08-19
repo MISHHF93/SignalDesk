@@ -1,4 +1,4 @@
-import type { IntelligenceCard } from "@business-dashboard/schemas";
+import type { IntelligenceCard } from "@signaldesk/schemas";
 
 import type { CreateInternalTaskAction } from "../_lib/actions";
 

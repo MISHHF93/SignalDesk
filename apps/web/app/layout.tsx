@@ -8,7 +8,7 @@ import { SiteNavigation } from "./_components/site-navigation";
 import { getCurrentOrganization } from "./_lib/session";
 import "./globals.css";
 
-const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "Business Dashboard";
+const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "SignalDesk";
 
 export const metadata: Metadata = {
   title: {

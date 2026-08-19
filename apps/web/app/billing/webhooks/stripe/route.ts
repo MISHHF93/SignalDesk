@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import {
   constructStripeWebhookEvent,
   createStripeBillingClient,
-} from "@business-dashboard/integrations/stripe-billing";
+} from "@signaldesk/integrations/stripe-billing";
 import {
   createDatabasePool,
   findOrganizationIdByStripeCustomerId,
@@ -11,7 +11,7 @@ import {
   updateSubscriptionFromStripe,
   type DatabasePool,
   type SubscriptionStatus,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import {
   getStripeSecretKey,

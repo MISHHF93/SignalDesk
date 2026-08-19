@@ -1,4 +1,4 @@
-import type { Invoice, Lead, Task } from "@business-dashboard/domain";
+import type { Invoice, Lead, Task } from "@signaldesk/domain";
 import { z } from "zod";
 
 const nonEmptyIdentifierSchema = z.string().trim().min(1);
@@ -347,7 +347,7 @@ export type IntelligenceCard = z.infer<typeof intelligenceCardSchema>;
 // A real, deterministically-assembled work product built from the
 // Intelligence Core's own findings — not a raw dashboard view, and not
 // fabricated AI prose (this app has no model provider yet; see
-// `@business-dashboard/application`'s `deterministic-provider.ts`).
+// `@signaldesk/application`'s `deterministic-provider.ts`).
 // `generatedBy` is honestly `"deterministic-assembly"` for every artifact
 // today. Only `daily_brief` exists; the broader artifact taxonomy (Client
 // Brief, Project Brief, Proposal, Risk Report, ...) is architected for via
@@ -396,7 +396,7 @@ export type Artifact = z.infer<typeof artifactSchema>;
 //
 // Natural-language command-bar input is never executed directly: it is
 // parsed into one of these validated, typed intents first (see
-// `@business-dashboard/application`'s `parseCommand`). `group` and `compare`
+// `@signaldesk/application`'s `parseCommand`). `group` and `compare`
 // are declared for contract completeness but no parser produces them yet.
 
 const filterDefinitionSchema = z.strictObject({
@@ -446,7 +446,7 @@ export const createInternalTaskInputSchema = z.strictObject({
    * Must be stable across a retry of the same logical request — derived
    * from what's being acted on (e.g. a card and action id), never
    * generated fresh per call. See `createInternalTask`'s doc comment in
-   * `@business-dashboard/persistence` for why.
+   * `@signaldesk/persistence` for why.
    */
   idempotencyKey: nonEmptyIdentifierSchema,
 });

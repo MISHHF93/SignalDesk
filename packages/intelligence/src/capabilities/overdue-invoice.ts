@@ -1,4 +1,4 @@
-import { evaluateOverdueInvoice } from "@business-dashboard/domain";
+import { evaluateOverdueInvoice } from "@signaldesk/domain";
 
 import type {
   IntelligenceCapability,

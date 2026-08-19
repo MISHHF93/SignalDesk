@@ -7,7 +7,7 @@ import {
   getSubscriptionItemId,
   previewPriceChangeInvoice,
   updateSubscriptionPrice,
-} from "@business-dashboard/integrations/stripe-billing";
+} from "@signaldesk/integrations/stripe-billing";
 import {
   createDatabasePool,
   getCurrentStandardPrice,
@@ -17,7 +17,7 @@ import {
   recordAuditEvent,
   updateSubscriptionFromStripe,
   type DatabasePool,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
 import { checkRateLimit } from "../_lib/rate-limit";

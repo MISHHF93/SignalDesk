@@ -3,7 +3,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { buildQuickBooksAuthorizationUrl } from "@business-dashboard/integrations/quickbooks";
+import { buildQuickBooksAuthorizationUrl } from "@signaldesk/integrations/quickbooks";
 
 import { issueOAuthState } from "../_lib/oauth-state";
 import {

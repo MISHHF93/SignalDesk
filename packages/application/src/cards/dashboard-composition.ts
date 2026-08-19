@@ -1,12 +1,12 @@
 import type {
   IntelligenceType,
   PrioritizedFinding,
-} from "@business-dashboard/intelligence";
+} from "@signaldesk/intelligence";
 import type {
   ActionProposal,
   CardType,
   IntelligenceCard,
-} from "@business-dashboard/schemas";
+} from "@signaldesk/schemas";
 
 /**
  * Which findings currently have a registered UI presentation. A finding

@@ -15,7 +15,7 @@ The audit that found them also surveyed a much larger space (feature flags, enti
 
 **Precedence, today, is exactly two levels: a seeded platform default, overridable per organization.** No team-level, user-level, or session-level override exists, and none should be added speculatively — the moment a second configuration domain needs a richer precedence model, that's the trigger to generalize, not before.
 
-**Validated at the boundary, trusted after.** `updateBusinessProfileInputSchema` (`@business-dashboard/schemas`) validates the timezone against `Intl.supportedValuesOf("timeZone")` — the real IANA list, not a hand-maintained one — and bounds on the two numeric fields. `updateOrganizationBusinessProfile` (persistence layer) trusts validated input, consistent with this repository's standing rule that persistence functions don't re-validate what a Server Action already checked.
+**Validated at the boundary, trusted after.** `updateBusinessProfileInputSchema` (`@signaldesk/schemas`) validates the timezone against `Intl.supportedValuesOf("timeZone")` — the real IANA list, not a hand-maintained one — and bounds on the two numeric fields. `updateOrganizationBusinessProfile` (persistence layer) trusts validated input, consistent with this repository's standing rule that persistence functions don't re-validate what a Server Action already checked.
 
 **Changing it is itself audited.** Every update calls `recordAuditEvent` with the changed fields as metadata — this is organization policy, not routine data, and the same "who changed what" question applies here as to `internal_task.created` or `integration.connected`.
 

@@ -5,7 +5,7 @@ import {
   fetchQuickBooksInvoices,
   mapQuickBooksInvoiceToSourceInvoiceRecord,
   type QuickBooksInvoice,
-} from "@business-dashboard/integrations/quickbooks";
+} from "@signaldesk/integrations/quickbooks";
 import {
   canAddActiveConnection,
   createDatabasePool,
@@ -13,8 +13,8 @@ import {
   ingestQuickBooksInvoice,
   recordAuditEvent,
   storeQuickBooksTokens,
-} from "@business-dashboard/persistence";
-import { parseSourceInvoiceRecord } from "@business-dashboard/schemas";
+} from "@signaldesk/persistence";
+import { parseSourceInvoiceRecord } from "@signaldesk/schemas";
 
 import { consumeOAuthState } from "../../../_lib/oauth-state";
 import { getQuickBooksOAuthConfig } from "../../../_lib/quickbooks-config";

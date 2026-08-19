@@ -1,4 +1,4 @@
-import type { CardType, IntelligenceCard } from "@business-dashboard/schemas";
+import type { CardType, IntelligenceCard } from "@signaldesk/schemas";
 import type { ComponentType } from "react";
 
 import type { CreateInternalTaskAction } from "../_lib/actions";
@@ -17,7 +17,7 @@ export type { CardComponentProps } from "./card-types";
  * `composeCommandCenterCards`, later an AI orchestrator) decides which
  * registered component to use by setting `card.type` — it never generates
  * markup or arbitrary component references itself. Adding a card type means
- * adding it here **and** to `cardTypeSchema` in `@business-dashboard/schemas`;
+ * adding it here **and** to `cardTypeSchema` in `@signaldesk/schemas`;
  * an entry missing from either place cannot render.
  */
 const cardRegistry: Record<CardType, ComponentType<CardComponentProps>> = {

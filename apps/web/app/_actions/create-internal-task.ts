@@ -3,11 +3,11 @@
 import {
   createDatabasePool,
   createInternalTask,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 import {
   parseCreateInternalTaskInput,
   type CreateInternalTaskInput,
-} from "@business-dashboard/schemas";
+} from "@signaldesk/schemas";
 
 import type { CreateInternalTaskActionResult } from "../_lib/actions";
 import { describeActionError } from "../_lib/describe-action-error";

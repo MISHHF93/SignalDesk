@@ -101,7 +101,7 @@ export interface StuckLeadSignal {
 const MILLISECONDS_PER_HOUR = 60 * 60 * 1_000;
 /** Fallback only — real callers pass the organization's own threshold
  * (`OrganizationBusinessProfile.highValueThresholdCents`,
- * `@business-dashboard/persistence`) rather than relying on this. */
+ * `@signaldesk/persistence`) rather than relying on this. */
 const DEFAULT_CRITICAL_VALUE_CENTS = 1_000_000;
 
 /**

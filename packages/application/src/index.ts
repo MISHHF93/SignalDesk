@@ -42,8 +42,8 @@ export type {
   IntelligenceContext,
   IntelligenceFinding,
   PrioritizedFinding,
-} from "@business-dashboard/intelligence";
+} from "@signaldesk/intelligence";
 export {
   getLeadAttention,
   type LeadAttentionResult,
-} from "@business-dashboard/intelligence";
+} from "@signaldesk/intelligence";

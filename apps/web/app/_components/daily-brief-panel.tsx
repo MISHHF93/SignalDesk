@@ -1,6 +1,6 @@
 "use client";
 
-import type { Artifact } from "@business-dashboard/persistence";
+import type { Artifact } from "@signaldesk/persistence";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 

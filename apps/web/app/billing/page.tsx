@@ -11,7 +11,7 @@ import {
   getPlanCatalog,
   listSubscriptionAddons,
   type DatabasePool,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import {
   changePlanAction,

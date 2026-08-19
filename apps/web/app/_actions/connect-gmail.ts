@@ -3,7 +3,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { buildGmailAuthorizationUrl } from "@business-dashboard/integrations/gmail";
+import { buildGmailAuthorizationUrl } from "@signaldesk/integrations/gmail";
 
 import {
   getGoogleOAuthConfig,

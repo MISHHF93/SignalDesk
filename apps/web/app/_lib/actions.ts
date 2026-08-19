@@ -1,8 +1,8 @@
-import type { ParseCommandResult } from "@business-dashboard/application";
+import type { ParseCommandResult } from "@signaldesk/application";
 import type {
   CreateInternalTaskInput,
   IntelligenceCard,
-} from "@business-dashboard/schemas";
+} from "@signaldesk/schemas";
 
 /**
  * Shared shapes for the two Server Actions the UI depends on, so

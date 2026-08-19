@@ -7,8 +7,8 @@ import {
   listOverdueTasks,
   type DatabasePool,
   type OrganizationBusinessProfile,
-} from "@business-dashboard/persistence";
-import type { BusinessAttention } from "@business-dashboard/application";
+} from "@signaldesk/persistence";
+import type { BusinessAttention } from "@signaldesk/application";
 
 import { businessAIOrchestrator } from "./orchestrator";
 import type { CurrentSession } from "./session";

@@ -4,10 +4,10 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
   transpilePackages: [
-    "@business-dashboard/application",
-    "@business-dashboard/domain",
-    "@business-dashboard/integrations",
-    "@business-dashboard/schemas",
+    "@signaldesk/application",
+    "@signaldesk/domain",
+    "@signaldesk/integrations",
+    "@signaldesk/schemas",
   ],
 };
 

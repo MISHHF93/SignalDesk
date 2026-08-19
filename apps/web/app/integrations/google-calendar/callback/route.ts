@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 
-import { exchangeGoogleCalendarAuthorizationCode } from "@business-dashboard/integrations/google-calendar";
+import { exchangeGoogleCalendarAuthorizationCode } from "@signaldesk/integrations/google-calendar";
 import {
   canAddActiveConnection,
   createDatabasePool,
   findOrCreateGoogleCalendarIntegration,
   recordAuditEvent,
   storeGoogleCalendarTokens,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { getGoogleOAuthConfig } from "../../../_lib/google-config";
 import { consumeOAuthState } from "../../../_lib/oauth-state";

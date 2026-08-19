@@ -1,4 +1,4 @@
-import type { Invoice, Lead, Task } from "@business-dashboard/domain";
+import type { Invoice, Lead, Task } from "@signaldesk/domain";
 
 import type { IntelligenceFinding } from "./finding";
 
@@ -13,7 +13,7 @@ import type { IntelligenceFinding } from "./finding";
  * `overdueInvoices` is the real widening this type's own doc comment
  * anticipated: unlike `lead` (one representative record), invoices are
  * independent risk items, so this is every currently-overdue invoice
- * worth surfacing (`listOverdueInvoices`, `@business-dashboard/persistence`),
+ * worth surfacing (`listOverdueInvoices`, `@signaldesk/persistence`),
  * not just one. An empty array means either no invoices exist yet or none
  * are currently overdue — both read the same to a capability.
  *
@@ -27,7 +27,7 @@ import type { IntelligenceFinding } from "./finding";
  * `highValueThresholdCents` is the organization's own configured
  * "critical vs. high" severity boundary
  * (`OrganizationBusinessProfile.highValueThresholdCents`,
- * `@business-dashboard/persistence`) — never a hardcoded platform-wide
+ * `@signaldesk/persistence`) — never a hardcoded platform-wide
  * constant, since what counts as high-value differs by business.
  *
  * `workingDaysBitmask`/`timeZone` are the organization's own configured
@@ -42,7 +42,7 @@ export interface IntelligenceContext {
   readonly lead: Lead | null;
   readonly overdueInvoices: readonly Invoice[];
   /** Every currently-overdue, incomplete task assigned to the connected
-   * Asana user (`listOverdueTasks`, `@business-dashboard/persistence`) —
+   * Asana user (`listOverdueTasks`, `@signaldesk/persistence`) —
    * the Delivery-domain counterpart to `overdueInvoices`, same "real set,
    * not one representative record" shape. */
   readonly overdueTasks: readonly Task[];

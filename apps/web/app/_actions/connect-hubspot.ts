@@ -3,7 +3,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { buildHubSpotAuthorizationUrl } from "@business-dashboard/integrations/hubspot";
+import { buildHubSpotAuthorizationUrl } from "@signaldesk/integrations/hubspot";
 
 import {
   getHubSpotOAuthConfig,

@@ -3,7 +3,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { buildAsanaAuthorizationUrl } from "@business-dashboard/integrations/asana";
+import { buildAsanaAuthorizationUrl } from "@signaldesk/integrations/asana";
 
 import { getAsanaOAuthConfig, isAsanaConfigured } from "../_lib/asana-config";
 import { issueOAuthState } from "../_lib/oauth-state";

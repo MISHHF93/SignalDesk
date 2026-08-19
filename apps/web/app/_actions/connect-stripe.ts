@@ -3,7 +3,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { buildStripeAuthorizationUrl } from "@business-dashboard/integrations/stripe";
+import { buildStripeAuthorizationUrl } from "@signaldesk/integrations/stripe";
 
 import {
   getStripeOAuthConfig,

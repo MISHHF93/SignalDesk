@@ -2,14 +2,14 @@
 
 import { redirect } from "next/navigation";
 
-import { revokeHubSpotRefreshToken } from "@business-dashboard/integrations/hubspot";
+import { revokeHubSpotRefreshToken } from "@signaldesk/integrations/hubspot";
 import {
   createDatabasePool,
   disconnectHubSpotIntegration,
   getHubSpotIntegrationStatus,
   getHubSpotTokens,
   recordAuditEvent,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
 import { getCurrentOrganization } from "../_lib/session";

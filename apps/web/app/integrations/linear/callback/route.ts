@@ -3,14 +3,14 @@ import { NextResponse } from "next/server";
 import {
   exchangeLinearAuthorizationCode,
   fetchLinearViewer,
-} from "@business-dashboard/integrations/linear";
+} from "@signaldesk/integrations/linear";
 import {
   canAddActiveConnection,
   createDatabasePool,
   findOrCreateLinearIntegration,
   recordAuditEvent,
   storeLinearTokens,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { getLinearOAuthConfig } from "../../../_lib/linear-config";
 import { consumeOAuthState } from "../../../_lib/oauth-state";

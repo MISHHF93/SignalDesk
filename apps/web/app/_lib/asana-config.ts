@@ -1,4 +1,4 @@
-import type { AsanaOAuthConfig } from "@business-dashboard/integrations/asana";
+import type { AsanaOAuthConfig } from "@signaldesk/integrations/asana";
 
 /**
  * Asana credentials — server-only, never NEXT_PUBLIC_. Real app registered

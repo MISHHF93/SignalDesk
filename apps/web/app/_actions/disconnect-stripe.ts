@@ -3,13 +3,13 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { deauthorizeStripeAccount } from "@business-dashboard/integrations/stripe";
+import { deauthorizeStripeAccount } from "@signaldesk/integrations/stripe";
 import {
   createDatabasePool,
   disconnectStripeIntegration,
   getStripeIntegrationStatus,
   recordAuditEvent,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
 import { getCurrentOrganization } from "../_lib/session";

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { Lead } from "@business-dashboard/domain";
+import type { Lead } from "@signaldesk/domain";
 
 import { getLeadAttention } from "./leadAttention";
 

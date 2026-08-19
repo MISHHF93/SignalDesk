@@ -4,7 +4,7 @@ import type { QuickBooksInvoice } from "./client";
 
 /**
  * Maps a QuickBooks Invoice onto the shape `parseSourceInvoiceRecord`
- * (`@business-dashboard/schemas`) expects. Mirrors
+ * (`@signaldesk/schemas`) expects. Mirrors
  * `mapHubSpotDealToSourceLeadRecord`'s own contract exactly: returns a
  * plain `unknown`-shaped object (runtime validation stays at the real
  * boundary, the caller in apps/web), and is honest about a known

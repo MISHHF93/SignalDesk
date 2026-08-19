@@ -9,7 +9,7 @@ export interface OrganizationBusinessProfile {
   /**
    * Bit n (0 = Sunday, matching JS `Date.getUTCDay()`) set means day n is a
    * working day — real callers of `evaluateUntouchedLead`
-   * (`@business-dashboard/domain`) must pass this so elapsed-time
+   * (`@signaldesk/domain`) must pass this so elapsed-time
    * calculations count only the organization's own working days.
    */
   readonly workingDaysBitmask: number;
@@ -53,7 +53,7 @@ export async function getOrganizationBusinessProfile(
 
 // Deliberately not `Partial<OrganizationBusinessProfile>` — the caller's
 // validated input (`parseUpdateBusinessProfileInput`,
-// `@business-dashboard/schemas`) comes from Zod `.optional()` fields,
+// `@signaldesk/schemas`) comes from Zod `.optional()` fields,
 // which infer as `T | undefined` rather than "may be absent," and
 // `exactOptionalPropertyTypes` treats those as genuinely different types.
 export interface UpdateOrganizationBusinessProfileInput {

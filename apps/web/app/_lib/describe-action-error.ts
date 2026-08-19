@@ -1,4 +1,4 @@
-import { describeValidationError } from "@business-dashboard/schemas";
+import { describeValidationError } from "@signaldesk/schemas";
 
 /**
  * A plain `error.message` on a thrown ZodError is a pretty-printed JSON

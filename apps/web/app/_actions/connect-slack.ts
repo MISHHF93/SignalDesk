@@ -3,7 +3,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { buildSlackAuthorizationUrl } from "@business-dashboard/integrations/slack";
+import { buildSlackAuthorizationUrl } from "@signaldesk/integrations/slack";
 
 import { getSlackOAuthConfig, isSlackConfigured } from "../_lib/slack-config";
 import { issueOAuthState } from "../_lib/oauth-state";

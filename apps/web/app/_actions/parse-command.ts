@@ -1,7 +1,7 @@
 "use server";
 
-import type { ParseCommandResult } from "@business-dashboard/application";
-import type { IntelligenceCard } from "@business-dashboard/schemas";
+import type { ParseCommandResult } from "@signaldesk/application";
+import type { IntelligenceCard } from "@signaldesk/schemas";
 
 import { businessAIOrchestrator } from "../_lib/orchestrator";
 import { getCurrentOrganization } from "../_lib/session";

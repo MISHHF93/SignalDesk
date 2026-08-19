@@ -1,4 +1,4 @@
-import type { SlackOAuthConfig } from "@business-dashboard/integrations/slack";
+import type { SlackOAuthConfig } from "@signaldesk/integrations/slack";
 
 /**
  * Slack credentials — server-only, never NEXT_PUBLIC_. Real app registered

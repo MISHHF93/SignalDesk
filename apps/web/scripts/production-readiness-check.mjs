@@ -51,16 +51,12 @@ function startProductionServer() {
   // `PORT` (not a forwarded `-p` CLI flag) — pnpm's `--` argument
   // forwarding doesn't survive `shell: true` + array args cleanly on
   // Windows, and Next.js already reads `PORT` directly for `next start`.
-  const child = spawn(
-    "pnpm",
-    ["--filter", "@business-dashboard/web", "start"],
-    {
-      cwd: REPO_ROOT,
-      env: { ...process.env, PORT: String(PORT) },
-      stdio: ["ignore", "pipe", "pipe"],
-      shell: true,
-    },
-  );
+  const child = spawn("pnpm", ["--filter", "@signaldesk/web", "start"], {
+    cwd: REPO_ROOT,
+    env: { ...process.env, PORT: String(PORT) },
+    stdio: ["ignore", "pipe", "pipe"],
+    shell: true,
+  });
 
   let output = "";
   child.stdout.on("data", (chunk) => {

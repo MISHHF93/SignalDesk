@@ -1,7 +1,7 @@
 import {
   parseDashboardIntent,
   type DashboardIntent,
-} from "@business-dashboard/schemas";
+} from "@signaldesk/schemas";
 
 import type { AIProvider, DashboardCommandContext } from "./ai-provider";
 

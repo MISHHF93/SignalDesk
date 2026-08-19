@@ -4,7 +4,7 @@ import type { AsanaTask } from "./client";
 
 /**
  * Maps an Asana Task onto the shape `parseSourceTaskRecord`
- * (`@business-dashboard/schemas`) expects. Mirrors
+ * (`@signaldesk/schemas`) expects. Mirrors
  * `mapQuickBooksInvoiceToSourceInvoiceRecord`'s own contract exactly:
  * returns a plain `unknown`-shaped object (runtime validation stays at the
  * real boundary, the caller in apps/web), and returns `null` (not a

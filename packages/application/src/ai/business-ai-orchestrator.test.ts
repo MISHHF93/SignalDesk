@@ -1,4 +1,4 @@
-import type { Lead } from "@business-dashboard/domain";
+import type { Lead } from "@signaldesk/domain";
 import { describe, expect, it } from "vitest";
 
 import { createBusinessAIOrchestrator } from "./business-ai-orchestrator";

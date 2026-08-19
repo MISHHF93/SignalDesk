@@ -1,4 +1,4 @@
-import type { PrioritizedFinding } from "@business-dashboard/intelligence";
+import type { PrioritizedFinding } from "@signaldesk/intelligence";
 
 import {
   countFindingsBySeverity,

@@ -1,12 +1,12 @@
 "use server";
 
-import { generateDailyBrief } from "@business-dashboard/application";
+import { generateDailyBrief } from "@signaldesk/application";
 import {
   createArtifact,
   createDatabasePool,
   type Artifact,
   type DatabasePool,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
 import { getCurrentOrganization } from "../_lib/session";

@@ -1,4 +1,4 @@
-import type { IntelligenceCard } from "@business-dashboard/schemas";
+import type { IntelligenceCard } from "@signaldesk/schemas";
 
 /**
  * Fallback for any card whose `type` is not in the registry. The Card

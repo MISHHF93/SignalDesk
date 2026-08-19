@@ -12,7 +12,7 @@ import {
   getQuickBooksIntegrationStatus,
   getSlackIntegrationStatus,
   getStripeIntegrationStatus,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { isAsanaConfigured } from "../../_lib/asana-config";
 import { isGoogleConfigured } from "../../_lib/google-config";

@@ -3,8 +3,8 @@
 import {
   createDatabasePool,
   updateOrganizationBusinessProfile,
-} from "@business-dashboard/persistence";
-import { parseUpdateBusinessProfileInput } from "@business-dashboard/schemas";
+} from "@signaldesk/persistence";
+import { parseUpdateBusinessProfileInput } from "@signaldesk/schemas";
 
 import { describeActionError } from "../_lib/describe-action-error";
 import { getCurrentOrganization } from "../_lib/session";

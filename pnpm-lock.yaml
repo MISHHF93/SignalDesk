@@ -35,19 +35,19 @@ importers:
 
   apps/web:
     dependencies:
-      '@business-dashboard/application':
+      '@signaldesk/application':
         specifier: workspace:*
         version: link:../../packages/application
-      '@business-dashboard/integrations':
+      '@signaldesk/integrations':
         specifier: workspace:*
         version: link:../../packages/integrations
-      '@business-dashboard/intelligence':
+      '@signaldesk/intelligence':
         specifier: workspace:*
         version: link:../../packages/intelligence
-      '@business-dashboard/persistence':
+      '@signaldesk/persistence':
         specifier: workspace:*
         version: link:../../packages/persistence
-      '@business-dashboard/schemas':
+      '@signaldesk/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas
       '@stripe/react-stripe-js':
@@ -81,13 +81,13 @@ importers:
 
   packages/application:
     dependencies:
-      '@business-dashboard/domain':
+      '@signaldesk/domain':
         specifier: workspace:*
         version: link:../domain
-      '@business-dashboard/intelligence':
+      '@signaldesk/intelligence':
         specifier: workspace:*
         version: link:../intelligence
-      '@business-dashboard/schemas':
+      '@signaldesk/schemas':
         specifier: workspace:*
         version: link:../schemas
 
@@ -99,28 +99,28 @@ importers:
         specifier: 22.5.0
         version: 22.5.0(@types/node@24.13.3)
     devDependencies:
-      '@business-dashboard/schemas':
+      '@signaldesk/schemas':
         specifier: workspace:*
         version: link:../schemas
 
   packages/intelligence:
     dependencies:
-      '@business-dashboard/domain':
+      '@signaldesk/domain':
         specifier: workspace:*
         version: link:../domain
-      '@business-dashboard/integrations':
+      '@signaldesk/integrations':
         specifier: workspace:*
         version: link:../integrations
-      '@business-dashboard/schemas':
+      '@signaldesk/schemas':
         specifier: workspace:*
         version: link:../schemas
 
   packages/persistence:
     dependencies:
-      '@business-dashboard/domain':
+      '@signaldesk/domain':
         specifier: workspace:*
         version: link:../domain
-      '@business-dashboard/schemas':
+      '@signaldesk/schemas':
         specifier: workspace:*
         version: link:../schemas
       drizzle-orm:
@@ -139,7 +139,7 @@ importers:
 
   packages/schemas:
     dependencies:
-      '@business-dashboard/domain':
+      '@signaldesk/domain':
         specifier: workspace:*
         version: link:../domain
       zod:
@@ -4323,7 +4323,7 @@ snapshots:
       eslint: 9.39.5
       eslint-import-resolver-node: 0.3.10
       eslint-import-resolver-typescript: 3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.67.0(eslint@9.39.5)(typescript@6.0.3))(eslint@9.39.5))(eslint@9.39.5)
-      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.67.0(eslint@9.39.5)(typescript@6.0.3))(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.5)
+      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.67.0(eslint@9.39.5)(typescript@6.0.3))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.67.0(eslint@9.39.5)(typescript@6.0.3))(eslint@9.39.5))(eslint@9.39.5))(eslint@9.39.5)
       eslint-plugin-jsx-a11y: 6.10.2(eslint@9.39.5)
       eslint-plugin-react: 7.37.5(eslint@9.39.5)
       eslint-plugin-react-hooks: 7.1.1(eslint@9.39.5)
@@ -4356,7 +4356,7 @@ snapshots:
       tinyglobby: 0.2.17
       unrs-resolver: 1.12.2
     optionalDependencies:
-      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.67.0(eslint@9.39.5)(typescript@6.0.3))(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.5)
+      eslint-plugin-import: 2.32.0(@typescript-eslint/parser@8.67.0(eslint@9.39.5)(typescript@6.0.3))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.67.0(eslint@9.39.5)(typescript@6.0.3))(eslint@9.39.5))(eslint@9.39.5))(eslint@9.39.5)
     transitivePeerDependencies:
       - supports-color
 
@@ -4371,7 +4371,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.67.0(eslint@9.39.5)(typescript@6.0.3))(eslint-import-resolver-typescript@3.10.1)(eslint@9.39.5):
+  eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.67.0(eslint@9.39.5)(typescript@6.0.3))(eslint-import-resolver-typescript@3.10.1(eslint-plugin-import@2.32.0(@typescript-eslint/parser@8.67.0(eslint@9.39.5)(typescript@6.0.3))(eslint@9.39.5))(eslint@9.39.5))(eslint@9.39.5):
     dependencies:
       '@rtsao/scc': 1.1.0
       array-includes: 3.1.9

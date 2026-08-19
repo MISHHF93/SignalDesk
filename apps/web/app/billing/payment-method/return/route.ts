@@ -4,13 +4,13 @@ import {
   attachDefaultPaymentMethod,
   createStripeBillingClient,
   retrieveSetupIntentPaymentMethod,
-} from "@business-dashboard/integrations/stripe-billing";
+} from "@signaldesk/integrations/stripe-billing";
 import {
   createDatabasePool,
   getOrganizationSubscription,
   recordAuditEvent,
   type DatabasePool,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { getCurrentOrganization } from "../../../_lib/session";
 import { getStripeSecretKey } from "../../../_lib/stripe-billing-config";

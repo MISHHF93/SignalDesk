@@ -5,7 +5,7 @@ export interface SlackTokens {
   /** A bot token (`xoxb-...`). No refresh token or expiry: Slack's
    * standard OAuth v2 flow issues persistent bot tokens by default — see
    * `SlackTokenResponse`'s doc comment in
-   * `@business-dashboard/integrations/slack` for the source. */
+   * `@signaldesk/integrations/slack` for the source. */
   readonly accessToken: string;
 }
 

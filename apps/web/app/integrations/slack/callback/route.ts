@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 
-import { exchangeSlackAuthorizationCode } from "@business-dashboard/integrations/slack";
+import { exchangeSlackAuthorizationCode } from "@signaldesk/integrations/slack";
 import {
   canAddActiveConnection,
   createDatabasePool,
   findOrCreateSlackIntegration,
   recordAuditEvent,
   storeSlackTokens,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { getSlackOAuthConfig } from "../../../_lib/slack-config";
 import { consumeOAuthState } from "../../../_lib/oauth-state";

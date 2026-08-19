@@ -2,14 +2,14 @@
 
 import { redirect } from "next/navigation";
 
-import { revokeLinearToken } from "@business-dashboard/integrations/linear";
+import { revokeLinearToken } from "@signaldesk/integrations/linear";
 import {
   createDatabasePool,
   disconnectLinearIntegration,
   getLinearIntegrationStatus,
   getLinearTokens,
   recordAuditEvent,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
 import { getCurrentOrganization } from "../_lib/session";

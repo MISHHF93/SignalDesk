@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 
-import { exchangeMicrosoftCalendarAuthorizationCode } from "@business-dashboard/integrations/microsoft-calendar";
+import { exchangeMicrosoftCalendarAuthorizationCode } from "@signaldesk/integrations/microsoft-calendar";
 import {
   canAddActiveConnection,
   createDatabasePool,
   findOrCreateMicrosoftCalendarIntegration,
   recordAuditEvent,
   storeMicrosoftCalendarTokens,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { getMicrosoftOAuthConfig } from "../../../_lib/microsoft-config";
 import {

@@ -1,4 +1,4 @@
-import type { HubSpotOAuthConfig } from "@business-dashboard/integrations/hubspot";
+import type { HubSpotOAuthConfig } from "@signaldesk/integrations/hubspot";
 
 /**
  * HubSpot credentials (ADR 0008) — server-only, never NEXT_PUBLIC_. Real

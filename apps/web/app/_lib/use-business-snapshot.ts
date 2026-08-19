@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import type { BusinessSnapshot } from "@business-dashboard/application";
+import type { BusinessSnapshot } from "@signaldesk/application";
 
 /**
  * `BusinessSnapshot` over the wire — `GET /api/business/snapshot`

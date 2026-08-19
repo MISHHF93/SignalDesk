@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import {
   buildMicrosoftCalendarAuthorizationUrl,
   generatePkcePair,
-} from "@business-dashboard/integrations/microsoft-calendar";
+} from "@signaldesk/integrations/microsoft-calendar";
 
 import {
   getMicrosoftOAuthConfig,

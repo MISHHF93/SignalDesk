@@ -1,5 +1,5 @@
 {
-  "name": "@business-dashboard/web",
+  "name": "@signaldesk/web",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -9,11 +9,11 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@business-dashboard/application": "workspace:*",
-    "@business-dashboard/integrations": "workspace:*",
-    "@business-dashboard/intelligence": "workspace:*",
-    "@business-dashboard/persistence": "workspace:*",
-    "@business-dashboard/schemas": "workspace:*",
+    "@signaldesk/application": "workspace:*",
+    "@signaldesk/integrations": "workspace:*",
+    "@signaldesk/intelligence": "workspace:*",
+    "@signaldesk/persistence": "workspace:*",
+    "@signaldesk/schemas": "workspace:*",
     "@stripe/react-stripe-js": "6.8.1",
     "@stripe/stripe-js": "9.13.0",
     "@supabase/ssr": "0.12.4",

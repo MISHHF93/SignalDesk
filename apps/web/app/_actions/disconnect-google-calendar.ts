@@ -2,14 +2,14 @@
 
 import { redirect } from "next/navigation";
 
-import { revokeGoogleCalendarToken } from "@business-dashboard/integrations/google-calendar";
+import { revokeGoogleCalendarToken } from "@signaldesk/integrations/google-calendar";
 import {
   createDatabasePool,
   disconnectGoogleCalendarIntegration,
   getGoogleCalendarIntegrationStatus,
   getGoogleCalendarTokens,
   recordAuditEvent,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
 import { getCurrentOrganization } from "../_lib/session";

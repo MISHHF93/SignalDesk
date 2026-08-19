@@ -4,7 +4,7 @@ import type { HubSpotDeal } from "./client";
 
 /**
  * Maps a HubSpot Deal onto the shape `parseSourceLeadRecord`
- * (`@business-dashboard/schemas`) expects. Deliberately returns a plain
+ * (`@signaldesk/schemas`) expects. Deliberately returns a plain
  * `unknown`-shaped object rather than depending on the schemas package
  * directly — runtime validation stays at the real boundary (the caller in
  * apps/web), matching this project's existing "validate at the source

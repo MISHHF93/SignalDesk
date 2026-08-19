@@ -834,7 +834,7 @@ export interface CategoryCoverage {
 /**
  * Real coverage, computed from real connection state — never a fabricated
  * "strong/limited" label. `connectedSlugs` should come from
- * `listActiveIntegrationSourceSystems` (`@business-dashboard/persistence`);
+ * `listActiveIntegrationSourceSystems` (`@signaldesk/persistence`);
  * this function only aggregates it against the catalog. A category with
  * zero cataloged connectors doesn't appear at all, since "0 of 0 connected"
  * isn't a coverage gap — it's a category with no catalog entry yet.

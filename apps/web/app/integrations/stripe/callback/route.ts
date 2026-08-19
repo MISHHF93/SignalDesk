@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 
-import { exchangeStripeAuthorizationCode } from "@business-dashboard/integrations/stripe";
+import { exchangeStripeAuthorizationCode } from "@signaldesk/integrations/stripe";
 import {
   canAddActiveConnection,
   createDatabasePool,
   findOrCreateStripeIntegration,
   recordAuditEvent,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { consumeOAuthState } from "../../../_lib/oauth-state";
 import { checkRateLimit, getClientIp } from "../../../_lib/rate-limit";

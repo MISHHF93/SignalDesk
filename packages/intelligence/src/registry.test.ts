@@ -1,4 +1,4 @@
-import type { Lead } from "@business-dashboard/domain";
+import type { Lead } from "@signaldesk/domain";
 import { describe, expect, it, vi } from "vitest";
 
 import type { IntelligenceCapability } from "./capability";

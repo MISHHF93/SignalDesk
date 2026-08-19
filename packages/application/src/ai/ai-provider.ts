@@ -1,4 +1,4 @@
-import type { IntelligenceCard } from "@business-dashboard/schemas";
+import type { IntelligenceCard } from "@signaldesk/schemas";
 
 /**
  * Bounded structured-generation tasks the orchestration layer asks a

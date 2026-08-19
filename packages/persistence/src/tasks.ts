@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { Task } from "@business-dashboard/domain";
+import type { Task } from "@signaldesk/domain";
 
 import type { DatabasePool } from "./client";
 import { withTenantContext } from "./tenant-context";

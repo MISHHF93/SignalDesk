@@ -1,9 +1,6 @@
 "use client";
 
-import type {
-  FilterDefinition,
-  IntelligenceCard,
-} from "@business-dashboard/schemas";
+import type { FilterDefinition, IntelligenceCard } from "@signaldesk/schemas";
 import { useMemo, useState, useTransition } from "react";
 
 import type {

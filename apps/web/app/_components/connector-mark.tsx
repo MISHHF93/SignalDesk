@@ -1,4 +1,4 @@
-import type { ConnectorDefinition } from "@business-dashboard/integrations";
+import type { ConnectorDefinition } from "@signaldesk/integrations";
 
 import { ConnectorIcon } from "./connector-icons";
 

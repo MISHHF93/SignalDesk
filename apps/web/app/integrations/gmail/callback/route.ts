@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 
-import { exchangeGmailAuthorizationCode } from "@business-dashboard/integrations/gmail";
+import { exchangeGmailAuthorizationCode } from "@signaldesk/integrations/gmail";
 import {
   canAddActiveConnection,
   createDatabasePool,
   findOrCreateGmailIntegration,
   recordAuditEvent,
   storeGmailTokens,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { getGoogleOAuthConfig } from "../../../_lib/google-config";
 import { consumeOAuthState } from "../../../_lib/oauth-state";

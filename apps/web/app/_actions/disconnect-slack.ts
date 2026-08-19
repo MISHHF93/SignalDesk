@@ -2,14 +2,14 @@
 
 import { redirect } from "next/navigation";
 
-import { revokeSlackToken } from "@business-dashboard/integrations/slack";
+import { revokeSlackToken } from "@signaldesk/integrations/slack";
 import {
   createDatabasePool,
   disconnectSlackIntegration,
   getSlackIntegrationStatus,
   getSlackTokens,
   recordAuditEvent,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
 import { getCurrentOrganization } from "../_lib/session";

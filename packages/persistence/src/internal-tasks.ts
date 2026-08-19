@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import type { CreateInternalTaskInput } from "@business-dashboard/schemas";
+import type { CreateInternalTaskInput } from "@signaldesk/schemas";
 
 import {
   STANDARD_AUDIT_RETENTION_CLASS,

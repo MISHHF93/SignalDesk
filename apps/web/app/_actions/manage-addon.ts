@@ -6,7 +6,7 @@ import {
   addSubscriptionAddonItem,
   createStripeBillingClient,
   removeSubscriptionAddonItem,
-} from "@business-dashboard/integrations/stripe-billing";
+} from "@signaldesk/integrations/stripe-billing";
 import {
   createDatabasePool,
   getEnabledPlanAddons,
@@ -16,7 +16,7 @@ import {
   removeSubscriptionAddon,
   upsertSubscriptionAddon,
   type DatabasePool,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
 import { checkRateLimit } from "../_lib/rate-limit";

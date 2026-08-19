@@ -3,7 +3,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { buildGoogleCalendarAuthorizationUrl } from "@business-dashboard/integrations/google-calendar";
+import { buildGoogleCalendarAuthorizationUrl } from "@signaldesk/integrations/google-calendar";
 
 import {
   getGoogleOAuthConfig,

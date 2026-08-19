@@ -1,5 +1,5 @@
 {
-  "name": "@business-dashboard/persistence",
+  "name": "@signaldesk/persistence",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -14,8 +14,8 @@
     "db:check": "drizzle-kit check --config=drizzle.config.ts"
   },
   "dependencies": {
-    "@business-dashboard/domain": "workspace:*",
-    "@business-dashboard/schemas": "workspace:*",
+    "@signaldesk/domain": "workspace:*",
+    "@signaldesk/schemas": "workspace:*",
     "drizzle-orm": "0.45.2",
     "pg": "8.16.3"
   },

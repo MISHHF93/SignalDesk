@@ -3,14 +3,14 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { revokeAsanaToken } from "@business-dashboard/integrations/asana";
+import { revokeAsanaToken } from "@signaldesk/integrations/asana";
 import {
   createDatabasePool,
   disconnectAsanaIntegration,
   getAsanaIntegrationStatus,
   getAsanaTokens,
   recordAuditEvent,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { getAsanaOAuthConfig, isAsanaConfigured } from "../_lib/asana-config";
 import { describeActionError } from "../_lib/describe-action-error";

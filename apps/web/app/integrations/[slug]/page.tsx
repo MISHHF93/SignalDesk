@@ -2,7 +2,7 @@ import {
   connectorCatalog,
   getConnectorBySlug,
   type ConnectorDefinition,
-} from "@business-dashboard/integrations";
+} from "@signaldesk/integrations";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";

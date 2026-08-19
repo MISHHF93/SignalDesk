@@ -1,4 +1,4 @@
-import type { LinearOAuthConfig } from "@business-dashboard/integrations/linear";
+import type { LinearOAuthConfig } from "@signaldesk/integrations/linear";
 
 /**
  * Linear credentials — server-only, never NEXT_PUBLIC_. Real app

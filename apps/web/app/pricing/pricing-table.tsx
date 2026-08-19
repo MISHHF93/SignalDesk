@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 
-import type { PlanCatalogEntry } from "@business-dashboard/persistence";
+import type { PlanCatalogEntry } from "@signaldesk/persistence";
 
 const CAPABILITY_LABELS: Record<string, string> = {
   actionPreparation: "Action preparation",

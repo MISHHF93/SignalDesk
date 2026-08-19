@@ -1,4 +1,4 @@
-import type { StripeOAuthConfig } from "@business-dashboard/integrations/stripe";
+import type { StripeOAuthConfig } from "@signaldesk/integrations/stripe";
 
 /**
  * Stripe Connect credentials — server-only, never NEXT_PUBLIC_. Real app

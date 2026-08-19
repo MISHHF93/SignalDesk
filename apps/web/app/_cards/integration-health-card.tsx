@@ -1,5 +1,5 @@
-import { getConnectorBySlug } from "@business-dashboard/integrations";
-import type { IntelligenceCard } from "@business-dashboard/schemas";
+import { getConnectorBySlug } from "@signaldesk/integrations";
+import type { IntelligenceCard } from "@signaldesk/schemas";
 import Link from "next/link";
 
 import { ConnectorMark } from "../_components/connector-mark";

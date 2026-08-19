@@ -1,11 +1,11 @@
 import {
   computeBusinessCoverageByPurpose,
   connectorCatalog,
-} from "@business-dashboard/integrations";
+} from "@signaldesk/integrations";
 import {
   createDatabasePool,
   listActiveIntegrationSourceSystems,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 import type { Metadata } from "next";
 
 import { purposeLabels, purposeQuestions } from "../_lib/connector-labels";

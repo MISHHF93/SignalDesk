@@ -2,7 +2,7 @@ import {
   createDatabasePool,
   resolveOrganizationForIdentity,
   type DatabasePool,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 import { cache } from "react";
 
 import { createClient } from "../../lib/supabase/server";

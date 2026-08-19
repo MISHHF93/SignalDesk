@@ -6,7 +6,7 @@ import {
   fetchAsanaWorkspaces,
   mapAsanaTaskToSourceTaskRecord,
   type AsanaTask,
-} from "@business-dashboard/integrations/asana";
+} from "@signaldesk/integrations/asana";
 import {
   canAddActiveConnection,
   createDatabasePool,
@@ -14,8 +14,8 @@ import {
   ingestAsanaTask,
   recordAuditEvent,
   storeAsanaTokens,
-} from "@business-dashboard/persistence";
-import { parseSourceTaskRecord } from "@business-dashboard/schemas";
+} from "@signaldesk/persistence";
+import { parseSourceTaskRecord } from "@signaldesk/schemas";
 
 import { getAsanaOAuthConfig } from "../../../_lib/asana-config";
 import { consumeOAuthState } from "../../../_lib/oauth-state";

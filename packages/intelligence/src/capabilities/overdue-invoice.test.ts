@@ -1,4 +1,4 @@
-import type { Invoice } from "@business-dashboard/domain";
+import type { Invoice } from "@signaldesk/domain";
 import { describe, expect, it } from "vitest";
 
 import { overdueInvoiceIntelligence } from "./overdue-invoice";

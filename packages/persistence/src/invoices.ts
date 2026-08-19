@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { Invoice } from "@business-dashboard/domain";
+import type { Invoice } from "@signaldesk/domain";
 
 import type { DatabasePool } from "./client";
 import { withTenantContext } from "./tenant-context";

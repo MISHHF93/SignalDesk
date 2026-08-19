@@ -6,7 +6,7 @@ import {
   createDatabasePool,
   listArtifacts,
   type DatabasePool,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { getCurrentOrganization } from "../_lib/session";
 

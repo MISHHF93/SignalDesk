@@ -1,4 +1,4 @@
-import type { QuickBooksOAuthConfig } from "@business-dashboard/integrations/quickbooks";
+import type { QuickBooksOAuthConfig } from "@signaldesk/integrations/quickbooks";
 
 /**
  * QuickBooks Online credentials — server-only, never NEXT_PUBLIC_. Real

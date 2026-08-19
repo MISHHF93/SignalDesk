@@ -1,5 +1,5 @@
 {
-  "name": "business-dashboard",
+  "name": "signaldesk",
   "version": "0.1.0",
   "private": true,
   "description": "AI-orchestrated one-page business operating system",
@@ -10,16 +10,16 @@
     "pnpm": "9.15.0"
   },
   "scripts": {
-    "dev": "pnpm --filter @business-dashboard/web dev",
-    "build": "pnpm --filter @business-dashboard/web build",
+    "dev": "pnpm --filter @signaldesk/web dev",
+    "build": "pnpm --filter @signaldesk/web build",
     "lint": "eslint .",
     "audit": "pnpm audit --audit-level=high",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test",
-    "db:generate": "pnpm --filter @business-dashboard/persistence db:generate",
-    "db:check": "pnpm --filter @business-dashboard/persistence db:check",
+    "db:generate": "pnpm --filter @signaldesk/persistence db:generate",
+    "db:check": "pnpm --filter @signaldesk/persistence db:check",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm db:check && pnpm build",
     "test:production": "node apps/web/scripts/production-readiness-check.mjs"
   },

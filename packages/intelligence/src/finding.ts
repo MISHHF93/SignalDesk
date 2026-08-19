@@ -1,4 +1,4 @@
-import type { SourceReference } from "@business-dashboard/domain";
+import type { SourceReference } from "@signaldesk/domain";
 import type {
   CardExplanation,
   CardSeverity,
@@ -6,14 +6,14 @@ import type {
   EntityReference,
   FinancialContext,
   OwnerReference,
-} from "@business-dashboard/schemas";
+} from "@signaldesk/schemas";
 
 /**
  * The kinds of findings the Intelligence Core can currently produce. Each
  * capability owns a narrow slice of this union; adding a new finding type
  * means adding both the capability that produces it and, if it should be
  * user-visible, a mapping to a registered `CardType` in the orchestrator's
- * dashboard composition step (see `@business-dashboard/application`).
+ * dashboard composition step (see `@signaldesk/application`).
  */
 export type IntelligenceType =
   | "lead.untouched"

@@ -1,9 +1,6 @@
 "use client";
 
-import type {
-  ActionProposal,
-  IntelligenceCard,
-} from "@business-dashboard/schemas";
+import type { ActionProposal, IntelligenceCard } from "@signaldesk/schemas";
 import { useState, useTransition } from "react";
 
 import { Button } from "../_components/button";

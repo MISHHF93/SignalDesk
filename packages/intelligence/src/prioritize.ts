@@ -1,4 +1,4 @@
-import type { CardSeverity } from "@business-dashboard/schemas";
+import type { CardSeverity } from "@signaldesk/schemas";
 
 import type { IntelligenceFinding, PrioritizedFinding } from "./finding";
 

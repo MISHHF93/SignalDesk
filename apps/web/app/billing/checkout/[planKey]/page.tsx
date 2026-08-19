@@ -9,7 +9,7 @@ import {
   getRedeemablePromoPrice,
   type DatabasePool,
   type SubscriptionStatus,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { getCurrentOrganization } from "../../../_lib/session";
 import { isBillingConfigured } from "../../../_lib/stripe-billing-config";

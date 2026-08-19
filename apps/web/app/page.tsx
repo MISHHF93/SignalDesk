@@ -2,7 +2,7 @@ import {
   createDatabasePool,
   getLatestArtifact,
   type DatabasePool,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";

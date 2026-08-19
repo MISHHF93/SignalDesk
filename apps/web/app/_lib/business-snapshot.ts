@@ -3,16 +3,16 @@ import { randomUUID } from "node:crypto";
 import {
   assembleBusinessSnapshot,
   type BusinessSnapshot,
-} from "@business-dashboard/application";
+} from "@signaldesk/application";
 import {
   computeBusinessCoverageByPurpose,
   listConnectors,
-} from "@business-dashboard/integrations";
+} from "@signaldesk/integrations";
 import {
   createDatabasePool,
   listRecentAuditEvents,
   type DatabasePool,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { getTodaysAttention } from "./todays-attention";
 import type { CurrentSession } from "./session";

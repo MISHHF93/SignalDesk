@@ -3,7 +3,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { buildLinearAuthorizationUrl } from "@business-dashboard/integrations/linear";
+import { buildLinearAuthorizationUrl } from "@signaldesk/integrations/linear";
 
 import {
   getLinearOAuthConfig,

@@ -2,14 +2,14 @@
 
 import { redirect } from "next/navigation";
 
-import { revokeGmailToken } from "@business-dashboard/integrations/gmail";
+import { revokeGmailToken } from "@signaldesk/integrations/gmail";
 import {
   createDatabasePool,
   disconnectGmailIntegration,
   getGmailIntegrationStatus,
   getGmailTokens,
   recordAuditEvent,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
 import { getCurrentOrganization } from "../_lib/session";

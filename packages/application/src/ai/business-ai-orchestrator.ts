@@ -1,12 +1,12 @@
 import type {
   IntelligenceContext,
   PrioritizedFinding,
-} from "@business-dashboard/intelligence";
+} from "@signaldesk/intelligence";
 import {
   prioritizeFindings,
   runIntelligenceCapabilities,
-} from "@business-dashboard/intelligence";
-import type { IntelligenceCard } from "@business-dashboard/schemas";
+} from "@signaldesk/intelligence";
+import type { IntelligenceCard } from "@signaldesk/schemas";
 
 import { composeCards } from "../cards/dashboard-composition";
 import type { AIProvider, DashboardCommandContext } from "./ai-provider";
@@ -22,7 +22,7 @@ export interface BusinessAIOrchestrator {
    * Runs the Intelligence Core, prioritizes what it finds, and composes the
    * result into cards for the one-page command center. This is the single
    * place that decides what the user sees — capabilities only ever produce
-   * evidence (see `@business-dashboard/intelligence`).
+   * evidence (see `@signaldesk/intelligence`).
    */
   getAttention(context: IntelligenceContext): Promise<BusinessAttention>;
   /**

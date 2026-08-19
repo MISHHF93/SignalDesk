@@ -7,7 +7,7 @@ import {
   createStripeCustomer,
   createSubscriptionWithImmediatePayment,
   createTrialSubscription,
-} from "@business-dashboard/integrations/stripe-billing";
+} from "@signaldesk/integrations/stripe-billing";
 import {
   createDatabasePool,
   createOrganizationSubscription,
@@ -19,7 +19,7 @@ import {
   resurrectOrganizationSubscription,
   type DatabasePool,
   type SubscriptionStatus,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
 import { checkRateLimit } from "../_lib/rate-limit";

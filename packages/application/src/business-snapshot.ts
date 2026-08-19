@@ -1,4 +1,4 @@
-import type { PrioritizedFinding } from "@business-dashboard/intelligence";
+import type { PrioritizedFinding } from "@signaldesk/intelligence";
 
 import {
   countFindingsBySeverity,
@@ -6,7 +6,7 @@ import {
 } from "./severity-counts";
 
 /**
- * Mirrors `@business-dashboard/integrations`' real `ConnectorPurpose`
+ * Mirrors `@signaldesk/integrations`' real `ConnectorPurpose`
  * union, declared locally rather than imported — `packages/application`
  * stays decoupled from the connector-catalog package, the same boundary
  * `IntelligenceContext` already draws (it takes `connectedIntegrationSlugs:

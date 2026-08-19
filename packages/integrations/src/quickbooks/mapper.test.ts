@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-// @business-dashboard/schemas is a devDependency only, used here to prove
+// @signaldesk/schemas is a devDependency only, used here to prove
 // the mapper's output actually satisfies the real runtime boundary schema
 // — not just this test file's own assumptions about the shape. Nothing in
 // the mapper's own runtime code depends on it (see mapper.ts's doc comment).
-import { parseSourceInvoiceRecord } from "@business-dashboard/schemas";
+import { parseSourceInvoiceRecord } from "@signaldesk/schemas";
 import { randomUUID } from "node:crypto";
 
 import { mapQuickBooksInvoiceToSourceInvoiceRecord } from "./mapper";

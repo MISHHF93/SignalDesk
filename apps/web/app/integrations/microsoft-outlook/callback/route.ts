@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 
-import { exchangeMicrosoftOutlookAuthorizationCode } from "@business-dashboard/integrations/microsoft-outlook";
+import { exchangeMicrosoftOutlookAuthorizationCode } from "@signaldesk/integrations/microsoft-outlook";
 import {
   canAddActiveConnection,
   createDatabasePool,
   findOrCreateMicrosoftOutlookIntegration,
   recordAuditEvent,
   storeMicrosoftOutlookTokens,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { getMicrosoftOAuthConfig } from "../../../_lib/microsoft-config";
 import {

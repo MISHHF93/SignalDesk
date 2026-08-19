@@ -2,7 +2,7 @@ import {
   createDatabasePool,
   getOrganizationBusinessProfile,
   getOrganizationPreferences,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 import type { Metadata } from "next";
 import Link from "next/link";
 

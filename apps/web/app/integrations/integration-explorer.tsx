@@ -3,7 +3,7 @@
 import type {
   ConnectorDefinition,
   ConnectorPurpose,
-} from "@business-dashboard/integrations";
+} from "@signaldesk/integrations";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 

@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import {
   buildMicrosoftOutlookAuthorizationUrl,
   generatePkcePair,
-} from "@business-dashboard/integrations/microsoft-outlook";
+} from "@signaldesk/integrations/microsoft-outlook";
 
 import {
   getMicrosoftOAuthConfig,

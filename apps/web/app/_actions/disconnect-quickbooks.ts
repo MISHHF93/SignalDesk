@@ -2,14 +2,14 @@
 
 import { redirect } from "next/navigation";
 
-import { revokeQuickBooksToken } from "@business-dashboard/integrations/quickbooks";
+import { revokeQuickBooksToken } from "@signaldesk/integrations/quickbooks";
 import {
   createDatabasePool,
   disconnectQuickBooksIntegration,
   getQuickBooksIntegrationStatus,
   getQuickBooksTokens,
   recordAuditEvent,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
 import {

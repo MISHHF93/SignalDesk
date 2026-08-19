@@ -7,7 +7,7 @@ import {
   disconnectMicrosoftCalendarIntegration,
   getMicrosoftCalendarIntegrationStatus,
   recordAuditEvent,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
 import { getCurrentOrganization } from "../_lib/session";

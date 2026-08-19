@@ -6,7 +6,7 @@ import {
   fetchHubSpotOwners,
   mapHubSpotDealToSourceLeadRecord,
   type HubSpotDeal,
-} from "@business-dashboard/integrations/hubspot";
+} from "@signaldesk/integrations/hubspot";
 import {
   canAddActiveConnection,
   createDatabasePool,
@@ -15,8 +15,8 @@ import {
   ingestHubSpotDeal,
   recordAuditEvent,
   storeHubSpotTokens,
-} from "@business-dashboard/persistence";
-import { parseSourceLeadRecord } from "@business-dashboard/schemas";
+} from "@signaldesk/persistence";
+import { parseSourceLeadRecord } from "@signaldesk/schemas";
 
 import { getHubSpotOAuthConfig } from "../../../_lib/hubspot-config";
 import { consumeOAuthState } from "../../../_lib/oauth-state";

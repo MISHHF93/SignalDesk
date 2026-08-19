@@ -1,4 +1,4 @@
-import type { ConnectorDefinition } from "@business-dashboard/integrations";
+import type { ConnectorDefinition } from "@signaldesk/integrations";
 
 /**
  * Real brand glyphs for the connector catalog, sourced from Simple Icons

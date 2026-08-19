@@ -1,4 +1,4 @@
-import type { Task } from "@business-dashboard/domain";
+import type { Task } from "@signaldesk/domain";
 import { describe, expect, it } from "vitest";
 
 import { overdueTaskIntelligence } from "./overdue-task";

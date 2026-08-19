@@ -4,7 +4,7 @@ import {
   createDatabasePool,
   getPlanCatalog,
   type DatabasePool,
-} from "@business-dashboard/persistence";
+} from "@signaldesk/persistence";
 
 import { PricingTable } from "./pricing-table";
 
