@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { UpstreamProviderError } from "../shared/upstream-error";
 import { sendEmail, type SendEmailInput } from "./client";
 
 function jsonResponse(status: number, body: unknown) {
@@ -55,7 +56,7 @@ describe("sendEmail", () => {
     );
   });
 
-  it("throws with the real response body on a non-ok, non-retryable status", async () => {
+  it("throws a safe UpstreamProviderError on a non-ok, non-retryable status, never leaking the raw response body into the client-visible message", async () => {
     // 401 is not one of fetchWithRetry's retryable statuses (429/5xx), so
     // this rejects immediately — no fake-timer advance needed, unlike the
     // retry test below.
@@ -63,7 +64,21 @@ describe("sendEmail", () => {
       jsonResponse(401, { message: "Invalid API key" }),
     );
 
-    await expect(sendEmail(INPUT)).rejects.toThrow(/401/);
+    let thrown: unknown;
+
+    try {
+      await sendEmail(INPUT);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(UpstreamProviderError);
+    const error = thrown as UpstreamProviderError;
+    expect(error.message).not.toContain("401");
+    expect(error.message).not.toContain("Invalid API key");
+    expect(error.message).toContain("Email send failed");
+    expect(error.rawDetail).toContain("401");
+    expect(error.rawDetail).toContain("Invalid API key");
   });
 
   it("throws when the response is ok but carries no message id", async () => {

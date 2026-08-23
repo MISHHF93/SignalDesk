@@ -1,7 +1,7 @@
 # Production Golden Path report
 
-- Generated: 2026-08-22T01:40:02.044Z
-- Target: http://localhost:3000
+- Generated: 2026-08-23T20:48:44.336Z
+- Target: http://localhost:3100
 - Console/page errors observed: none
 
 | Stage                                                                                                           | Status    | Detail                                                                                                                                                                                                                                  |

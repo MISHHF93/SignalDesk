@@ -52,4 +52,11 @@ describe("parseCsv", () => {
       ["1", "", "3"],
     ]);
   });
+
+  it("treats a quote appearing mid-field as literal content, not a quoted-field marker", () => {
+    expect(parseCsv('name,note\nBob\'s "Discount" Store,ok')).toEqual([
+      ["name", "note"],
+      ['Bob\'s "Discount" Store', "ok"],
+    ]);
+  });
 });

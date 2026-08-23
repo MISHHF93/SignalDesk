@@ -11,6 +11,7 @@
  */
 
 import { fetchWithRetry } from "../shared/fetch-with-retry";
+import { throwUpstreamError } from "../shared/upstream-error";
 
 const RESEND_API_URL = "https://api.resend.com/emails";
 
@@ -48,9 +49,7 @@ export async function sendEmail(
   });
 
   if (!response.ok) {
-    throw new Error(
-      `Resend email send failed: ${response.status} ${await response.text()}`,
-    );
+    await throwUpstreamError("Email send", response);
   }
 
   const payload = (await response.json()) as RawResendResponse;

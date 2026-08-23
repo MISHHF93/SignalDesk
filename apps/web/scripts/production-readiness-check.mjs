@@ -71,11 +71,16 @@ function startProductionServer() {
   // `PORT` (not a forwarded `-p` CLI flag) — pnpm's `--` argument
   // forwarding doesn't survive `shell: true` + array args cleanly on
   // Windows, and Next.js already reads `PORT` directly for `next start`.
+  // `shell` only needs to be `true` on Windows, where `pnpm` itself is a
+  // `.cmd` shim `spawn` can't resolve directly — same platform split
+  // `killServerTree` below already uses. All args here are fixed literals,
+  // never external input, but there's no reason to carry Node's own
+  // shell-args deprecation warning on platforms that don't need it.
   const child = spawn("pnpm", ["--filter", "@signaldesk/web", "start"], {
     cwd: REPO_ROOT,
     env: { ...process.env, PORT: String(PORT) },
     stdio: ["ignore", "pipe", "pipe"],
-    shell: true,
+    shell: process.platform === "win32",
   });
 
   let output = "";

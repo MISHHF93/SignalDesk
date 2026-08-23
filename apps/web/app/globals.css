@@ -983,17 +983,6 @@ input {
   text-transform: capitalize;
 }
 
-.evidencePanel code {
-  color: var(--muted);
-  font-family: var(--font-family-mono);
-  font-size: 0.68rem;
-  overflow-wrap: anywhere;
-}
-
-.evidencePanel .evidenceDigest {
-  flex-basis: 100%;
-}
-
 .evidencePanel li > span:last-child {
   margin-left: auto;
   color: var(--muted);
@@ -1054,6 +1043,15 @@ input {
   font-size: 0.66rem;
   transform: translateY(-50%);
   pointer-events: none;
+}
+
+/* A "Ctrl K"/"⌘K" hint means nothing on a touchscreen with no physical
+   keyboard — `pointer: coarse` (not a viewport width) is the correct
+   check, since a touch laptop with a real keyboard should still see it. */
+@media (pointer: coarse) {
+  .commandKbdHint {
+    display: none;
+  }
 }
 
 .askForm input::placeholder {
@@ -1377,6 +1375,93 @@ input {
   font-size: 0.75rem;
   line-height: 1.55;
   overflow-wrap: anywhere;
+}
+
+.errorState {
+  display: flex;
+  align-items: start;
+  gap: 1.1rem;
+  max-width: 640px;
+  margin: 3.5rem auto;
+  padding: 1.6rem 1.7rem;
+  border-radius: var(--radius-lg);
+  background: var(--ember);
+  color: var(--ember-ink);
+}
+
+.errorIcon {
+  display: grid;
+  width: 2.6rem;
+  height: 2.6rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--ember-ink) 18%, var(--ember));
+  color: var(--ember-ink);
+  font-weight: 700;
+}
+
+.errorState h1 {
+  margin: 0;
+  color: var(--ember-ink);
+  font-size: 1.05rem;
+}
+
+.errorState p {
+  margin: 0.35rem 0 0;
+  color: var(--ink);
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+.errorActions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1.1rem;
+}
+
+.errorActions button {
+  background: var(--emphasis-fill);
+  color: var(--emphasis-fill-ink);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 0.55rem 1.1rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.errorActions button:hover {
+  opacity: 0.9;
+}
+
+/* A missing page is normal navigation, not a system alert — stays
+   monochrome per the "color means alert" rule, unlike .errorState. */
+.notFoundState {
+  background: var(--surface);
+  border: 1px solid var(--line);
+}
+
+.notFoundState .errorIcon {
+  background: var(--surface-sunken);
+  color: var(--muted);
+}
+
+.notFoundState h1 {
+  color: var(--ink);
+}
+
+.errorActions a {
+  color: var(--ink);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.errorReference {
+  margin-top: 1.1rem !important;
+  color: var(--muted) !important;
+  font-size: 0.72rem !important;
 }
 
 .settingsIcon {
@@ -2449,6 +2534,28 @@ input {
   margin-bottom: 2.8rem;
 }
 
+/* The whole section is a <details> now — collapsed by default so a real
+   customer isn't handed an engineering readiness scorecard just for
+   opening a connector's page (found by the 2026-08-23 customer-POV
+   audit), while the detail itself stays honestly available to anyone who
+   actually wants it, one click away. */
+.implementationGates > summary {
+  padding: 0.7rem 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.implementationGates > summary:hover {
+  color: var(--emphasis);
+}
+
+.implementationGates[open] > summary {
+  margin-bottom: 1rem;
+  color: var(--emphasis);
+}
+
 .implementationGates ol {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -2503,7 +2610,11 @@ input {
 }
 
 .connectorSecurityNote .sectionKicker {
-  color: color-mix(in srgb, var(--emphasis-fill-ink) 55%, transparent);
+  /* 55% measured at 4.39:1 against --emphasis-fill via a real axe-core
+     scan (2026-08-23) — just under WCAG AA's 4.5:1 minimum for this
+     bold, small-size kicker text. 64% clears it while staying visibly
+     lighter than the 80%/100% body/heading text below it. */
+  color: color-mix(in srgb, var(--emphasis-fill-ink) 64%, transparent);
 }
 
 .connectorSecurityNote p:last-child {
@@ -3407,6 +3518,14 @@ button.oauthButton:disabled {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 1rem;
+  /* Same real bug `.profileGrid` documents fixing: without this, grid's
+     default stretch forces Starter (no capability checklist, real content
+     genuinely shorter) to match Business/Scale/Enterprise's taller height,
+     leaving a large dead gap below its Subscribe button — confirmed via
+     computed styles (all four cards reporting an identical 494px) before
+     this fix, not just eyeballed. Shared by /pricing and /billing (both
+     render <PricingTable>), so this one rule fixes both. */
+  align-items: start;
 }
 
 .pricingCard {

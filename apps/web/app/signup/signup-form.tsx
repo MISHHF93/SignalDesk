@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 
 import { signUpAction, type AuthActionState } from "../_actions/auth";
 import { Button } from "../_components/button";
@@ -24,6 +24,14 @@ export function SignupForm({
     signUpAction,
     INITIAL_STATE,
   );
+  // React resets every uncontrolled field in a `<form action={fn}>` after
+  // the action runs, success or failure — e.g. a taken-email rejection or
+  // a transient error, forcing a retype of the email too, not just
+  // whatever was actually wrong. Controlled here so it survives; the
+  // password field is deliberately left uncontrolled (and so still
+  // clears) — that's normal, expected behavior after a failed submission,
+  // not a bug to fix alongside this one.
+  const [email, setEmail] = useState(prefillEmail ?? "");
 
   return (
     <>
@@ -40,7 +48,8 @@ export function SignupForm({
             name="email"
             type="email"
             autoComplete="email"
-            defaultValue={prefillEmail}
+            value={prefillEmail ?? email}
+            onChange={(event) => setEmail(event.target.value)}
             readOnly={Boolean(prefillEmail)}
             required
           />

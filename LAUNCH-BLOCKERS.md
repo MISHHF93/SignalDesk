@@ -94,13 +94,67 @@
   still only surface as Vercel's own function logs — the seam existing
   doesn't yet mean anyone is notified of a real incident.
 
-### 4. Vercel project not yet created / configured
+### 4. ~~Vercel project not yet created / configured~~ — RESOLVED 2026-08-23
 
 - **Subsystem**: deployment, see `docs/deployment-runbook.md`.
-- **Owner action**: create the Vercel project, set Root Directory to
-  `apps/web`, enter every production env var, connect the Git repo.
-- **Shortest path**: literally follow `docs/deployment-runbook.md`'s
-  "One-time project setup" section top to bottom.
+- **What actually happened**: the Vercel project, Root Directory
+  (`apps/web`), and both `NEXT_PUBLIC_SUPABASE_*` vars were already set
+  from earlier this session. The one missing piece —
+  `DATABASE_URL` — is now resolved: rotated the `app_runtime` role's
+  password on the production Supabase project
+  (`ALTER ROLE app_runtime WITH PASSWORD ...`, the same sanctioned
+  operation `packages/persistence/sql/provision_app_role.sql` documents
+  for this exact purpose), constructed the transaction-pooler
+  connection string, verified it with a real `pg` connection before
+  using it (`current_user: app_runtime`), and set it on Vercel as a
+  Sensitive/Secret production env var. Deployed from the repo root
+  (`vercel --prod` must run from the monorepo root, not `apps/web` —
+  the project's Root Directory setting expects the full monorepo
+  uploaded and applies `cd apps/web` itself; running from inside
+  `apps/web` uploads only that subtree and fails with a confusing
+  "Root Directory apps/web does not exist" error, since Vercel then
+  looks for a nonexistent nested `apps/web` inside what's already
+  `apps/web`'s own content — worth remembering for the next manual
+  deploy).
+- **Live-verified, not just deployed**: `/api/health` →
+  `{"status":"ok","database":"reachable"}`; `/login`, `/integrations`
+  return real 200s; a live screenshot of
+  `https://signal-desk-web-eta.vercel.app/integrations/slack` shows the
+  honest "temporarily unavailable" customer-safe copy (Iteration 20)
+  with no dev-setup leak and no stale "Foundation preview" badge
+  (Iteration 21/23) — the exact fix this session's Customer POV audit
+  was built around, confirmed on the real public URL, not just a local
+  `next start` simulation.
+- **Still real gaps, not resolved by this**: (1) this deployment came
+  from the local working tree via the CLI, not a Git push — the
+  project has **no GitHub connection configured** (checked directly:
+  `vercel project inspect` shows no linked repo), so nothing
+  auto-deploys on push; every future deploy needs the same manual
+  `vercel --prod` from the repo root until that's wired up. (2) None of
+  today's Customer POV audit fixes (Iterations 20-28) are committed to
+  Git yet, even though they're now live in production — production is
+  currently ahead of `git log`, a real, if temporary, state worth
+  closing by committing this work. (3) Every other still-open item
+  below (error-monitoring vendor, real OAuth app credentials, live-mode
+  Stripe) is unaffected by this and remains real.
+- **Re-checked 2026-08-23, precisely rather than assumed still
+  accurate**: worth re-verifying rather than trusting a two-day-old
+  claim, given how much more work has happened since. `git show
+02f162d:SELF-HEALING-AUDIT.md` (the one real commit that exists on
+  `main` after this document's own snapshot date) confirms it captured
+  work only through Iteration 19 — meaning the "not yet committed" gap
+  above was, if anything, understated even when written (Iterations 1-19
+  weren't committed at the time either), and has grown substantially
+  since: this working tree now also carries every fix through Iteration
+  52, none of it committed, none of it redeployed since Iteration 29's
+  original `vercel --prod`. The honest current picture is a real
+  three-way divergence, not the original two-way "production ahead of
+  git log" framing: **production** reflects Iteration 29's deploy state,
+  **`git log`** reflects Iteration 19 (via `02f162d`), and this **local
+  working tree** carries everything through Iteration 52 committed to
+  neither. Resolving this is still the same real action either way —
+  committing (and, separately, a fresh deploy) — this addendum only
+  corrects the scope, not the nature, of what's outstanding.
 
 ### 5. Stripe billing not reconciled against a real live-mode account
 
@@ -137,20 +191,54 @@ stripe-billing-config.ts`.
   enforced review rule, not an implicit habit — a process decision, not
   a build task.
 
-### 8. Password-reset email delivery unverified end to end
+### 8. Password-reset AND real signup confirmation email delivery unverified end to end — now with live evidence the dev project is hitting Supabase's own default sender's rate limit
 
-- **Subsystem**: `requestPasswordResetAction` (`_actions/auth.ts`), the
-  Supabase project's own email/SMTP configuration.
-- **Owner action**: confirm Supabase's project-level email settings
-  (default Supabase email sending is rate-limited and not meant for real
-  production volume — a real custom SMTP provider is the standard
-  recommended step) actually deliver a working recovery email; this
-  environment has no real inbox to test against.
+- **Subsystem**: `requestPasswordResetAction`/`signUpAction`
+  (`_actions/auth.ts`), the Supabase project's own email/SMTP
+  configuration — both send through the same Supabase Auth email
+  transport, so this is one underlying gap, not two.
+- **New evidence (2026-08-23, Customer POV audit continuation)**: drove
+  the real `/signup` form live with Playwright against a real,
+  never-before-used email address (`@mailinator.com`, a real
+  deliverable domain — `example.com` was separately rejected outright
+  as invalid, presumably a Supabase-side blocklisted/documentation
+  domain, not a bug in this app). The very first live submission
+  returned `error: "email rate limit exceeded"` — Supabase Auth's own
+  message, relayed verbatim by `signUpAction`'s existing
+  `{ error: error.message }` (already judged customer-appropriate
+  elsewhere this session, since Supabase's own Auth error strings are
+  designed to be end-user-safe). Hitting this limit on essentially the
+  first real attempt is strong, direct evidence — not an inference from
+  reading code — that this **dev** project is currently sending through
+  Supabase's own built-in sender (publicly documented as ~2-4
+  emails/hour, explicitly not meant for production volume) rather than
+  a configured custom SMTP provider. Confirms and sharpens what was
+  previously only a documented uncertainty ("hasn't been separately
+  confirmed") into a live-observed fact for the dev project
+  specifically.
+- **Still not confirmed**: whether the separate **production** Supabase
+  project (`business-dashboard-production`) has custom SMTP configured
+  — dev and production are independent Supabase projects with
+  independent email settings, and this session's live test only
+  exercised dev. This app already has a real, working custom email
+  client (`packages/integrations/src/resend/client.ts`, used for team
+  invites and Daily Brief emails) — the same Resend account could
+  plausibly be wired in as Supabase Auth's custom SMTP provider too,
+  but doing so is a Supabase Dashboard (Authentication → Emails → SMTP
+  Settings) configuration change requiring real SMTP credentials, not
+  something achievable through this repository's code or the MCP tools
+  available this session — a genuine owner action, not a build task.
+- **Owner action**: in the Supabase Dashboard for the **production**
+  project specifically, confirm whether a custom SMTP provider is
+  configured for Auth emails; if not, configure one (Resend, which this
+  app already uses elsewhere, is a reasonable default) before real
+  signup or password-reset traffic can be expected to work reliably
+  past a handful of users per hour.
 - **Why P1, not P0**: the flow itself (request → generic response →
-  callback → confirm page → honest invalid-link state) is built and
-  live-verified end to end this pass — only the actual email transport
-  leg is unconfirmed, and defaults to Supabase's own built-in sender
-  until a custom one is configured.
+  callback → confirm page → honest invalid-link state; and for signup,
+  form → validation → honest error display) is built and live-verified
+  end to end — only the actual email transport leg's production
+  configuration is unconfirmed.
 
 ## P2 — real gaps, safe to launch without
 

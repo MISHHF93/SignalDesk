@@ -1,4 +1,7 @@
-import { getConnectorBySlug } from "@signaldesk/integrations";
+import {
+  getConnectorBySlug,
+  getSourceSystemLabel,
+} from "@signaldesk/integrations";
 import {
   createDatabasePool,
   getInternalCostSummary,
@@ -119,7 +122,7 @@ export default async function TrustCenterPage() {
               return (
                 <dl className="settingsList" key={connection.id}>
                   <div>
-                    <dt>{connector?.name ?? connection.sourceSystem}</dt>
+                    <dt>{getSourceSystemLabel(connection.sourceSystem)}</dt>
                     <dd>
                       {connection.status === "degraded"
                         ? "Connected — degraded (a recent sync couldn't parse some records)"
@@ -139,7 +142,9 @@ export default async function TrustCenterPage() {
                       {connector?.authStrategy.scopesDefined &&
                       connector.authStrategy.scopes
                         ? connector.authStrategy.scopes.join(", ")
-                        : "Not disclosed by this provider's catalog entry"}
+                        : connector
+                          ? "Not disclosed by this provider's catalog entry"
+                          : "Not applicable — this source isn't a third-party OAuth connection"}
                     </dd>
                   </div>
                 </dl>
@@ -157,7 +162,7 @@ export default async function TrustCenterPage() {
         <section className="settingsCard" aria-labelledby="trust-ai-heading">
           <div className="settingsCardHeader">
             <div>
-              <p className="sectionKicker">Kill switches</p>
+              <p className="sectionKicker">AI safety controls</p>
               <h2 id="trust-ai-heading">What AI can do here</h2>
             </div>
             <span
@@ -165,32 +170,33 @@ export default async function TrustCenterPage() {
                 isAgentFabricEnabled() ? "readOnlyBadge" : "plannedBadge"
               }
             >
-              {isAgentFabricEnabled() ? "Agent Fabric enabled" : "Disabled"}
+              {isAgentFabricEnabled()
+                ? "AI investigations enabled"
+                : "Disabled"}
             </span>
           </div>
 
           <dl className="settingsList">
             <div>
-              <dt>AGENT_FABRIC_ENABLED</dt>
+              <dt>AI-powered investigations</dt>
               <dd>
                 {isAgentFabricEnabled()
-                  ? "true — real specialist investigations can run"
-                  : "unset — investigations are inert, no specialist runs"}
+                  ? "On — this workspace can run a real AI investigation."
+                  : "Off — no AI investigation can run in this workspace."}
               </dd>
             </div>
             <div>
-              <dt>ANTHROPIC_API_KEY</dt>
+              <dt>Premium AI model access</dt>
               <dd>
                 {isClaudeConfigured()
-                  ? "configured — the Claude specialist is available"
-                  : "unset — every investigation resolves to the deterministic specialist"}
+                  ? "Available — investigations use a real AI model."
+                  : "Not available yet — investigations fall back to SignalDesk's deterministic rules only."}
               </dd>
             </div>
             <div>
-              <dt>Can any agent execute an action directly?</dt>
+              <dt>Can AI take an action on its own?</dt>
               <dd>
-                No — every agent&rsquo;s <code>canExecute</code> is hard-coded
-                false. Agents can only propose; a human always approves or
+                No, never. AI can only propose — a human always approves or
                 dismisses before anything real happens.
               </dd>
             </div>

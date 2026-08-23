@@ -13,6 +13,7 @@ import {
   createDatabasePool,
   recordAuditEvent,
   startAgentCollaboration,
+  withAdvisoryLock,
   type DatabasePool,
 } from "@signaldesk/persistence";
 
@@ -134,80 +135,112 @@ export async function runAgentInvestigationAction(): Promise<RunAgentInvestigati
       };
     }
 
-    const collaboration = await startAgentCollaboration(
+    // A real, cross-instance Postgres advisory lock (`withAdvisoryLock`,
+    // same primitive `start-checkout.ts` uses for its own double-submit
+    // guard). Without it, two near-simultaneous triggers (a double-click,
+    // or a client retry after a slow response) both pass the rate-limit
+    // check above and each start a real, independent collaboration —
+    // `agent_collaborations_org_idempotency_unique` exists specifically to
+    // prevent that, but only if a repeated request carries a repeatable
+    // key; a command-bar trigger has no natural stable key to dedupe on
+    // the way a checkout has a plan/interval, so a per-organization lock
+    // is the right primitive here instead. `randomUUID()` below is still
+    // correct for `idempotencyKey` itself (real, unique, satisfies the
+    // column's NOT NULL/non-empty constraint) — the lock is what actually
+    // prevents the double-run this key alone can't.
+    const lockResult = await withAdvisoryLock(
       db,
-      session.organizationId,
-      {
-        userId: session.userId,
-        pattern: "parallel_specialists",
-        objective: "Investigate current finance and delivery risk.",
-        correlationId: randomUUID(),
-        idempotencyKey: randomUUID(),
+      `agent-investigate-lock:${session.organizationId}`,
+      async (): Promise<RunAgentInvestigationActionResult> => {
+        const collaboration = await startAgentCollaboration(
+          db,
+          session.organizationId,
+          {
+            userId: session.userId,
+            pattern: "parallel_specialists",
+            objective: "Investigate current finance and delivery risk.",
+            correlationId: randomUUID(),
+            idempotencyKey: randomUUID(),
+          },
+        );
+
+        const gateway = createAgentGatewayService({
+          pool: db,
+          organizationId: session.organizationId,
+          collaborationId: collaboration.id,
+          providerFor: (agentId) =>
+            providerFor(agentId, session.organizationId, db),
+        });
+
+        const results = await runParallelSpecialists(
+          { findings: financeFindings },
+          { findings: deliveryFindings },
+          availabilityFor(),
+          gateway.dispatch,
+        );
+
+        const { finding: reconciled, contradictionsDetected } =
+          reconcileSpecialistResults(results, [
+            ...financeFindings,
+            ...deliveryFindings,
+          ]);
+
+        await completeAgentCollaboration(
+          db,
+          session.organizationId,
+          collaboration.id,
+          {
+            status: reconciled ? "completed" : "failed",
+            reconciledSummary: reconciled?.summary ?? null,
+            reconciledConfidenceBasisPoints:
+              reconciled === null
+                ? null
+                : Math.round(reconciled.confidence * 10_000),
+            contradictionsDetected,
+          },
+        );
+
+        if (!reconciled) {
+          return {
+            ok: true,
+            card: null,
+            message: "No confident recommendation from this investigation.",
+          };
+        }
+
+        // The card's id becomes the real agent_collaborations.id
+        // (overriding the reconciler's synthetic one) — this is what lets
+        // the client pass card.id straight back as collaborationId when
+        // the user clicks Approve/Dismiss, with no extra field needed on
+        // the card schema.
+        const collaborationFinding = { ...reconciled, id: collaboration.id };
+        const prioritized = prioritizeFindings([
+          ...attention.findings,
+          collaborationFinding,
+        ]);
+        const cards = composeCards(prioritized);
+        const card =
+          cards.find((candidate) => candidate.id === collaboration.id) ?? null;
+
+        return {
+          ok: true,
+          card,
+          message: "Investigation complete.",
+        };
       },
     );
 
-    const gateway = createAgentGatewayService({
-      pool: db,
-      organizationId: session.organizationId,
-      collaborationId: collaboration.id,
-      providerFor: (agentId) =>
-        providerFor(agentId, session.organizationId, db),
-    });
-
-    const results = await runParallelSpecialists(
-      { findings: financeFindings },
-      { findings: deliveryFindings },
-      availabilityFor(),
-      gateway.dispatch,
-    );
-
-    const { finding: reconciled, contradictionsDetected } =
-      reconcileSpecialistResults(results, [
-        ...financeFindings,
-        ...deliveryFindings,
-      ]);
-
-    await completeAgentCollaboration(
-      db,
-      session.organizationId,
-      collaboration.id,
-      {
-        status: reconciled ? "completed" : "failed",
-        reconciledSummary: reconciled?.summary ?? null,
-        reconciledConfidenceBasisPoints:
-          reconciled === null
-            ? null
-            : Math.round(reconciled.confidence * 10_000),
-        contradictionsDetected,
-      },
-    );
-
-    if (!reconciled) {
+    if (lockResult === null) {
+      await recordDeclinedTrigger("investigation_already_running");
       return {
         ok: true,
         card: null,
-        message: "No confident recommendation from this investigation.",
+        message:
+          "An investigation is already running for this workspace. Please wait a moment and try again.",
       };
     }
 
-    // The card's id becomes the real agent_collaborations.id (overriding
-    // the reconciler's synthetic one) — this is what lets the client pass
-    // card.id straight back as collaborationId when the user clicks
-    // Approve/Dismiss, with no extra field needed on the card schema.
-    const collaborationFinding = { ...reconciled, id: collaboration.id };
-    const prioritized = prioritizeFindings([
-      ...attention.findings,
-      collaborationFinding,
-    ]);
-    const cards = composeCards(prioritized);
-    const card =
-      cards.find((candidate) => candidate.id === collaboration.id) ?? null;
-
-    return {
-      ok: true,
-      card,
-      message: "Investigation complete.",
-    };
+    return lockResult;
   } catch (error) {
     return {
       ok: false,

@@ -32,9 +32,13 @@ export function DeleteOrganizationForm() {
     <form action={formAction} className="checkoutForm">
       <p className="dailyBriefMeta">
         This permanently disconnects every integration, cancels any active
-        subscription, and erases this organization&rsquo;s personal information.
-        Business records are anonymized, not deleted — see ADR 0018 in the
-        repository if you want the exact scope. This cannot be undone.
+        subscription, and scrubs personal information — your name, email, and
+        the contact names on your leads, invoices, and tasks — replacing each
+        with a placeholder. The underlying business records themselves stay in
+        place (so they can&rsquo;t be tied back to you or your customers by
+        name), rather than being deleted outright. Free-text fields like message
+        bodies and support ticket notes aren&rsquo;t scrubbed today. This cannot
+        be undone.
       </p>
       <label>
         Type {CONFIRM_PHRASE} to confirm

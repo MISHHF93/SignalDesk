@@ -17,6 +17,26 @@ This reframes the earlier `AskBusinessService` proposal (see the mega-spec respo
 
 Every proposal in this document — retrieval engines, a model router, continuous investigation, causal-restraint labeling, an AI-disagreement critic pass — assumes an LLM is already in the loop somewhere. None of that exists yet. **Connecting a real model provider for the first time is the actual prerequisite this document depends on**, not a detail to backfill later. Everything below is sequenced with that in mind.
 
+**Update (2026-08-23, re-checked rather than assumed still accurate):**
+this section's core premise has partially changed since 2026-08-19. A
+second, real `AIProvider` implementation now exists —
+`createClaudeProvider` (`packages/application/src/ai/claude-provider.ts`,
+ADR 0020), Claude-backed, unit-tested, with a real
+`<untrusted_business_data>` prompt-injection boundary (ADR 0044) and
+per-organization BYO-key support (Phase 4c, live-tested). So "the only
+implementation... is explicitly non-model" is no longer literally true:
+the code-level version of "connect a real model provider for the first
+time" is done. What's still missing, and still the real practical
+blocker, is narrower than this section originally framed: no
+`ANTHROPIC_API_KEY` is funded/set in any environment this app runs in
+(`LAUNCH-BLOCKERS.md` #2), so the Claude provider has never actually
+called the real Anthropic API — the deterministic provider still serves
+every live request today, for that reason rather than for lack of a
+model-backed code path. This changes tier 3's prerequisite below from an
+engineering gap to an external-credential one; it does not change the
+fact that continuous investigation, model routing, semantic/graph RAG,
+and the MCP gateway all remain genuinely unbuilt.
+
 ## Proposed target architecture (vision, zero implementation)
 
 ```text
@@ -143,7 +163,7 @@ Given nothing here is built, a reasonable dependency order (not a schedule):
 
 1. **Zero AI dependency, real value today**: expand `SignalScore`'s formula; build the evidence/freshness drawer UI; build the Business Memory rules table; formalize `epistemicType` as a field (even before AI generates any claims, since deterministic findings can be typed `FACT` today).
 2. **Requires event/sync infrastructure first, no model needed yet**: delta detection / "what changed" — but this depends on recurring sync existing at all, which no connector has yet (every sync today is one-time-on-connect, per ADR 0017) — a real, disclosed prerequisite gap, not a small one.
-3. **Requires a real model provider, the actual unlock**: continuous investigation, model routing, AI disagreement, semantic/graph RAG. Nothing in this tier is buildable until the first real `AIProvider` implementation beyond `createDeterministicProvider` exists — that decision (which provider, what data leaves the tenant boundary, what the privacy/security review looks like) is itself a real, separate piece of work this document doesn't resolve.
+3. **Requires a real, live-callable model provider, the actual unlock**: continuous investigation, model routing, AI disagreement, semantic/graph RAG. Updated 2026-08-23: a real `AIProvider` implementation beyond `createDeterministicProvider` now exists in code (`createClaudeProvider`, see the update above) — the remaining prerequisite is a funded `ANTHROPIC_API_KEY` actually exercised against the live Anthropic API, an external-credential gap (`LAUNCH-BLOCKERS.md` #2), not an unbuilt-code one. The privacy/security review this line originally flagged (what data leaves the tenant boundary) is still real and still unresolved — the code existing doesn't substitute for that review.
 4. **Requires (3) plus external-facing governance**: the MCP Agent Gateway, since it exposes whatever (3) builds to outside AI systems and needs its own authorization/rate-limit/audit design, mirroring the Safe Action pattern already established for `create_internal_task`.
 
 ## What this document is not

@@ -11,6 +11,7 @@ import {
   type SubscriptionStatus,
 } from "@signaldesk/persistence";
 
+import { isLocalDevelopment } from "../../../_lib/environment";
 import { getCurrentOrganization } from "../../../_lib/session";
 import { isBillingConfigured } from "../../../_lib/stripe-billing-config";
 import { CheckoutClient } from "./checkout-client";
@@ -108,8 +109,9 @@ export default async function CheckoutPage({
               Billing isn&rsquo;t configured yet
             </h2>
             <p>
-              Set STRIPE_SECRET_KEY and NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY to
-              enable checkout.
+              {isLocalDevelopment()
+                ? "Set STRIPE_SECRET_KEY and NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY to enable checkout. This note only shows in local development."
+                : "Checkout isn't available right now. This isn't something you need to do anything about — please try again shortly, or contact Support if it continues."}
             </p>
           </div>
         </aside>

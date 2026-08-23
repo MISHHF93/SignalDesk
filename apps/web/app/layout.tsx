@@ -54,7 +54,11 @@ export default async function RootLayout({
   const session = await getCurrentOrganization();
 
   return (
-    <html lang="en" className={`${plexSans.variable} ${plexMono.variable}`}>
+    <html
+      lang="en"
+      className={`${plexSans.variable} ${plexMono.variable}`}
+      data-scroll-behavior="smooth"
+    >
       <body>
         <a className="skipLink" href="#main-content">
           Skip to main content

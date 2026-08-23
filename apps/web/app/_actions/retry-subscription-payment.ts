@@ -13,7 +13,10 @@ import {
 import { describeActionError } from "../_lib/describe-action-error";
 import { checkRateLimit } from "../_lib/rate-limit";
 import { getCurrentOrganization } from "../_lib/session";
-import { getStripeSecretKey } from "../_lib/stripe-billing-config";
+import {
+  getStripeSecretKey,
+  isBillingConfigured,
+} from "../_lib/stripe-billing-config";
 
 let pool: DatabasePool | undefined;
 
@@ -54,6 +57,14 @@ export async function retryPaymentAction(): Promise<RetryPaymentState> {
       error: "Too many attempts. Try again shortly.",
       clientSecret: null,
     };
+  }
+
+  // See start-payment-method-setup.ts's identical check: `getStripeSecretKey()`
+  // alone would let this succeed with only half of billing configured,
+  // leaving the client with a real `clientSecret` and no publishable key to
+  // render it with (found by a deep audit, 2026-08-23).
+  if (!isBillingConfigured()) {
+    return { error: "Billing is not configured yet.", clientSecret: null };
   }
 
   const db = getPool();

@@ -134,8 +134,8 @@ export default async function AgentsPage() {
         >
           <div className="settingsCardHeader">
             <div>
-              <p className="sectionKicker">Kill switch</p>
-              <h2 id="agent-fabric-heading">Agent Fabric status</h2>
+              <p className="sectionKicker">AI availability</p>
+              <h2 id="agent-fabric-heading">AI investigation status</h2>
             </div>
             <span
               className={
@@ -148,19 +148,19 @@ export default async function AgentsPage() {
 
           <dl className="settingsList">
             <div>
-              <dt>AGENT_FABRIC_ENABLED</dt>
+              <dt>AI investigations</dt>
               <dd>
                 {isAgentFabricEnabled()
-                  ? "true"
-                  : "unset — investigations are inert"}
+                  ? "On for this workspace"
+                  : "Off — no investigation can run right now"}
               </dd>
             </div>
             <div>
-              <dt>ANTHROPIC_API_KEY</dt>
+              <dt>Premium AI model</dt>
               <dd>
                 {isClaudeConfigured()
-                  ? "configured — the Claude specialist is available"
-                  : "unset — both specialists resolve to the deterministic one"}
+                  ? "Available"
+                  : "Not available yet — investigations use SignalDesk's deterministic rules instead"}
               </dd>
             </div>
           </dl>
@@ -245,8 +245,8 @@ export default async function AgentsPage() {
                     <dd>{collaboration.status}</dd>
                   </div>
                   <div>
-                    <dt>Pattern</dt>
-                    <dd>{collaboration.pattern}</dd>
+                    <dt>Collaboration pattern</dt>
+                    <dd>{collaboration.pattern.replace(/_/g, " ")}</dd>
                   </div>
                   <div>
                     <dt>Contradictions detected</dt>
@@ -304,9 +304,7 @@ export default async function AgentsPage() {
         >
           <div className="settingsCardHeader">
             <div>
-              <p className="sectionKicker">
-                Evaluation Lab — first slice (ADR 0033)
-              </p>
+              <p className="sectionKicker">Evaluation</p>
               <h2 id="card-feedback-heading">Card feedback</h2>
             </div>
             <span className="readOnlyBadge">Real</span>

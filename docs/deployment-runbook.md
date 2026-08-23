@@ -64,18 +64,23 @@ every `_CLIENT_SECRET`, `_SECRET_KEY`, `DATABASE_URL`,
 `SUPABASE_SERVICE_ROLE`-anything (this app doesn't use a service-role key
 at all — see the tenant-isolation note below), `ANTHROPIC_API_KEY`,
 `RESEND_API_KEY`, `STRIPE_WEBHOOK_SECRET`, `QUICKBOOKS_WEBHOOK_VERIFIER_TOKEN`.
-The two vars that are deliberately `NEXT_PUBLIC_` (`_SUPABASE_URL`,
-`_SUPABASE_PUBLISHABLE_KEY`, `_STRIPE_PUBLISHABLE_KEY`) are safe to expose
-by design — a publishable/anon key, not a secret.
+The three key-shaped vars that are deliberately `NEXT_PUBLIC_`
+(`_SUPABASE_URL`, `_SUPABASE_PUBLISHABLE_KEY`, `_STRIPE_PUBLISHABLE_KEY`)
+are safe to expose by design — a publishable/anon key, not a secret. The
+other two real `NEXT_PUBLIC_` vars (`_APP_NAME`, `_ENABLED_OAUTH_PROVIDERS`
+— see the audit below) are safe for the same reason but aren't keys at
+all: a display string and a comma-separated feature list.
 
 ## Secret-exposure audit (done this pass, not assumed)
 
-- Grepped every `NEXT_PUBLIC_` usage in `apps/web` — the only three are
+- Grepped every `NEXT_PUBLIC_` usage in `apps/web` — the only five are
   `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`,
   `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `NEXT_PUBLIC_APP_NAME`,
   `NEXT_PUBLIC_ENABLED_OAUTH_PROVIDERS` — all five are meant to be public
   (a publishable/anon key, a display name, a comma-separated feature list),
-  none is a secret.
+  none is a secret. Re-grepped 2026-08-23 to confirm this list hasn't
+  drifted since this session's many later changes to `apps/web` — it
+  hasn't; still exactly these five.
 - Every OAuth client secret, `STRIPE_SECRET_KEY`, `ANTHROPIC_API_KEY`,
   `RESEND_API_KEY`, `DATABASE_URL`, and `STRIPE_WEBHOOK_SECRET` is read
   only in server-only modules (`_lib/*-config.ts`, Server Actions, Route
@@ -113,15 +118,19 @@ by design — a publishable/anon key, not a secret.
    integration). Vercel builds inside `apps/web` per the Root Directory
    setting above.
 4. **Post-deploy smoke test**: `pnpm test:production` (root
-   `package.json`) currently launches its own local `next start` and
-   exercises `SMOKE_ROUTES`/`LOAD_TEST_ROUTES` against `localhost` — real
-   and already working, but it verifies _this build_, not _the live
-   deployed URL_. Running the same smoke assertions against the actual
-   production URL after a real deploy (adjusting `BASE_URL` to the live
-   domain instead of spawning a local server) is the one adaptation still
-   needed before this script fully covers "verify the live deployment,"
-   not just "verify the build that was about to be deployed" — a small,
-   real gap, not a fabricated "done."
+   `package.json`) defaults to launching its own local `next start` and
+   exercising `SMOKE_ROUTES`/`LOAD_TEST_ROUTES` against `localhost` — that
+   mode verifies _this build_, not _the live deployed URL_. For the actual
+   live deployment, pass the real domain instead:
+   `node apps/web/scripts/production-readiness-check.mjs --url
+https://your-deploy.vercel.app` — no local server is spawned in this
+   mode, and the load-test pass is skipped by default against real
+   production traffic (pass `--load` to opt into it deliberately, since a
+   10-connection/10s burst against a live deployment is a real load test,
+   not a smoke test). Re-verified 2026-08-23: this mode is real and
+   already implemented (`REMOTE_URL`/`--url` in the script itself), not
+   the "still needed" gap an earlier pass of this document described —
+   that gap closed before this document was updated to say so.
 5. **Verify `/api/health`** (new, added alongside this document) returns
    `200 {"status":"ok"}` against the live URL — confirms the deployed
    instance can actually reach the production database, not just that it

@@ -47,7 +47,7 @@ export default async function BriefsHistoryPage() {
     <main className="shell appPage" id="main-content">
       <section className="pageHero" aria-labelledby="briefs-heading">
         <div>
-          <p className="sectionKicker">Artifact</p>
+          <p className="sectionKicker">History</p>
           <h1 id="briefs-heading">Daily Brief history.</h1>
           <p>Every brief you&rsquo;ve generated, newest first.</p>
         </div>

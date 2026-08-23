@@ -11,9 +11,9 @@ import { ConnectorMark } from "../_components/connector-mark";
 import { capabilityClassLabels } from "../_lib/connector-labels";
 
 function directionLabel(direction: ConnectorDefinition["direction"]): string {
-  if (direction === "inbound") return "Inbound design";
-  if (direction === "outbound") return "Outbound design";
-  return "Two-way design";
+  if (direction === "inbound") return "Brings data in";
+  if (direction === "outbound") return "Sends data out";
+  return "Two-way sync";
 }
 
 export function IntegrationExplorer({
@@ -126,8 +126,8 @@ export function IntegrationExplorer({
                     className={`availabilityBadge ${connector.availability === "foundation-preview" ? "preview" : "planned"}`}
                   >
                     {connector.availability === "foundation-preview"
-                      ? "Foundation preview"
-                      : "Planned"}
+                      ? "In progress"
+                      : "Coming soon"}
                   </span>
                 </div>
 
@@ -155,8 +155,8 @@ export function IntegrationExplorer({
                   <span>{directionLabel(connector.direction)}</span>
                   <span>
                     {connector.accessPosture === "read-only"
-                      ? "Read-only intent"
-                      : "Governed write intent"}
+                      ? "Read-only"
+                      : "Can also take approved actions"}
                   </span>
                 </div>
 

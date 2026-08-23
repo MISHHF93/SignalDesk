@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 
 import { signInWithOAuthAction, type OAuthActionState } from "../_actions/auth";
+import { isLocalDevelopment } from "../_lib/environment";
 import {
   isOAuthProviderEnabled,
   oauthProviders,
@@ -72,13 +73,13 @@ export function OAuthButtons({ next }: { next: string }) {
         </p>
       ) : null}
 
-      {hasDisabledProvider ? (
+      {hasDisabledProvider && isLocalDevelopment() ? (
         <p className="oauthSetupHint">
           Social sign-in needs a real OAuth app registered with each provider (a
           one-time setup step, not a per-sign-in one) — see{" "}
           <code>NEXT_PUBLIC_ENABLED_OAUTH_PROVIDERS</code> in{" "}
           <code>.env.example</code>. Email and guest sign-in work today without
-          it.
+          it. This note only shows in local development.
         </p>
       ) : null}
     </div>

@@ -1479,6 +1479,34 @@ export function getConnectorBySlug(
   return connectorCatalog.find((connector) => connector.slug === slug);
 }
 
+/** First-party record sources that never appear in the connector catalog
+ * (no OAuth, no vendor, no capability class — adding one there would
+ * misrepresent it as a real third-party integration) but still need a
+ * customer-comprehensible label wherever a `source.system` value is shown
+ * — e.g. `WhyDisclosure`'s "Source evidence" panel. Keep in sync with the
+ * literal `sourceSystem` values each first-party ingestion path writes
+ * (currently just the CSV import escape hatch,
+ * `packages/persistence/src/csv-import.ts`). */
+const NON_CATALOG_SOURCE_SYSTEM_LABELS: Record<string, string> = {
+  csv_import: "CSV import",
+};
+
+/**
+ * The one place that turns any real `source.system` value — a connector
+ * catalog slug or a first-party ingestion path's own literal — into a
+ * label a customer can actually read, rather than each call site
+ * re-deriving its own fallback. Never hides the real value: an
+ * unrecognized system still renders as-is rather than a generic
+ * placeholder, since an honest raw string beats a fabricated label.
+ */
+export function getSourceSystemLabel(system: string): string {
+  return (
+    getConnectorBySlug(system)?.name ??
+    NON_CATALOG_SOURCE_SYSTEM_LABELS[system] ??
+    system
+  );
+}
+
 export function listConnectors(): readonly ConnectorDefinition[] {
   return connectorCatalog;
 }

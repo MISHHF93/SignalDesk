@@ -132,8 +132,8 @@ export default async function CommandCenterPage() {
           </div>
           <p>
             {cards.length === 0
-              ? "No dynamic cards"
-              : `${cards.length} dynamic card${cards.length === 1 ? "" : "s"}`}
+              ? "Nothing right now"
+              : `${cards.length} item${cards.length === 1 ? "" : "s"}`}
             {deferredCount > 0 ? (
               <>
                 {" · "}

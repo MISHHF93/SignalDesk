@@ -1,3 +1,4 @@
+import { getSourceSystemLabel } from "@signaldesk/integrations";
 import type { IntelligenceCard } from "@signaldesk/schemas";
 
 import {
@@ -64,18 +65,20 @@ export function WhyDisclosure({ card }: { card: IntelligenceCard }) {
           <>
             <h4>Source evidence</h4>
             <ul>
-              {card.sources.map((source) => (
-                <li
-                  key={`${source.integrationId}:${source.externalRecordId}:${source.sourceVersion}`}
-                >
-                  <span>{source.system}</span>
-                  <code>
-                    {source.integrationId} / {source.externalRecordId} @{" "}
-                    {source.sourceVersion}
-                  </code>
-                  <code className="evidenceDigest">
-                    sha256:{source.recordDigestSha256}
-                  </code>
+              {Array.from(
+                card.sources
+                  .reduce((bySystem, source) => {
+                    const label = getSourceSystemLabel(source.system);
+                    bySystem.set(label, (bySystem.get(label) ?? 0) + 1);
+                    return bySystem;
+                  }, new Map<string, number>())
+                  .entries(),
+              ).map(([label, recordCount]) => (
+                <li key={label}>
+                  <span>{label}</span>
+                  <span>
+                    {recordCount} record{recordCount === 1 ? "" : "s"}
+                  </span>
                 </li>
               ))}
             </ul>

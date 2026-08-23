@@ -15,6 +15,7 @@ import {
   recordAuditEvent,
   removeSubscriptionAddon,
   upsertSubscriptionAddon,
+  withAdvisoryLock,
   type DatabasePool,
 } from "@signaldesk/persistence";
 
@@ -65,64 +66,95 @@ export async function addAddonAction(
   }
 
   const db = getPool();
-  const [subscription, addons, purchased] = await Promise.all([
-    getOrganizationSubscription(db, session.organizationId),
-    getEnabledPlanAddons(db),
-    listSubscriptionAddons(db, session.organizationId),
-  ]);
 
-  if (!subscription || !subscription.stripeSubscriptionId) {
-    return { error: "There's no subscription to add this to." };
-  }
+  // A real, cross-instance Postgres advisory lock (`withAdvisoryLock`,
+  // same primitive `start-checkout.ts` uses for its own double-submit
+  // guard). Without it, two concurrent requests (a double-click, a
+  // client retry) can both pass the "already active" check below before
+  // either writes, each creating a real, billed Stripe subscription
+  // item — `upsertSubscriptionAddon`'s `ON CONFLICT ... DO UPDATE` then
+  // silently overwrites the first `stripeSubscriptionItemId` with the
+  // second, permanently orphaning the first: still billed on Stripe,
+  // never referenced locally again, so `removeAddonAction` can never
+  // remove it. Non-blocking, matching `withAdvisoryLock`'s own
+  // documented fast-reject behavior for a Server Action.
+  const lockResult = await withAdvisoryLock(
+    db,
+    `manage-addon-lock:${session.organizationId}`,
+    async (): Promise<AddonActionState> => {
+      const [subscription, addons, purchased] = await Promise.all([
+        getOrganizationSubscription(db, session.organizationId),
+        getEnabledPlanAddons(db),
+        listSubscriptionAddons(db, session.organizationId),
+      ]);
 
-  const addon = addons.find((entry) => entry.addonKey === addonKey);
+      if (!subscription || !subscription.stripeSubscriptionId) {
+        return { error: "There's no subscription to add this to." };
+      }
 
-  if (!addon) {
-    return { error: "That add-on isn't currently available." };
-  }
+      const addon = addons.find((entry) => entry.addonKey === addonKey);
 
-  if (purchased.some((entry) => entry.addonKey === addonKey)) {
-    return { error: "That add-on is already active." };
-  }
+      if (!addon) {
+        return { error: "That add-on isn't currently available." };
+      }
 
-  const stripePriceId = resolveStripePriceId(addon);
+      if (purchased.some((entry) => entry.addonKey === addonKey)) {
+        return { error: "That add-on is already active." };
+      }
 
-  if (!stripePriceId) {
-    return { error: "That add-on isn't available for checkout yet." };
-  }
+      const stripePriceId = resolveStripePriceId(addon);
 
-  try {
-    const stripe = createStripeBillingClient(getStripeSecretKey());
-    const result = await addSubscriptionAddonItem(stripe, {
-      subscriptionId: subscription.stripeSubscriptionId,
-      addonPriceId: stripePriceId,
-      quantity: 1,
-    });
+      if (!stripePriceId) {
+        return { error: "That add-on isn't available for checkout yet." };
+      }
 
-    await upsertSubscriptionAddon(
-      db,
-      session.organizationId,
-      subscription.id,
-      addon.id,
-      1,
-      result.subscriptionItemId,
-    );
+      try {
+        const stripe = createStripeBillingClient(getStripeSecretKey());
+        const result = await addSubscriptionAddonItem(stripe, {
+          subscriptionId: subscription.stripeSubscriptionId,
+          addonPriceId: stripePriceId,
+          quantity: 1,
+        });
 
-    await recordAuditEvent(db, session.organizationId, {
-      userId: session.userId,
-      eventType: "subscription.addon_added",
-      subjectType: "organization_subscription",
-      subjectId: subscription.id,
-      outcome: "succeeded",
-      metadata: {
-        addonKey,
-        stripeSubscriptionItemId: result.subscriptionItemId,
-      },
-    });
-  } catch (error) {
+        await upsertSubscriptionAddon(
+          db,
+          session.organizationId,
+          subscription.id,
+          addon.id,
+          1,
+          result.subscriptionItemId,
+        );
+
+        await recordAuditEvent(db, session.organizationId, {
+          userId: session.userId,
+          eventType: "subscription.addon_added",
+          subjectType: "organization_subscription",
+          subjectId: subscription.id,
+          outcome: "succeeded",
+          metadata: {
+            addonKey,
+            stripeSubscriptionItemId: result.subscriptionItemId,
+          },
+        });
+      } catch (error) {
+        return {
+          error: describeActionError(error, "Failed to add that add-on."),
+        };
+      }
+
+      return { error: null };
+    },
+  );
+
+  if (lockResult === null) {
     return {
-      error: describeActionError(error, "Failed to add that add-on."),
+      error:
+        "Another add-on change is already in progress. Please wait a moment and try again.",
     };
+  }
+
+  if (lockResult.error !== null) {
+    return lockResult;
   }
 
   redirect("/billing?billing=addon_added");
@@ -155,49 +187,80 @@ export async function removeAddonAction(
   }
 
   const db = getPool();
-  const [subscription, addons, purchased] = await Promise.all([
-    getOrganizationSubscription(db, session.organizationId),
-    getEnabledPlanAddons(db),
-    listSubscriptionAddons(db, session.organizationId),
-  ]);
 
-  if (!subscription) {
-    return { error: "There's no subscription to remove this from." };
-  }
+  // Same lock as `addAddonAction`, same key — a per-organization
+  // mutual-exclusion boundary around every add-on mutation, not just
+  // same-action races. Without it, a concurrent add and remove (or two
+  // removes) could both read the same `purchasedAddon` before either
+  // writes, calling Stripe twice for one item.
+  const lockResult = await withAdvisoryLock(
+    db,
+    `manage-addon-lock:${session.organizationId}`,
+    async (): Promise<AddonActionState> => {
+      const [subscription, addons, purchased] = await Promise.all([
+        getOrganizationSubscription(db, session.organizationId),
+        getEnabledPlanAddons(db),
+        listSubscriptionAddons(db, session.organizationId),
+      ]);
 
-  const addon = addons.find((entry) => entry.addonKey === addonKey);
-  const purchasedAddon = purchased.find((entry) => entry.addonKey === addonKey);
+      if (!subscription) {
+        return { error: "There's no subscription to remove this from." };
+      }
 
-  if (!addon || !purchasedAddon || !purchasedAddon.stripeSubscriptionItemId) {
-    return { error: "That add-on isn't currently active." };
-  }
+      const addon = addons.find((entry) => entry.addonKey === addonKey);
+      const purchasedAddon = purchased.find(
+        (entry) => entry.addonKey === addonKey,
+      );
 
-  try {
-    const stripe = createStripeBillingClient(getStripeSecretKey());
-    await removeSubscriptionAddonItem(
-      stripe,
-      purchasedAddon.stripeSubscriptionItemId,
-    );
+      if (
+        !addon ||
+        !purchasedAddon ||
+        !purchasedAddon.stripeSubscriptionItemId
+      ) {
+        return { error: "That add-on isn't currently active." };
+      }
 
-    await removeSubscriptionAddon(
-      db,
-      session.organizationId,
-      subscription.id,
-      addon.id,
-    );
+      try {
+        const stripe = createStripeBillingClient(getStripeSecretKey());
+        await removeSubscriptionAddonItem(
+          stripe,
+          purchasedAddon.stripeSubscriptionItemId,
+        );
 
-    await recordAuditEvent(db, session.organizationId, {
-      userId: session.userId,
-      eventType: "subscription.addon_removed",
-      subjectType: "organization_subscription",
-      subjectId: subscription.id,
-      outcome: "succeeded",
-      metadata: { addonKey },
-    });
-  } catch (error) {
+        await removeSubscriptionAddon(
+          db,
+          session.organizationId,
+          subscription.id,
+          addon.id,
+        );
+
+        await recordAuditEvent(db, session.organizationId, {
+          userId: session.userId,
+          eventType: "subscription.addon_removed",
+          subjectType: "organization_subscription",
+          subjectId: subscription.id,
+          outcome: "succeeded",
+          metadata: { addonKey },
+        });
+      } catch (error) {
+        return {
+          error: describeActionError(error, "Failed to remove that add-on."),
+        };
+      }
+
+      return { error: null };
+    },
+  );
+
+  if (lockResult === null) {
     return {
-      error: describeActionError(error, "Failed to remove that add-on."),
+      error:
+        "Another add-on change is already in progress. Please wait a moment and try again.",
     };
+  }
+
+  if (lockResult.error !== null) {
+    return lockResult;
   }
 
   redirect("/billing?billing=addon_removed");

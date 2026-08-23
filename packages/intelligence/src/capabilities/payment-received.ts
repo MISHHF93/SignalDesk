@@ -53,7 +53,8 @@ export const paymentReceivedIntelligence: IntelligenceCapability = {
         explanation: {
           trigger: "A payment was recorded against the connected account.",
           observedValue: `${(payment.amountCents / 100).toFixed(2)} ${payment.currency}`,
-          expectedBaseline: "N/A — this is a confirmation, not a deviation.",
+          expectedBaseline:
+            "Not applicable — this confirms something good happened, it isn't flagging a problem.",
           confidence: "high",
         },
         recommendedActionTypes: [],

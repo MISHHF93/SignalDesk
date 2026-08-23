@@ -109,7 +109,7 @@ export const goalVarianceIntelligence: IntelligenceCapability = {
             : "unknown",
         },
         explanation: {
-          trigger: `Current value moved past the ${variance.status === "OFF_TRACK" ? "off-track" : "at-risk"} distance band from this goal's target.`,
+          trigger: `Current value moved far enough from this goal's target to count as ${variance.status === "OFF_TRACK" ? "off track" : "at risk"}.`,
           observedValue: `${metricName}: ${variance.actualValue}${matchedMetric.unit === "currency" ? ` ${matchedMetric.currency}` : ""}`,
           expectedBaseline: `${goal.comparisonOperator === "at_most" ? "At most" : "At least"} ${goal.targetValue}`,
           confidence: "high",

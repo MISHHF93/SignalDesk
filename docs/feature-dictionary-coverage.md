@@ -78,9 +78,13 @@ itself is still unbuilt, its own scoped future phase.
 
 ## 3. Business Graph — **PARTIAL**
 
-Real canonical entities: `leads`, `invoices`, `tasks`, `payments` — each
-via the real `source_records` → normalized-entity provenance pattern
-(ADR 0003/0014). Ownership resolution (this session) now correctly
+Real canonical entities: `leads`, `invoices`, `tasks`, `payments`,
+`support_tickets` (re-verified 2026-08-23, this line's own prior
+four-entity list was stale — Zendesk's `support_tickets` table, named a
+few paragraphs below in Section 8, was missing here; confirmed real via
+a direct read of `packages/persistence/src/schema.ts`) — each via the
+real `source_records` → normalized-entity provenance pattern (ADR
+0003/0014). Ownership resolution (this session) now correctly
 resolves for both Asana tasks and HubSpot leads. **Not built**: Customer/
 Project/Opportunity/Contract as first-class objects (`Customer` doesn't
 exist as an entity — a lead's `companyName` is a free-text string), a
@@ -125,8 +129,13 @@ there's only one source per capability class today), a customer-facing
 Real: a genuine Connector Framework (`packages/integrations`,
 `ConnectorCapabilityClass`, ADR 0021), 25 cataloged connectors, real OAuth
 
-- real sync for 3 (HubSpot, QuickBooks, Asana), real health/lifecycle
-  tracking (Section 7 has the detail). **Not built**: a documented/
+- real sync for 8 (HubSpot, QuickBooks, Asana, Gmail, Salesforce, Xero,
+  Jira, Zendesk — re-verified 2026-08-23, this line's own prior "3" was
+  stale: it predated the four connectors Section 8 below already
+  documents in detail, and `IMPLEMENTATION-READINESS.md`'s "Connector
+  sync" row independently confirms the same current count), real
+  health/lifecycle tracking (Section 7 has the detail). **Not built**: a
+  documented/
   certifiable Connector SDK with formal interfaces (ADR 0021 itself
   explicitly deferred this — "a bigger type system" it warned against
   building without a second real reason to), a Connector Marketplace or

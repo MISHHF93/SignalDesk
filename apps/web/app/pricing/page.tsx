@@ -31,10 +31,12 @@ export default async function PricingPage() {
           <p className="sectionKicker">Pricing</p>
           <h1 id="pricing-heading">One page for the whole business.</h1>
           <p>
-            Every paid plan gets the full command center — Business Graph,
-            Attention Engine, Daily Brief, connector health, and Ask Your
-            Business AI. Plans differ by team size, active connections, and
-            operational sophistication, not by which features are locked away.
+            Every paid plan gets the full command center — every connected
+            system in one place, what needs attention surfaced automatically, a
+            Daily Brief, connector health, and a command bar to ask or filter
+            your business data. Plans differ by team size, active connections,
+            and operational sophistication, not by which features are locked
+            away.
           </p>
         </div>
       </section>

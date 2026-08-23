@@ -1,3 +1,4 @@
+import { getSourceSystemLabel } from "@signaldesk/integrations";
 import {
   EXPOSURE_TYPE_LABEL,
   getMetricDefinition,
@@ -87,7 +88,9 @@ export function BusinessMetricsPanel({
                           ? ""
                           : "s"} from{" "}
                         {metric.lineage.sourceSystems.length > 0
-                          ? metric.lineage.sourceSystems.join(", ")
+                          ? metric.lineage.sourceSystems
+                              .map(getSourceSystemLabel)
+                              .join(", ")
                           : "no connected source"}
                       </dd>
                     </div>

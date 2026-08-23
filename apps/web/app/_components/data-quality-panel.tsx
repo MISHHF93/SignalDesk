@@ -31,10 +31,10 @@ export function DataQualityPanel({
       <p className="sectionKicker">Data quality</p>
       <h2 id="data-quality-heading">Possible duplicate records</h2>
       <p>
-        A real, deterministic check: an invoice customer name and a lead company
-        name that match exactly across two different connected systems — a
-        likely sign they&rsquo;re the same business tracked twice, with no
-        relationship modeled between them yet.
+        A real check: an invoice customer name and a lead company name that
+        match exactly across two different connected systems — a likely sign
+        they&rsquo;re the same business tracked twice, even though there&rsquo;s
+        nothing linking them together yet.
       </p>
 
       {issues.length === 0 ? (

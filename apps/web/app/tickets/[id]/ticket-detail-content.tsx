@@ -1,3 +1,4 @@
+import { getSourceSystemLabel } from "@signaldesk/integrations";
 import {
   createDatabasePool,
   getSupportTicketById,
@@ -93,7 +94,7 @@ export async function TicketDetailContent({ ticketId }: { ticketId: string }) {
         ) : null}
         <div>
           <dt>Source</dt>
-          <dd>{ticket.source.system}</dd>
+          <dd>{getSourceSystemLabel(ticket.source.system)}</dd>
         </div>
         <div>
           <dt>Synced</dt>

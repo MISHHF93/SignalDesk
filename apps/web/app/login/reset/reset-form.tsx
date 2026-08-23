@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 
 import {
   requestPasswordResetAction,
@@ -16,6 +16,10 @@ export function ResetRequestForm() {
     requestPasswordResetAction,
     INITIAL_STATE,
   );
+  // See LoginForm's identical fix — React resets uncontrolled fields in a
+  // `<form action={fn}>` after every action call, which would otherwise
+  // force a retype of the email after a blank-field or rate-limit error.
+  const [email, setEmail] = useState("");
 
   if (state.message) {
     return (
@@ -37,6 +41,8 @@ export function ResetRequestForm() {
           name="email"
           type="email"
           autoComplete="email"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
           required
         />
       </div>

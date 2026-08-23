@@ -77,6 +77,7 @@ describe("mapXeroInvoiceToSourceInvoiceRecord", () => {
   });
 
   it("returns null for an invoice with no due date, not a validation error", () => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- discarded to build an object without this key, not merely unread
     const { DueDate, ...withoutDueDate } = invoice();
 
     const record = mapXeroInvoiceToSourceInvoiceRecord(

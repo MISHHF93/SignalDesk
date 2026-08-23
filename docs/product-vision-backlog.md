@@ -1467,38 +1467,67 @@ a maze of sub-dashboards"), not a new bar being invented.
 **Built the same day, for real, as the first concrete slice — item 4
 ("Integrations should become a drawer") and the Level-3 side-drawer pattern
 generally**: `/integrations/{slug}` is now a real Next.js parallel +
-intercepting route (`@modal/(.)[slug]`, App Router's own documented pattern
-for exactly this "modal with a shareable URL" shape). Clicking a connector
-card from `/integrations` opens its detail as a slide-in drawer over the
-still-visible, still-mounted list (`ConnectorDetailDrawer`,
-`apps/web/app/integrations/@modal/`) — closes via an ×, `Escape`, or a
-backdrop click, and the URL updates to `/integrations/{slug}` the whole
-time (deep-linkable, `router.back()`-friendly, satisfying this proposal's
-own "keep URL routing underneath" requirement). A direct visit — an OAuth
-callback redirect, a bookmarked link, a refresh — never engages the
-intercepting route at all (Next.js only intercepts an in-app `<Link>` soft
-navigation), so it still renders the real, complete full page unchanged;
-this matters concretely here since every real OAuth provider redirects
-back to this exact URL after consent, and that flow cannot be a client-side
-interception. Both the drawer and the full page now share one
-`ConnectorDetailContent` component (`[slug]/connector-detail-content.tsx`)
-for the actual data-fetching/rendering, so there are not two copies of this
-logic to drift. One real layout bug was caught live, not by typecheck:
-the full page's two-column hero grid (`minmax(0,1fr) minmax(300px,0.42fr)`)
-badly mid-word-wrapped the connector name inside the drawer's narrower,
-fixed 720px panel — a `@media (max-width: 720px)` query didn't catch it,
-since that checks the browser viewport, not the drawer's own width, which
-is a fixed value independent of viewport size. Fixed with an unconditional
+intercepting route, App Router's own documented pattern for exactly this
+"modal with a shareable URL" shape. Clicking a connector card opens its
+detail as a slide-in drawer over the still-visible, still-mounted page
+behind it — closes via an ×, `Escape`, or a backdrop click, and the URL
+updates to `/integrations/{slug}` the whole time (deep-linkable,
+`router.back()`-friendly, satisfying this proposal's own "keep URL routing
+underneath" requirement). A direct visit — an OAuth callback redirect, a
+bookmarked link, a refresh — never engages the intercepting route at all
+(Next.js only intercepts an in-app `<Link>` soft navigation), so it still
+renders the real, complete full page unchanged; this matters concretely
+here since every real OAuth provider redirects back to this exact URL
+after consent, and that flow cannot be a client-side interception. Both
+the drawer and the full page share one `ConnectorDetailContent` component
+(`[slug]/connector-detail-content.tsx`) for the actual data-fetching/
+rendering, so there are not two copies of this logic to drift. One real
+layout bug was caught live, not by typecheck: the full page's two-column
+hero grid (`minmax(0,1fr) minmax(300px,0.42fr)`) badly mid-word-wrapped
+the connector name inside the drawer's narrower, fixed 720px panel — a
+`@media (max-width: 720px)` query didn't catch it, since that checks the
+browser viewport, not the drawer's own width, which is a fixed value
+independent of viewport size. Fixed with an unconditional
 `.connectorDrawerPanel .connectorDetailHero { grid-template-columns: 1fr; }`
 override, verified via a re-screenshot, not assumed fixed from the CSS
-alone. Live-verified via Playwright: open/close via all three mechanisms,
-list stays mounted and visible behind the drawer throughout, correct URL
-round-trip on both open and close, the pre-existing direct-visit/OAuth-
-callback path (`?hubspot=connected&synced=N`-style banners) unchanged and
-still rendering correctly full-page, zero console errors, clean
-`pnpm -r typecheck` and clean `pnpm --filter @signaldesk/web build` (route
-manifest shows `/integrations/(.)[slug]` and `/integrations/[slug]` as two
-distinct, both-successful routes).
+alone.
+
+**Also built since this entry was first captured, both worth recording
+here rather than leaving this reality check stale (`SELF-HEALING-AUDIT.md`
+Iterations 37-38 have the full detail):**
+
+- The exact "reasonable next slice" this entry originally suggested — a
+  `support_tickets`/`ticket_risk` card opening its own ticket detail as a
+  drawer — is real and done: `/tickets/{id}` has the identical
+  intercepting-route/shared-content-component shape as connectors.
+- The intercepting route for **both** entities now lives at the app
+  root (`app/@modal/(.)integrations/[slug]/`, `app/@modal/(.)tickets/[id]/`)
+  — not nested under `/integrations/@modal/` the way this entry originally
+  described the connector drawer. That move fixed a real bug this entry's
+  own "Built the same day" claim didn't know about yet: a Next.js
+  intercepting route only engages when the _current_ route is already
+  inside the segment that owns the `@modal` slot, so nesting it under
+  `/integrations` meant the identical `<Link href="/integrations/{slug}">`
+  on a Today-page card (`integration-health-card.tsx`) silently fell back
+  to a full page navigation instead of the drawer — the exact
+  `Navigate → navigate → configure → navigate → back` pattern this whole
+  proposal exists to close, reopened by one routing-scope detail nobody
+  had reason to suspect until Today's own card-originated click was
+  actually tested end to end. Root-level placement fixes it for both
+  entities and for any future one, matching the pattern's own intent that
+  a Level-3 drawer should be reachable from wherever a link to it
+  naturally appears, not just from one specific list page.
+- Live-verified via both a real Playwright script and the actual
+  committed E2E suite (`e2e/drawer-focus-trap.spec.ts`,
+  `e2e/signup-to-integration.spec.ts`, run for real via `pnpm e2e`, not
+  approximated): open/close via all three mechanisms, the page stays
+  mounted and visible behind the drawer throughout, correct URL
+  round-trip on both open and close, real WAI-ARIA focus-trap/restoration
+  behavior, the pre-existing direct-visit/OAuth-callback path unchanged,
+  zero console errors, clean `pnpm -r typecheck` and clean
+  `pnpm --filter @signaldesk/web build` (route manifest shows
+  `/(.)integrations/[slug]`, `/(.)tickets/[id]`, `/integrations/[slug]`,
+  and `/tickets/[id]` as four distinct, all-successful routes).
 
 **Explicitly not built, named rather than silently dropped**: a generalized
 `OverlayRouter` abstraction (this slice hand-writes one parallel/
@@ -1532,17 +1561,25 @@ in this Business Graph at all yet (see the Zendesk/`support_tickets` ADR,
 in the proposal yet. Popovers/Level-2 "tiny interactions" generally (no
 component of this shape exists in this codebase before or after today).
 
-**Sequencing, if prioritized further**: the connector drawer shipped today
-is deliberately the smallest real proof of the pattern, not a down-payment
-on the whole architecture at once — matching this session's own repeated
-"one real vertical before generalizing" discipline (Gmail before a second
-content connector, Salesforce before a `CrmConnector` interface, etc.). A
-reasonable next slice, if this direction is prioritized again: pick one
-more concrete Level-3 candidate with a real underlying entity today (e.g.
-a `support_tickets`/`ticket_risk` card opening its own ticket detail as a
-drawer, since that entity and card already exist) before attempting to
-extract a shared `OverlayRouter` primitive from two real examples instead
-of one hypothetical one.
+**Sequencing, if prioritized further**: the connector drawer shipped as
+the smallest real proof of the pattern, not a down-payment on the whole
+architecture at once — matching this session's own repeated "one real
+vertical before generalizing" discipline (Gmail before a second content
+connector, Salesforce before a `CrmConnector` interface, etc.). The
+reasonable next slice this entry originally named — a second concrete
+Level-3 drawer, on the ticket entity — is now the real, done thing
+described above, so the specific recommendation this paragraph used to
+make is no longer open. The condition it named for extracting a shared
+`OverlayRouter` primitive ("two real examples instead of one hypothetical
+one") is now genuinely met — connectors and tickets both exist as real,
+independently-verified Level-3 drawers, sharing the same
+parallel/intercepting-route shape but still two separate, hand-written
+implementations, not one shared abstraction. Extracting that shared
+primitive from these two real examples is the next honest step in this
+proposal's own stated order, if this direction is prioritized again — not
+a third hand-written entity-specific drawer, which would just delay facing
+whatever the first two examples reveal about what a real `OverlayRouter`
+interface needs to cover.
 
 ## How to use this file
 

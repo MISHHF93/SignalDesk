@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
 
 import { signInAction, type AuthActionState } from "../_actions/auth";
 import { Button } from "../_components/button";
@@ -15,6 +15,15 @@ export function LoginForm({ next }: { next: string }) {
     signInAction,
     INITIAL_STATE,
   );
+  // React resets every uncontrolled field in a `<form action={fn}>` after
+  // the action runs, success or failure — including on a wrong-password
+  // rejection, the single most common reason this form re-renders with an
+  // error. Left uncontrolled, that forces a retype of the email too, not
+  // just the password, on every failed attempt. Controlled here so it
+  // survives; the password field is deliberately left uncontrolled (and so
+  // still clears) — that's normal, expected behavior after a failed
+  // sign-in, not a bug to fix alongside this one.
+  const [email, setEmail] = useState("");
 
   return (
     <>
@@ -34,6 +43,8 @@ export function LoginForm({ next }: { next: string }) {
             name="email"
             type="email"
             autoComplete="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
             required
           />
         </div>

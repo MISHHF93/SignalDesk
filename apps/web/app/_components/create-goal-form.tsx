@@ -59,14 +59,28 @@ export function CreateGoalForm({
     setStatus("pending");
     setMessage(null);
 
+    const submittedCurrency = isCurrencyMetric ? currency : null;
+
     startTransition(async () => {
       const result = await createGoalAction({
         metricId,
         name: name.trim() || `${definition?.name ?? metricId} target`,
         comparisonOperator,
         targetValue,
-        currency: isCurrencyMetric ? currency : null,
-        idempotencyKey: `goal-form:${metricId}:${comparisonOperator}:${targetValue}:${Date.now()}`,
+        currency: submittedCurrency,
+        // Stable across a retry of the same logical request — no
+        // `Date.now()` or other per-call-unique value. `createGoal`'s own
+        // doc comment requires this ("must be stable across a retry...
+        // never freshly random per call"); a timestamp here would make
+        // every submission unique, silently defeating the dedup this
+        // form's own success copy ("no duplicate was made") promises the
+        // user. Goals have no edit/delete yet (ADR 0035), so one real
+        // goal per metric/comparison/target/currency is the correct
+        // permanent identity, not just a short-lived double-submit guard.
+        // Uses `submittedCurrency`, not the raw `currency` state, so a
+        // non-currency metric's key doesn't vary with an unused, still-
+        // "USD"-defaulted field.
+        idempotencyKey: `goal-form:${metricId}:${comparisonOperator}:${targetValue}:${submittedCurrency}`,
       });
 
       if (result.ok) {

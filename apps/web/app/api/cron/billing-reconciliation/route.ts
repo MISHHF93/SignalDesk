@@ -48,7 +48,7 @@ function datesDiffer(a: Date | null, b: Date | null): boolean {
  * the response and logs can say exactly what drifted, not just that
  * something did.
  */
-function findDrift(
+export function findDrift(
   local: StripeLinkedSubscription,
   desired: UpdateSubscriptionFromStripeInput,
 ): readonly string[] {
@@ -68,10 +68,16 @@ function findDrift(
   if (datesDiffer(local.currentPeriodEnd, desired.currentPeriodEnd ?? null)) {
     drifted.push("currentPeriodEnd");
   }
-  if (
-    local.cancelAtPeriodEnd !==
-    (desired.cancelAtPeriodEnd ?? local.cancelAtPeriodEnd)
-  ) {
+  // `?? false` (Stripe's own real default for a subscription with no
+  // scheduled cancellation), not `?? local.cancelAtPeriodEnd` — the
+  // latter compares local against itself whenever `desired` omits this
+  // field, silently disabling drift detection instead of just leaving it
+  // unset. Inert today (`mapStripeSubscriptionToSyncFields`, this route's
+  // one real source for `desired`, always sets a real boolean here), but
+  // `UpdateSubscriptionFromStripeInput.cancelAtPeriodEnd` is genuinely
+  // optional on the shared type, so this only stays correct by accident
+  // for any other caller `findDrift` might gain.
+  if (local.cancelAtPeriodEnd !== (desired.cancelAtPeriodEnd ?? false)) {
     drifted.push("cancelAtPeriodEnd");
   }
   if (datesDiffer(local.canceledAt, desired.canceledAt ?? null)) {

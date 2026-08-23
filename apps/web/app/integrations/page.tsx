@@ -35,7 +35,7 @@ import { IntegrationExplorer } from "./integration-explorer";
 export const metadata: Metadata = {
   title: "Integrations",
   description:
-    "Explore planned business connectors and their honest implementation readiness.",
+    "Connect the tools you already use, and see what's connected, what's available, and what's coming soon.",
 };
 
 let pool: ReturnType<typeof createDatabasePool> | undefined;
@@ -92,9 +92,8 @@ export default async function IntegrationsPage() {
             Bring your business tools into one view.
           </h1>
           <p>
-            Explore the connector foundation across CRM, communication,
-            projects, accounting, payments, documents, contracts, support, and
-            more.
+            Explore tools across CRM, communication, projects, accounting,
+            payments, documents, contracts, support, and more.
           </p>
         </div>
 
@@ -104,11 +103,11 @@ export default async function IntegrationsPage() {
             <dd>{liveConnections}</dd>
           </div>
           <div>
-            <dt>Catalog entries</dt>
+            <dt>Tools listed</dt>
             <dd>{connectorCatalog.length}</dd>
           </div>
           <div>
-            <dt>Foundation previews</dt>
+            <dt>In progress</dt>
             <dd>{previewCount}</dd>
           </div>
         </dl>
@@ -229,17 +228,16 @@ export default async function IntegrationsPage() {
           </span>
           <div>
             <h2 id="integration-notice-heading">
-              Catalog implemented; most connectivity is not
+              Not every tool is fully connectable yet
             </h2>
             <p>
-              25 catalog entries, three real tiers: 8 (HubSpot, QuickBooks,
-              Asana, Gmail, Salesforce, Xero, Jira, Zendesk) have real OAuth and
-              a real sync into your Business Graph; 6 more (Slack, Microsoft
-              Outlook, Stripe, Google Calendar, Microsoft Calendar, Linear) have
-              real OAuth but no sync yet; the remaining 11 describe intended
-              capabilities and safety gates only — no connection exists yet.
-              Connect controls stay disabled for a connector until its own
-              foundation is reviewed and built.
+              8 tools (HubSpot, QuickBooks, Asana, Gmail, Salesforce, Xero,
+              Jira, Zendesk) connect and sync your real data today. 6 more
+              (Slack, Microsoft Outlook, Stripe, Google Calendar, Microsoft
+              Calendar, Linear) can be connected but don&rsquo;t bring data into
+              SignalDesk yet. The remaining 11 aren&rsquo;t available to connect
+              yet. You won&rsquo;t see a working Connect button for a tool until
+              it&rsquo;s actually ready to use.
             </p>
           </div>
         </aside>
@@ -253,9 +251,9 @@ export default async function IntegrationsPage() {
           <p className="sectionKicker">No connector yet? Bring your own data</p>
           <h2 id="csv-import-heading">Import invoices from a CSV</h2>
           <p>
-            A real, governed escape hatch for a system with no connector —
-            imported invoices flow through the same Business Graph as a live
-            sync, labeled honestly as CSV-imported, never mixed up with a live
+            A real way to bring in data from a system we don&rsquo;t connect to
+            yet — imported invoices show up alongside everything else, labeled
+            honestly as CSV-imported so they&rsquo;re never mixed up with a live
             connection.
             {csvImportSummary.invoiceCount > 0
               ? ` ${csvImportSummary.invoiceCount} invoice${csvImportSummary.invoiceCount === 1 ? "" : "s"} imported so far.`

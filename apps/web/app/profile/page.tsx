@@ -31,7 +31,12 @@ export const metadata: Metadata = {
   description: "Account, workspace, security, and preference settings.",
 };
 
-export default async function ProfilePage() {
+export default async function ProfilePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ profile?: string }>;
+}) {
+  const { profile: bannerStatus } = await searchParams;
   const session = await getCurrentOrganization();
 
   if (!session) {
@@ -100,6 +105,12 @@ export default async function ProfilePage() {
           <p>Your real account, workspace, and security settings.</p>
         </div>
       </section>
+
+      {bannerStatus === "export_failed" ? (
+        <p className="hubspotSyncStatus hubspotSyncStatus-denied" role="alert">
+          Couldn&rsquo;t generate your data export. Please try again.
+        </p>
+      ) : null}
 
       <div className="profileGrid">
         <section
@@ -171,6 +182,11 @@ export default async function ProfilePage() {
               </dd>
             </div>
           </dl>
+          <p>
+            A unique identifier for your account. You won&rsquo;t need it day to
+            day — it&rsquo;s here for a future support conversation, not
+            something to act on.
+          </p>
         </section>
 
         <section className="settingsCard" aria-labelledby="membership-heading">
@@ -194,10 +210,14 @@ export default async function ProfilePage() {
               <dd>{session.role}</dd>
             </div>
             <div>
-              <dt>Provisioning</dt>
-              <dd>One solo organization, created automatically at sign-up</dd>
+              <dt>Workspace type</dt>
+              <dd>Solo workspace, created automatically when you signed up</dd>
             </div>
           </dl>
+          <p>
+            A unique identifier for this workspace, for the same reason as your
+            User ID above — not something you need to use directly.
+          </p>
 
           <TeamPanel
             members={members}
@@ -216,11 +236,11 @@ export default async function ProfilePage() {
           </div>
 
           <p>
-            Bring your own AI provider key (Phase 4c, implementation roadmap).
-            When connected, this workspace&rsquo;s AI investigations run on your
-            own Anthropic account/budget instead of the platform default —
-            grants no new ability for AI to act on anything; every existing
-            approval gate stays exactly as strict.
+            Bring your own AI provider key. When connected, this
+            workspace&rsquo;s AI investigations run on your own Anthropic
+            account/budget instead of the platform default — grants no new
+            ability for AI to act on anything; every existing approval gate
+            stays exactly as strict.
           </p>
 
           <AIProviderPanel
@@ -261,8 +281,8 @@ export default async function ProfilePage() {
               <div>
                 <strong>Social sign-in</strong>
                 <span>
-                  Scaffolded (Google, Slack, LinkedIn, Facebook) — not yet
-                  connected
+                  Google, Slack, LinkedIn, and Facebook sign-in are planned but
+                  not available yet
                 </span>
               </div>
             </li>

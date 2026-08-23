@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { createDatabasePool, type DatabasePool } from "@signaldesk/persistence";
 
 import { getBusinessSnapshot } from "../../../_lib/business-snapshot";
+import { describeActionError } from "../../../_lib/describe-action-error";
 import { checkRateLimit } from "../../../_lib/rate-limit";
 import { getCurrentOrganization } from "../../../_lib/session";
 
@@ -56,7 +57,20 @@ export async function GET() {
     );
   }
 
-  const snapshot = await getBusinessSnapshot(session, new Date());
+  try {
+    const snapshot = await getBusinessSnapshot(session, new Date());
 
-  return NextResponse.json(snapshot);
+    return NextResponse.json(snapshot);
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: describeActionError(
+          error,
+          "Failed to load the business snapshot.",
+          { organizationId: session.organizationId },
+        ),
+      },
+      { status: 500 },
+    );
+  }
 }

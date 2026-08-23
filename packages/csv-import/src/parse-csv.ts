@@ -45,7 +45,20 @@ export function parseCsv(text: string): readonly (readonly string[])[] {
     }
 
     if (char === '"') {
-      inQuotes = true;
+      // RFC4180 only treats a quote as the quoted-field marker when it's
+      // the very first character of a field — a quote appearing mid-field
+      // (a company name like `Bob's "Discount" Store`) is real, legitimate
+      // field content, not a mode switch. Without this check, that quote
+      // would flip parsing into quote mode with no real closing quote
+      // ahead, silently swallowing the rest of the row — and potentially
+      // the rest of the file — into one corrupted field instead of raising
+      // anything a caller could see (found by a deep audit, 2026-08-23; no
+      // existing test covered a mid-field quote).
+      if (field === "") {
+        inQuotes = true;
+      } else {
+        field += char;
+      }
       i += 1;
       continue;
     }

@@ -60,7 +60,14 @@ export async function withAdvisoryLock<T>(
       await client.query("commit");
       return result;
     } catch (error) {
-      await client.query("rollback");
+      try {
+        await client.query("rollback");
+      } catch {
+        // Same reasoning as withTenantContext's identical guard
+        // (tenant-context.ts): a rollback failure here (most likely a
+        // dead connection) must never replace the real error from `fn` —
+        // often a real external Stripe call — with a less actionable one.
+      }
       throw error;
     }
   } finally {

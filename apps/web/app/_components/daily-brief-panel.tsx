@@ -90,7 +90,7 @@ export function DailyBriefPanel({
     >
       <div className="sectionHeading">
         <div>
-          <p className="sectionKicker">Artifact</p>
+          <p className="sectionKicker">Summary</p>
           <h2 id="daily-brief-heading">Daily Brief</h2>
         </div>
         <div className="dailyBriefActions">

@@ -13,6 +13,7 @@ import { notFound } from "next/navigation";
 import { ConnectorMark } from "../../_components/connector-mark";
 import { LockIcon } from "../../_components/icons";
 import { capabilityClassLabels } from "../../_lib/connector-labels";
+import { isLocalDevelopment } from "../../_lib/environment";
 import { getRequestOrigin } from "../../_lib/request-origin";
 import { getCurrentOrganization } from "../../_lib/session";
 import { describeConnectorHealth } from "../../_lib/visual-state";
@@ -26,17 +27,18 @@ function getPool(): DatabasePool {
 }
 
 function directionLabel(direction: ConnectorDefinition["direction"]): string {
-  if (direction === "inbound") return "Provider to dashboard";
-  if (direction === "outbound") return "Dashboard to provider";
-  return "Provider and dashboard, both directions";
+  if (direction === "inbound") return "Brings data in";
+  if (direction === "outbound") return "Sends data out";
+  return "Two-way sync";
 }
 
 /**
  * Shared by the full-page route (`[slug]/page.tsx`, the real destination for
  * OAuth callback redirects and direct links) and the intercepted drawer
- * route (`@modal/(.)[slug]/page.tsx`, what a click from the `/integrations`
- * list opens instead) — one data-fetching/rendering path, not two copies
- * that could drift.
+ * route (root `@modal/(.)integrations/[slug]/page.tsx`, what any real
+ * in-app `<Link>` click opens instead — the `/integrations` list itself or
+ * a Today card) — one data-fetching/rendering path, not two copies that
+ * could drift.
  */
 export async function ConnectorDetailContent({
   slug,
@@ -228,8 +230,8 @@ export async function ConnectorDetailContent({
                 className={`availabilityBadge ${connector.availability === "foundation-preview" ? "preview" : "planned"}`}
               >
                 {connector.availability === "foundation-preview"
-                  ? "Foundation preview"
-                  : "Planned"}
+                  ? "In progress"
+                  : "Coming soon"}
               </span>
               <span className="readOnlyBadge">
                 {isConnected ? "Connected" : "Not connected"}
@@ -286,25 +288,53 @@ export async function ConnectorDetailContent({
                 </div>
               </>
             ) : !adapter.isConfigured() ? (
-              <>
-                <h2 id="connect-heading">Developer setup required</h2>
-                <p id="connect-explanation">
-                  The OAuth flow and token storage are real and tested — this
-                  app just doesn&rsquo;t have a {adapter.providerLabel}{" "}
-                  developer app registered yet. That&rsquo;s a one-time step for
-                  whoever runs this app, not something done per sign-in.
-                </p>
-                <ol className="setupSteps">
-                  {adapter.setupSteps(redirectUri)}
-                </ol>
-                <p
-                  className="connectStatus"
-                  aria-describedby="connect-explanation"
-                >
-                  <LockIcon className="lockIcon" />
-                  Connection unavailable until those env vars are set
-                </p>
-              </>
+              isLocalDevelopment() ? (
+                <>
+                  <h2 id="connect-heading">Developer setup required</h2>
+                  <p id="connect-explanation">
+                    The OAuth flow and token storage are real and tested — this
+                    app just doesn&rsquo;t have a {adapter.providerLabel}{" "}
+                    developer app registered yet. That&rsquo;s a one-time step
+                    for whoever runs this app, not something done per sign-in.
+                    This detailed setup guidance only shows in local development
+                    (see <code>isLocalDevelopment()</code>,{" "}
+                    <code>_lib/environment.ts</code>) — a real deployment shows
+                    a plain &ldquo;temporarily unavailable&rdquo; message here
+                    instead.
+                  </p>
+                  <ol className="setupSteps">
+                    {adapter.setupSteps(redirectUri)}
+                  </ol>
+                  <p
+                    className="connectStatus"
+                    aria-describedby="connect-explanation"
+                  >
+                    <LockIcon className="lockIcon" />
+                    Connection unavailable until those env vars are set
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h2 id="connect-heading">
+                    {adapter.providerLabel} connection is temporarily
+                    unavailable
+                  </h2>
+                  <p id="connect-explanation">
+                    This isn&rsquo;t something you need to do anything about —
+                    SignalDesk hasn&rsquo;t finished setting up{" "}
+                    {adapter.providerLabel} connections for this workspace yet.
+                    Your other connected systems and existing data are
+                    unaffected.
+                  </p>
+                  <p
+                    className="connectStatus"
+                    aria-describedby="connect-explanation"
+                  >
+                    <LockIcon className="lockIcon" />
+                    Connection unavailable
+                  </p>
+                </>
+              )
             ) : !session ? (
               <>
                 <h2 id="connect-heading">Sign in to connect</h2>
@@ -326,123 +356,142 @@ export async function ConnectorDetailContent({
         ) : (
           <div className="connectPanel" aria-labelledby="connect-heading">
             <p className="sectionKicker">Connection status</p>
-            <h2 id="connect-heading">Setup is intentionally unavailable</h2>
+            <h2 id="connect-heading">Not available yet</h2>
             <p id="connect-explanation">
-              OAuth, provider scopes, and token storage have not been
-              configured. This control does not launch or imitate an
-              authorization flow.
+              SignalDesk doesn&rsquo;t support connecting to {connector.name}{" "}
+              yet — there&rsquo;s no button here because there&rsquo;s nothing
+              real to click. No credentials are requested or stored.
             </p>
             <p className="connectStatus" aria-describedby="connect-explanation">
               <LockIcon className="lockIcon" />
               Connection unavailable
             </p>
-            <small>No credentials are requested or stored.</small>
           </div>
         )}
       </section>
 
       <section className="connectorOverview" aria-labelledby="overview-heading">
         <div className="detailSectionHeading">
-          <p className="sectionKicker">Designed behavior</p>
-          <h2 id="overview-heading">What this connector could support</h2>
+          <p className="sectionKicker">
+            {connector.readiness.syncImplemented
+              ? "What SignalDesk sees"
+              : "Designed behavior"}
+          </p>
+          <h2 id="overview-heading">
+            {connector.readiness.syncImplemented
+              ? `What ${connector.name} brings into SignalDesk`
+              : "What this connector could support"}
+          </h2>
           <p>
-            Capability descriptions are product intent, not claims of live
-            provider access.
+            {connector.readiness.syncImplemented
+              ? "Writes aren't live yet — reads below are real once connected."
+              : "These are planned capabilities, not something you can use yet."}
           </p>
         </div>
 
         <div className="capabilityGrid">
-          {connector.capabilities.map((capability) => (
-            <article className="capabilityCard" key={capability.id}>
-              <span className={`operationBadge ${capability.operation}`}>
-                {capability.operation === "read"
-                  ? "Read intent"
-                  : "Write intent"}
-              </span>
-              <h3>{capability.label}</h3>
-              <p>{capability.description}</p>
-              {capability.operation === "write" ? (
-                <small>
-                  A future write would require explicit approval, audit logging,
-                  idempotency, and a fresh preflight check.
-                </small>
-              ) : (
-                <small>
-                  A future read would be tenant-scoped and retain source
-                  provenance.
-                </small>
-              )}
-            </article>
-          ))}
+          {connector.capabilities.map((capability) => {
+            const isLive =
+              capability.operation === "read" &&
+              connector.readiness.syncImplemented;
+
+            return (
+              <article className="capabilityCard" key={capability.id}>
+                <span className={`operationBadge ${capability.operation}`}>
+                  {isLive
+                    ? "Live"
+                    : capability.operation === "read"
+                      ? "Planned"
+                      : "Planned write"}
+                </span>
+                <h3>{capability.label}</h3>
+                <p>{capability.description}</p>
+                {isLive ? (
+                  <small>
+                    Tenant-scoped, and every record keeps a trace back to{" "}
+                    {connector.name}.
+                  </small>
+                ) : capability.operation === "write" ? (
+                  <small>
+                    Not available yet — a future write would need your explicit
+                    approval every time, not just once at connect.
+                  </small>
+                ) : (
+                  <small>Not available to connect yet.</small>
+                )}
+              </article>
+            );
+          })}
         </div>
       </section>
 
-      <div className="connectorDetailGrid">
-        <section className="detailCard" aria-labelledby="data-flow-heading">
-          <div className="detailCardHeader">
-            <div>
-              <p className="sectionKicker">Data posture</p>
-              <h2 id="data-flow-heading">Intended data flow</h2>
-            </div>
-            <span className="readOnlyBadge">
-              {connector.accessPosture === "read-only"
-                ? "Read-only intent"
-                : "Read + governed writes"}
-            </span>
+      <section className="detailCard" aria-labelledby="data-flow-heading">
+        <div className="detailCardHeader">
+          <div>
+            <p className="sectionKicker">Data posture</p>
+            <h2 id="data-flow-heading">Intended data flow</h2>
           </div>
+          <span className="readOnlyBadge">
+            {connector.accessPosture === "read-only"
+              ? "Read-only"
+              : "Read + governed writes"}
+          </span>
+        </div>
 
-          <div
-            className="dataFlow"
-            role="img"
-            aria-label={directionLabel(connector.direction)}
-          >
-            <span>{connector.name}</span>
-            <span className="flowArrow" aria-hidden="true">
-              {connector.direction === "bidirectional"
-                ? "⇄"
-                : connector.direction === "inbound"
-                  ? "→"
-                  : "←"}
-            </span>
-            <span>Command center</span>
+        <div
+          className="dataFlow"
+          role="img"
+          aria-label={directionLabel(connector.direction)}
+        >
+          <span>{connector.name}</span>
+          <span className="flowArrow" aria-hidden="true">
+            {connector.direction === "bidirectional"
+              ? "⇄"
+              : connector.direction === "inbound"
+                ? "→"
+                : "←"}
+          </span>
+          <span>Command center</span>
+        </div>
+
+        <dl className="detailFacts">
+          <div>
+            <dt>Direction</dt>
+            <dd>{directionLabel(connector.direction)}</dd>
           </div>
-
-          <dl className="detailFacts">
-            <div>
-              <dt>Direction</dt>
-              <dd>{directionLabel(connector.direction)}</dd>
-            </div>
-            <div>
-              <dt>Authorization design</dt>
-              <dd>{connector.authStrategy.label}</dd>
-            </div>
-            <div>
-              <dt>Provider scopes</dt>
-              <dd>
-                {connector.authStrategy.scopesDefined &&
-                connector.authStrategy.scopes
-                  ? connector.authStrategy.scopes.join(", ")
-                  : "Not selected"}
-              </dd>
-            </div>
-            <div>
-              <dt>Current access</dt>
-              <dd>{isConnected ? "Connected" : "None"}</dd>
-            </div>
-          </dl>
-        </section>
-
-        <section className="detailCard" aria-labelledby="readiness-heading">
-          <div className="detailCardHeader">
-            <div>
-              <p className="sectionKicker">Reality check</p>
-              <h2 id="readiness-heading">Implementation readiness</h2>
-            </div>
-            <span className="readinessCount">
-              {readyItemCount} of {readinessItems.length}
-            </span>
+          <div>
+            <dt>Authorization design</dt>
+            <dd>{connector.authStrategy.label}</dd>
           </div>
+          <div>
+            <dt>Provider scopes</dt>
+            <dd>
+              {connector.authStrategy.scopesDefined &&
+              connector.authStrategy.scopes
+                ? connector.authStrategy.scopes.join(", ")
+                : "Not selected"}
+            </dd>
+          </div>
+          <div>
+            <dt>Current access</dt>
+            <dd>{isConnected ? "Connected" : "None"}</dd>
+          </div>
+        </dl>
+      </section>
 
+      {!connector.readiness.productionReady ? (
+        <details className="implementationGates">
+          <summary>
+            Not fully available yet — see what SignalDesk still needs to build
+            for {connector.name}
+          </summary>
+          <div className="detailSectionHeading">
+            <p className="sectionKicker">Reality check</p>
+            <h2 id="readiness-heading">Implementation readiness</h2>
+            <p>
+              {readyItemCount} of {readinessItems.length} steps done.
+            </p>
+          </div>
           <ul className="readinessList">
             {readinessItems.map((item) => (
               <li key={item.label}>
@@ -459,33 +508,29 @@ export async function ConnectorDetailContent({
               </li>
             ))}
           </ul>
-        </section>
-      </div>
-
-      <section className="implementationGates" aria-labelledby="gates-heading">
-        <div className="detailSectionHeading">
-          <p className="sectionKicker">Before connection</p>
-          <h2 id="gates-heading">Required implementation gates</h2>
-          <p>
-            Every item must be designed, tested, and reviewed before this
-            connector can handle real workspace data.
-          </p>
-        </div>
-
-        <ol>
-          {connector.implementationGates.map((gate, index) => (
-            <li key={gate.id}>
-              <span aria-hidden="true">
-                {String(index + 1).padStart(2, "0")}
-              </span>
-              <div>
-                <strong>{gate.label}</strong>
-                <small>Required · not complete</small>
-              </div>
-            </li>
-          ))}
-        </ol>
-      </section>
+          <div className="detailSectionHeading">
+            <p className="sectionKicker">Before connection</p>
+            <h2 id="gates-heading">Required implementation gates</h2>
+            <p>
+              Every item must be designed, tested, and reviewed before this
+              connector can handle real workspace data.
+            </p>
+          </div>
+          <ol>
+            {connector.implementationGates.map((gate, index) => (
+              <li key={gate.id}>
+                <span aria-hidden="true">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                <div>
+                  <strong>{gate.label}</strong>
+                  <small>Required · not complete</small>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </details>
+      ) : null}
 
       <aside className="connectorSecurityNote">
         <div>

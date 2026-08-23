@@ -21,6 +21,7 @@ import { addAddonAction, removeAddonAction } from "../_actions/manage-addon";
 import { retryPaymentAction } from "../_actions/retry-subscription-payment";
 import { startPaymentMethodSetupAction } from "../_actions/start-payment-method-setup";
 import { getCurrentOrganization } from "../_lib/session";
+import { PricingTable } from "../pricing/pricing-table";
 import { CancelSubscriptionButton } from "./cancel-subscription-button";
 import { ChangePlanForm } from "./change-plan-form";
 import { ManageAddonForm } from "./manage-addon-form";
@@ -154,23 +155,23 @@ export default async function BillingPage({
       ) : null}
 
       {!subscription ? (
-        <aside
-          className="honestyNotice"
-          aria-labelledby="billing-notice-heading"
-        >
-          <span className="noticeIcon" aria-hidden="true">
-            ⚠
-          </span>
-          <div>
-            <h2 id="billing-notice-heading">
-              You don&rsquo;t have a subscription yet
-            </h2>
-            <p>
-              <Link href="/pricing">See plans</Link> to start a subscription or
-              trial.
-            </p>
-          </div>
-        </aside>
+        <>
+          <aside
+            className="honestyNotice"
+            aria-labelledby="billing-notice-heading"
+          >
+            <span className="noticeIcon" aria-hidden="true">
+              ⚠
+            </span>
+            <div>
+              <h2 id="billing-notice-heading">
+                You don&rsquo;t have a subscription yet
+              </h2>
+              <p>Pick a plan below to start a subscription or trial.</p>
+            </div>
+          </aside>
+          <PricingTable plans={catalog} />
+        </>
       ) : (
         <section
           className="checkoutPanel"

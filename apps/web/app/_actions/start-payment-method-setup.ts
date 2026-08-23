@@ -13,7 +13,10 @@ import {
 import { describeActionError } from "../_lib/describe-action-error";
 import { checkRateLimit } from "../_lib/rate-limit";
 import { getCurrentOrganization } from "../_lib/session";
-import { getStripeSecretKey } from "../_lib/stripe-billing-config";
+import {
+  getStripeSecretKey,
+  isBillingConfigured,
+} from "../_lib/stripe-billing-config";
 
 let pool: DatabasePool | undefined;
 
@@ -50,6 +53,16 @@ export async function startPaymentMethodSetupAction(): Promise<StartPaymentMetho
 
   if (!rateLimit.allowed) {
     return { ok: false, error: "Too many attempts. Try again shortly." };
+  }
+
+  // `getStripeSecretKey()` alone would let this succeed with only half of
+  // billing configured — the client-side Payment Element also needs
+  // `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, and without it the browser has a
+  // real `clientSecret` but nothing to render it with, a silent dead end
+  // (found by a deep audit, 2026-08-23; `isBillingConfigured()` already
+  // checks both and is the pattern `start-checkout.ts` established).
+  if (!isBillingConfigured()) {
+    return { ok: false, error: "Billing is not configured yet." };
   }
 
   try {
