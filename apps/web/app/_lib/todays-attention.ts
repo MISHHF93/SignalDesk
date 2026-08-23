@@ -1,14 +1,26 @@
 import {
   createDatabasePool,
   getOrganizationBusinessProfile,
-  getPriorityLead,
   listActiveIntegrationSourceSystems,
+  listAllInvoices,
+  listAllLeads,
+  listAllTasks,
+  listGoals,
+  listLeadsForAttention,
   listOverdueInvoices,
   listOverdueTasks,
+  listRecentPayments,
+  listStuckSupportTickets,
+  listUnansweredExternalMessages,
   type DatabasePool,
+  type GoalRecord,
   type OrganizationBusinessProfile,
 } from "@signaldesk/persistence";
 import type { BusinessAttention } from "@signaldesk/application";
+import {
+  computeBusinessMetrics,
+  type MetricValue,
+} from "@signaldesk/semantics";
 
 import { businessAIOrchestrator } from "./orchestrator";
 import type { CurrentSession } from "./session";
@@ -23,6 +35,15 @@ function getPool(): DatabasePool {
 export interface TodaysAttention extends BusinessAttention {
   readonly connectedIntegrationSlugs: readonly string[];
   readonly businessProfile: OrganizationBusinessProfile;
+  /** The real Business Semantic Layer (Prompt 21,
+   * docs/product-vision-backlog.md, ADR 0034) — every catalog metric
+   * (@signaldesk/semantics) computed fresh from the same already-fetched
+   * data below, never a second independent calculation. */
+  readonly metrics: readonly MetricValue[];
+  /** Every real goal the organization has defined (Prompt 22, ADR 0035) —
+   * `page.tsx` renders these directly (status computed from `metrics`
+   * above via `evaluateGoal`) rather than re-fetching. */
+  readonly goals: readonly GoalRecord[];
 }
 
 /**
@@ -43,29 +64,64 @@ export async function getTodaysAttention(
 ): Promise<TodaysAttention> {
   const db = getPool();
   const [
-    lead,
+    leads,
     overdueInvoices,
     overdueTasks,
+    recentPayments,
     connectedIntegrationSlugs,
     businessProfile,
+    allInvoices,
+    allLeads,
+    allTasks,
+    goals,
+    recentUnansweredMessages,
+    stuckSupportTickets,
   ] = await Promise.all([
-    getPriorityLead(db, session.organizationId),
+    listLeadsForAttention(db, session.organizationId),
     listOverdueInvoices(db, session.organizationId),
     listOverdueTasks(db, session.organizationId),
+    listRecentPayments(db, session.organizationId),
     listActiveIntegrationSourceSystems(db, session.organizationId),
     getOrganizationBusinessProfile(db, session.organizationId),
+    listAllInvoices(db, session.organizationId),
+    listAllLeads(db, session.organizationId),
+    listAllTasks(db, session.organizationId),
+    listGoals(db, session.organizationId),
+    listUnansweredExternalMessages(db, session.organizationId),
+    listStuckSupportTickets(db, session.organizationId),
   ]);
 
+  const metrics = computeBusinessMetrics({
+    now,
+    allInvoices,
+    overdueInvoices,
+    leads: allLeads,
+    recentPayments,
+    tasks: allTasks,
+  });
+
   const attention = await businessAIOrchestrator.getAttention({
-    lead,
+    leads,
     overdueInvoices,
     overdueTasks,
+    recentPayments,
     now,
     connectedIntegrationSlugs,
     highValueThresholdCents: businessProfile.highValueThresholdCents,
     workingDaysBitmask: businessProfile.workingDaysBitmask,
     timeZone: businessProfile.timezone,
+    goals,
+    businessMetrics: metrics,
+    recentUnansweredMessages,
+    defaultExpectedResponseHours: businessProfile.defaultExpectedResponseHours,
+    stuckSupportTickets,
   });
 
-  return { ...attention, connectedIntegrationSlugs, businessProfile };
+  return {
+    ...attention,
+    connectedIntegrationSlugs,
+    businessProfile,
+    metrics,
+    goals,
+  };
 }

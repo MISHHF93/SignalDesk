@@ -1,0 +1,2 @@
+ALTER TABLE "tasks" ADD COLUMN "owner_membership_id" uuid;--> statement-breakpoint
+ALTER TABLE "tasks" ADD CONSTRAINT "tasks_org_owner_membership_fk" FOREIGN KEY ("organization_id","owner_membership_id") REFERENCES "public"."memberships"("organization_id","id") ON DELETE restrict ON UPDATE restrict;

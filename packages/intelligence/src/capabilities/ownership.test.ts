@@ -33,14 +33,20 @@ function lead(overrides: Partial<Lead> = {}): Lead {
 describe("ownershipIntelligence", () => {
   it("produces no finding for a lead that has an assigned owner", async () => {
     const findings = await ownershipIntelligence.evaluate({
-      lead: lead(),
+      leads: [lead()],
       now: NOW,
       overdueInvoices: [],
       connectedIntegrationSlugs: [],
       highValueThresholdCents: 1_000_000,
       overdueTasks: [],
+      recentPayments: [],
       workingDaysBitmask: 0b1111111,
       timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
     });
 
     expect(findings).toHaveLength(0);
@@ -48,31 +54,47 @@ describe("ownershipIntelligence", () => {
 
   it("fires a lead.ownership_gap finding for a lead with no owner", async () => {
     const findings = await ownershipIntelligence.evaluate({
-      lead: lead({ owner: null }),
+      leads: [lead({ owner: null })],
       now: NOW,
       overdueInvoices: [],
       connectedIntegrationSlugs: [],
       highValueThresholdCents: 1_000_000,
       overdueTasks: [],
+      recentPayments: [],
       workingDaysBitmask: 0b1111111,
       timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
     });
 
     expect(findings).toHaveLength(1);
     expect(findings[0]?.type).toBe("lead.ownership_gap");
     expect(findings[0]?.owner).toBeUndefined();
+    expect(findings[0]?.recommendedActionTypes).toEqual([
+      "create_internal_task",
+    ]);
+    expect(findings[0]?.correlationName).toBe("northstar dental");
   });
 
   it("produces no finding for a real organization with no lead yet", async () => {
     const findings = await ownershipIntelligence.evaluate({
-      lead: null,
+      leads: [],
       now: NOW,
       overdueInvoices: [],
       connectedIntegrationSlugs: [],
       highValueThresholdCents: 1_000_000,
       overdueTasks: [],
+      recentPayments: [],
       workingDaysBitmask: 0b1111111,
       timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
     });
 
     expect(findings).toHaveLength(0);

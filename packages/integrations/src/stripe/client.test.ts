@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { UpstreamProviderError } from "../shared/upstream-error";
 import {
   buildStripeAuthorizationUrl,
   deauthorizeStripeAccount,
@@ -86,9 +87,20 @@ describe("exchangeStripeAuthorizationCode", () => {
       }),
     );
 
-    await expect(
-      exchangeStripeAuthorizationCode(CONFIG, "bad-code"),
-    ).rejects.toThrow(/invalid_grant/);
+    let thrown: unknown;
+
+    try {
+      await exchangeStripeAuthorizationCode(CONFIG, "bad-code");
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(UpstreamProviderError);
+    const error = thrown as UpstreamProviderError;
+    expect(error.message).not.toContain("invalid_grant");
+    expect(error.message).toContain("Stripe token exchange failed");
+    expect(error.rawDetail).toContain("invalid_grant");
+    expect(error.rawDetail).toContain("Authorization code does not exist");
   });
 
   it("retries on a 5xx before succeeding, reusing the shared retry policy", async () => {

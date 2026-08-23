@@ -5,9 +5,15 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { DatabasePool } from "../src/client";
 import { ingestQuickBooksInvoice, listOverdueInvoices } from "../src/invoices";
 import { withTenantContext } from "../src/tenant-context";
-import { getTestPool, seedIntegration, seedOrganization } from "./support";
+import {
+  getTestPool,
+  seedIntegration,
+  seedOrganization,
+  seedSyncJob,
+} from "./support";
 
 function fixtureInput(
+  syncJobId: string,
   overrides: Partial<Parameters<typeof ingestQuickBooksInvoice>[3]> = {},
 ) {
   return {
@@ -21,6 +27,7 @@ function fixtureInput(
     currency: "USD",
     dueAt: new Date("2026-08-01T00:00:00.000Z"),
     status: "open" as const,
+    syncJobId,
     ...overrides,
   };
 }
@@ -55,12 +62,19 @@ describe.skipIf(!process.env.DATABASE_URL)(
         sourceSystem: "quickbooks",
       });
       const farFuture = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+      const job = await seedSyncJob(
+        pool,
+        org.id,
+        integration.id,
+        "quickbooks",
+        "invoice",
+      );
 
       await ingestQuickBooksInvoice(
         pool,
         org.id,
         integration.id,
-        fixtureInput({ dueAt: farFuture }),
+        fixtureInput(job.id, { dueAt: farFuture }),
       );
 
       const invoices = await listOverdueInvoices(pool, org.id);
@@ -74,7 +88,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
         sourceSystem: "quickbooks",
       });
       const pastDue = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
-      const input = fixtureInput({ dueAt: pastDue });
+      const job = await seedSyncJob(
+        pool,
+        org.id,
+        integration.id,
+        "quickbooks",
+        "invoice",
+      );
+      const input = fixtureInput(job.id, { dueAt: pastDue });
 
       const ingestResult = await ingestQuickBooksInvoice(
         pool,
@@ -103,11 +124,18 @@ describe.skipIf(!process.env.DATABASE_URL)(
         sourceSystem: "quickbooks",
       });
 
+      const job = await seedSyncJob(
+        pool,
+        org.id,
+        integration.id,
+        "quickbooks",
+        "invoice",
+      );
       const recentlyOverdue = await ingestQuickBooksInvoice(
         pool,
         org.id,
         integration.id,
-        fixtureInput({
+        fixtureInput(job.id, {
           dueAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
         }),
       );
@@ -115,7 +143,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         pool,
         org.id,
         integration.id,
-        fixtureInput({
+        fixtureInput(job.id, {
           dueAt: new Date(Date.now() - 40 * 24 * 60 * 60 * 1000),
         }),
       );
@@ -134,12 +162,19 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const integrationB = await seedIntegration(pool, orgB.id, {
         sourceSystem: "quickbooks",
       });
+      const job = await seedSyncJob(
+        pool,
+        orgB.id,
+        integrationB.id,
+        "quickbooks",
+        "invoice",
+      );
 
       await ingestQuickBooksInvoice(
         pool,
         orgB.id,
         integrationB.id,
-        fixtureInput({ dueAt: new Date(Date.now() - 1000) }),
+        fixtureInput(job.id, { dueAt: new Date(Date.now() - 1000) }),
       );
 
       const invoices = await listOverdueInvoices(pool, orgA.id);
@@ -152,11 +187,18 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const integration = await seedIntegration(pool, org.id, {
         sourceSystem: "quickbooks",
       });
+      const job = await seedSyncJob(
+        pool,
+        org.id,
+        integration.id,
+        "quickbooks",
+        "invoice",
+      );
       await ingestQuickBooksInvoice(
         pool,
         org.id,
         integration.id,
-        fixtureInput({ dueAt: new Date(Date.now() - 1000) }),
+        fixtureInput(job.id, { dueAt: new Date(Date.now() - 1000) }),
       );
 
       expect(await listOverdueInvoices(pool, org.id)).toHaveLength(1);
@@ -171,6 +213,37 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const invoices = await listOverdueInvoices(pool, org.id);
 
       expect(invoices).toEqual([]);
+    });
+
+    it("still surfaces an invoice when its source integration is degraded, not disconnected", async () => {
+      const org = await seedOrganization(pool);
+      const integration = await seedIntegration(pool, org.id, {
+        sourceSystem: "quickbooks",
+      });
+      const job = await seedSyncJob(
+        pool,
+        org.id,
+        integration.id,
+        "quickbooks",
+        "invoice",
+      );
+      await ingestQuickBooksInvoice(
+        pool,
+        org.id,
+        integration.id,
+        fixtureInput(job.id, { dueAt: new Date(Date.now() - 1000) }),
+      );
+
+      await withTenantContext(pool, org.id, async (client) => {
+        await client.query(
+          "update integrations set status = 'degraded' where id = $1",
+          [integration.id],
+        );
+      });
+
+      const invoices = await listOverdueInvoices(pool, org.id);
+
+      expect(invoices).toHaveLength(1);
     });
   },
 );

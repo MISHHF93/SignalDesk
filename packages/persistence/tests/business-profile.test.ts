@@ -5,6 +5,7 @@ import {
   getOrganizationBusinessProfile,
   updateOrganizationBusinessProfile,
 } from "../src/business-profile";
+import { QueryFailedError } from "../src/query-error";
 import { withTenantContext } from "../src/tenant-context";
 import { getTestPool, seedMembership, seedOrganization } from "./support";
 
@@ -31,6 +32,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         defaultExpectedResponseHours: 24,
         highValueThresholdCents: 1_000_000,
         workingDaysBitmask: 0b0111110, // Mon-Fri
+        industry: "unspecified",
       });
     });
 
@@ -49,6 +51,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         defaultExpectedResponseHours: 24,
         highValueThresholdCents: 2_000_000,
         workingDaysBitmask: 0b0111110,
+        industry: "unspecified",
       });
 
       const auditRow = await withTenantContext(
@@ -104,30 +107,84 @@ describe.skipIf(!process.env.DATABASE_URL)(
       expect(updated.workingDaysBitmask).toBe(0b1111111);
     });
 
+    it("updates the industry", async () => {
+      const { organizationId, userId } = await seedMembership(pool);
+
+      const updated = await updateOrganizationBusinessProfile(
+        pool,
+        organizationId,
+        userId,
+        { industry: "professional_services" },
+      );
+
+      expect(updated.industry).toBe("professional_services");
+    });
+
+    it("rejects an unrecognized industry via the database check constraint", async () => {
+      const org = await seedOrganization(pool);
+      let thrown: unknown;
+
+      try {
+        await withTenantContext(pool, org.id, async (client) => {
+          await client.query(
+            "update organizations set industry = 'not-a-real-industry' where id = $1",
+            [org.id],
+          );
+        });
+      } catch (error) {
+        thrown = error;
+      }
+
+      // withTenantContext wraps a real schema-level constraint violation
+      // (query-error.ts) rather than let the constraint name reach a
+      // client-visible message — the real detail is still checkable via
+      // rawDetail, server-side only.
+      expect(thrown).toBeInstanceOf(QueryFailedError);
+      expect((thrown as QueryFailedError).rawDetail).toContain(
+        "organizations_industry_allowed",
+      );
+    });
+
     it("rejects an out-of-range working-days bitmask via the database check constraint", async () => {
       const org = await seedOrganization(pool);
+      let thrown: unknown;
 
-      await expect(
-        withTenantContext(pool, org.id, async (client) => {
+      try {
+        await withTenantContext(pool, org.id, async (client) => {
           await client.query(
             "update organizations set working_days_bitmask = 128 where id = $1",
             [org.id],
           );
-        }),
-      ).rejects.toThrow(/organizations_working_days_bitmask_range/);
+        });
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(thrown).toBeInstanceOf(QueryFailedError);
+      expect((thrown as QueryFailedError).rawDetail).toContain(
+        "organizations_working_days_bitmask_range",
+      );
     });
 
     it("rejects a critical-value threshold below zero via the database check constraint", async () => {
       const org = await seedOrganization(pool);
+      let thrown: unknown;
 
-      await expect(
-        withTenantContext(pool, org.id, async (client) => {
+      try {
+        await withTenantContext(pool, org.id, async (client) => {
           await client.query(
             "update organizations set high_value_threshold_cents = -1 where id = $1",
             [org.id],
           );
-        }),
-      ).rejects.toThrow(/organizations_threshold_nonnegative/);
+        });
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(thrown).toBeInstanceOf(QueryFailedError);
+      expect((thrown as QueryFailedError).rawDetail).toContain(
+        "organizations_threshold_nonnegative",
+      );
     });
 
     it("cannot see another organization's business profile", async () => {

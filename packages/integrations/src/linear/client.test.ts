@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { UpstreamProviderError } from "../shared/upstream-error";
 import {
   buildLinearAuthorizationUrl,
   exchangeLinearAuthorizationCode,
@@ -23,8 +24,10 @@ const CONFIG: LinearOAuthConfig = {
 };
 
 describe("buildLinearAuthorizationUrl", () => {
-  it("builds a real authorize URL with client id, read scope, user actor, redirect uri, and state", () => {
-    const url = new URL(buildLinearAuthorizationUrl(CONFIG, "nonce-123"));
+  it("builds a real authorize URL with client id, read scope, user actor, redirect uri, state, and a real PKCE code_challenge", () => {
+    const url = new URL(
+      buildLinearAuthorizationUrl(CONFIG, "nonce-123", "challenge-abc"),
+    );
 
     expect(url.origin + url.pathname).toBe(
       "https://linear.app/oauth/authorize",
@@ -35,6 +38,8 @@ describe("buildLinearAuthorizationUrl", () => {
     expect(url.searchParams.get("scope")).toBe(LINEAR_SCOPES.join(" "));
     expect(url.searchParams.get("actor")).toBe("user");
     expect(url.searchParams.get("state")).toBe("nonce-123");
+    expect(url.searchParams.get("code_challenge")).toBe("challenge-abc");
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
   });
 });
 
@@ -52,7 +57,7 @@ describe("exchangeLinearAuthorizationCode", () => {
     vi.useRealTimers();
   });
 
-  it("maps a successful token response", async () => {
+  it("maps a successful token response and sends the real PKCE code_verifier", async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse(200, {
         access_token: "at-1",
@@ -62,13 +67,20 @@ describe("exchangeLinearAuthorizationCode", () => {
       }),
     );
 
-    const result = await exchangeLinearAuthorizationCode(CONFIG, "auth-code");
+    const result = await exchangeLinearAuthorizationCode(
+      CONFIG,
+      "auth-code",
+      "verifier-abc",
+    );
 
     expect(result).toEqual({
       accessToken: "at-1",
       refreshToken: "rt-1",
       expiresIn: 86399,
     });
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = init.body as URLSearchParams;
+    expect(body.get("code_verifier")).toBe("verifier-abc");
   });
 
   it("throws when Linear omits the refresh_token", async () => {
@@ -77,7 +89,7 @@ describe("exchangeLinearAuthorizationCode", () => {
     );
 
     await expect(
-      exchangeLinearAuthorizationCode(CONFIG, "auth-code"),
+      exchangeLinearAuthorizationCode(CONFIG, "auth-code", "verifier-abc"),
     ).rejects.toThrow(/refresh_token/);
   });
 
@@ -92,7 +104,11 @@ describe("exchangeLinearAuthorizationCode", () => {
         }),
       );
 
-    const resultPromise = exchangeLinearAuthorizationCode(CONFIG, "auth-code");
+    const resultPromise = exchangeLinearAuthorizationCode(
+      CONFIG,
+      "auth-code",
+      "verifier-abc",
+    );
     await vi.runAllTimersAsync();
     const result = await resultPromise;
 
@@ -134,14 +150,24 @@ describe("fetchLinearViewer", () => {
     expect(headers.Authorization).toBe("Bearer at-1");
   });
 
-  it("throws on a GraphQL errors array", async () => {
+  it("throws on a GraphQL errors array, without leaking the raw message into the client-visible text", async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse(200, { errors: [{ message: "not authenticated" }] }),
     );
 
-    await expect(fetchLinearViewer("bad-token")).rejects.toThrow(
-      /not authenticated/,
-    );
+    let thrown: unknown;
+
+    try {
+      await fetchLinearViewer("bad-token");
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(UpstreamProviderError);
+    const error = thrown as UpstreamProviderError;
+    expect(error.message).not.toContain("not authenticated");
+    expect(error.message).toContain("Linear viewer query failed");
+    expect(error.rawDetail).toContain("not authenticated");
   });
 
   it("throws when the viewer id is missing", async () => {

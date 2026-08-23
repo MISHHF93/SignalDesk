@@ -11,8 +11,10 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.120.0",
     "@signaldesk/domain": "workspace:*",
     "@signaldesk/intelligence": "workspace:*",
-    "@signaldesk/schemas": "workspace:*"
+    "@signaldesk/schemas": "workspace:*",
+    "@signaldesk/semantics": "workspace:*"
   }
 }

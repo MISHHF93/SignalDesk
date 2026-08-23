@@ -1,7 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { DatabasePool } from "../src/client";
-import { listActiveIntegrationSourceSystems } from "../src/integration-status";
+import {
+  listActiveIntegrationSourceSystems,
+  listActiveIntegrations,
+} from "../src/integration-status";
 import { withTenantContext } from "../src/tenant-context";
 import { getTestPool, seedIntegration, seedOrganization } from "./support";
 
@@ -56,6 +59,24 @@ describe.skipIf(!process.env.DATABASE_URL)(
       expect(slugs).toEqual([]);
     });
 
+    it("still lists a degraded integration's source system", async () => {
+      const org = await seedOrganization(pool);
+      const integration = await seedIntegration(pool, org.id, {
+        sourceSystem: "hubspot",
+      });
+
+      await withTenantContext(pool, org.id, async (client) => {
+        await client.query(
+          "update integrations set status = 'degraded' where id = $1",
+          [integration.id],
+        );
+      });
+
+      const slugs = await listActiveIntegrationSourceSystems(pool, org.id);
+
+      expect(slugs).toEqual(["hubspot"]);
+    });
+
     it("cannot see another organization's integrations", async () => {
       const orgA = await seedOrganization(pool);
       const orgB = await seedOrganization(pool);
@@ -64,6 +85,63 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const slugs = await listActiveIntegrationSourceSystems(pool, orgA.id);
 
       expect(slugs).toEqual([]);
+    });
+  },
+);
+
+// listActiveIntegrations feeds account-deletion's disconnect-everything
+// path (deleteOrganizationAction) — a degraded connection still holds a
+// real Vault-stored credential that must be revoked too, so it must not
+// be silently skipped.
+describe.skipIf(!process.env.DATABASE_URL)(
+  "listActiveIntegrations (live database)",
+  () => {
+    let pool: DatabasePool;
+
+    beforeAll(() => {
+      pool = getTestPool();
+    });
+
+    afterAll(async () => {
+      await pool.end();
+    });
+
+    it("includes a degraded integration, not just active ones", async () => {
+      const org = await seedOrganization(pool);
+      const integration = await seedIntegration(pool, org.id, {
+        sourceSystem: "hubspot",
+      });
+
+      await withTenantContext(pool, org.id, async (client) => {
+        await client.query(
+          "update integrations set status = 'degraded' where id = $1",
+          [integration.id],
+        );
+      });
+
+      const integrations = await listActiveIntegrations(pool, org.id);
+
+      expect(integrations).toEqual([
+        { id: integration.id, sourceSystem: "hubspot" },
+      ]);
+    });
+
+    it("excludes a disconnected integration", async () => {
+      const org = await seedOrganization(pool);
+      const integration = await seedIntegration(pool, org.id, {
+        sourceSystem: "hubspot",
+      });
+
+      await withTenantContext(pool, org.id, async (client) => {
+        await client.query(
+          "update integrations set status = 'disconnected' where id = $1",
+          [integration.id],
+        );
+      });
+
+      const integrations = await listActiveIntegrations(pool, org.id);
+
+      expect(integrations).toEqual([]);
     });
   },
 );

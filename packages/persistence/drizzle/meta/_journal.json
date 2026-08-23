@@ -225,6 +225,181 @@
       "when": 1787166268563,
       "tag": "0031_artifacts",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1787181786966,
+      "tag": "0032_organization_data_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1787183861390,
+      "tag": "0033_organization_industry",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1787196216429,
+      "tag": "0034_agent_fabric",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1787200689281,
+      "tag": "0035_connector_platform",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1787204143271,
+      "tag": "0036_quickbooks_payments_and_webhooks",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1787241019362,
+      "tag": "0038_agent_collaboration_outcome",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1787241913324,
+      "tag": "0039_source_records_sync_job_trace",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1787243691975,
+      "tag": "0040_card_feedback",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1787248622436,
+      "tag": "0041_goals",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1787249127267,
+      "tag": "0042_goal_variance_card_feedback",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1787252115764,
+      "tag": "0043_task_ownership",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1787279043595,
+      "tag": "0044_recent_list_query_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1787286468870,
+      "tag": "0045_rate_limit_buckets",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1787289944427,
+      "tag": "0046_organization_invites",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1787290100000,
+      "tag": "0047_grant_identity_provisioner_invites_access",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1787290200000,
+      "tag": "0048_fix_invite_lookup_column_ambiguity",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1787290300000,
+      "tag": "0049_fix_anonymous_display_name_regression",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1787296591413,
+      "tag": "0050_gmail_messages",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1787322178240,
+      "tag": "0051_ai_provider_connections",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1787322300000,
+      "tag": "0052_fix_ai_provider_connection_permissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1787326121353,
+      "tag": "0053_advisor_findings_fix",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1787337260811,
+      "tag": "0054_zendesk_support_tickets",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1787339660474,
+      "tag": "0055_card_feedback_type_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1787419584560,
+      "tag": "0056_billing_reconciliation_sweep",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "7",
+      "when": 1787435591253,
+      "tag": "0057_payment_invoice_allocations",
+      "breakpoints": true
     }
   ]
 }

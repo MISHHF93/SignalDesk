@@ -4,10 +4,17 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { DatabasePool } from "../src/client";
 import { ingestHubSpotDeal } from "../src/hubspot-sync";
+import { provisionIdentityAndOrganization } from "../src/identity";
 import { withTenantContext } from "../src/tenant-context";
-import { getTestPool, seedIntegration, seedOrganization } from "./support";
+import {
+  getTestPool,
+  seedIntegration,
+  seedOrganization,
+  seedSyncJob,
+} from "./support";
 
 function fixtureInput(
+  syncJobId: string,
   overrides: Partial<Parameters<typeof ingestHubSpotDeal>[3]> = {},
 ) {
   return {
@@ -24,6 +31,8 @@ function fixtureInput(
     expectedResponseHours: 24,
     sourceCreatedAt: new Date("2026-08-17T17:00:00.000Z"),
     lastInteractionAt: null,
+    syncJobId,
+    ownerName: null,
     ...overrides,
   };
 }
@@ -50,7 +59,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const integration = await seedIntegration(pool, org.id, {
         sourceSystem: "hubspot",
       });
-      const input = fixtureInput();
+      const job = await seedSyncJob(pool, org.id, integration.id, "hubspot");
+      const input = fixtureInput(job.id);
 
       const result = await ingestHubSpotDeal(
         pool,
@@ -99,7 +109,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const integration = await seedIntegration(pool, org.id, {
         sourceSystem: "hubspot",
       });
-      const input = fixtureInput();
+      const job = await seedSyncJob(pool, org.id, integration.id, "hubspot");
+      const input = fixtureInput(job.id);
 
       const first = await ingestHubSpotDeal(
         pool,
@@ -119,18 +130,88 @@ describe.skipIf(!process.env.DATABASE_URL)(
       expect(second.sourceRecordId).toBeNull();
     });
 
+    it("resolves owner_membership_id when ownerName exactly matches a real member's display name", async () => {
+      const displayName = `Maya Chen ${randomUUID()}`;
+      const { organizationId } = await provisionIdentityAndOrganization(pool, {
+        identityProvider: "test",
+        identityProviderSubject: `subject-${randomUUID()}`,
+        displayName,
+        primaryEmail: `${randomUUID()}@example.com`,
+      });
+      const integration = await seedIntegration(pool, organizationId, {
+        sourceSystem: "hubspot",
+      });
+      const job = await seedSyncJob(
+        pool,
+        organizationId,
+        integration.id,
+        "hubspot",
+      );
+
+      const result = await ingestHubSpotDeal(
+        pool,
+        organizationId,
+        integration.id,
+        fixtureInput(job.id, { ownerName: displayName }),
+      );
+
+      const [leadRow] = await withTenantContext(
+        pool,
+        organizationId,
+        async (client) => {
+          const leadResult = await client.query(
+            "select owner_membership_id from leads where id = $1",
+            [result.leadId],
+          );
+          return leadResult.rows;
+        },
+      );
+
+      expect(leadRow?.owner_membership_id).not.toBeNull();
+    });
+
+    it("leaves owner_membership_id null when ownerName matches no real member", async () => {
+      const org = await seedOrganization(pool);
+      const integration = await seedIntegration(pool, org.id, {
+        sourceSystem: "hubspot",
+      });
+      const job = await seedSyncJob(pool, org.id, integration.id, "hubspot");
+
+      const result = await ingestHubSpotDeal(
+        pool,
+        org.id,
+        integration.id,
+        fixtureInput(job.id, { ownerName: "Nobody Real" }),
+      );
+
+      const [leadRow] = await withTenantContext(
+        pool,
+        org.id,
+        async (client) => {
+          const leadResult = await client.query(
+            "select owner_membership_id from leads where id = $1",
+            [result.leadId],
+          );
+          return leadResult.rows;
+        },
+      );
+
+      expect(leadRow?.owner_membership_id).toBeNull();
+    });
+
     it("cannot see another organization's ingested leads", async () => {
       const orgA = await seedOrganization(pool);
       const orgB = await seedOrganization(pool);
       const integrationA = await seedIntegration(pool, orgA.id, {
         sourceSystem: "hubspot",
       });
+      const job = await seedSyncJob(pool, orgA.id, integrationA.id, "hubspot");
 
       const result = await ingestHubSpotDeal(
         pool,
         orgA.id,
         integrationA.id,
-        fixtureInput(),
+        fixtureInput(job.id),
       );
 
       const rows = await withTenantContext(pool, orgB.id, async (client) => {

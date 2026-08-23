@@ -1,9 +1,12 @@
+import { randomUUID } from "node:crypto";
+
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { DatabasePool } from "../src/client";
 import {
   disconnectQuickBooksIntegration,
   findOrCreateQuickBooksIntegration,
+  findOrganizationAndIntegrationIdByQuickBooksRealmId,
   getQuickBooksIntegrationStatus,
 } from "../src/quickbooks-integration";
 import {
@@ -158,6 +161,65 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await expect(
         disconnectQuickBooksIntegration(pool, orgA.id, integrationB.id),
       ).rejects.toThrow(/not found in the current tenant context/i);
+    });
+
+    // The webhook handler resolves realmId -> organization/integration with
+    // no tenant context set yet (see the SECURITY DEFINER function this
+    // wraps, migration 0036) — the whole point of this call is bootstrapping
+    // that tenant context, so it must work called directly with no
+    // withTenantContext wrapper, unlike every other function in this file.
+    it("resolves the organization and integration for a real active realm", async () => {
+      // A unique realm id per run, not a fixed literal: this resolver
+      // deliberately looks up by realmId alone with no org scope (that's
+      // its whole job — bootstrapping tenant context for the
+      // unauthenticated webhook has no org to scope by yet), so a fixed
+      // literal would collide with the same test's own leftover row from
+      // a previous run against this persistent live database and make the
+      // lookup non-deterministic.
+      const realmId = `realm-${randomUUID()}`;
+      const org = await seedOrganization(pool);
+      const integration = await findOrCreateQuickBooksIntegration(
+        pool,
+        org.id,
+        realmId,
+      );
+
+      const lookup = await findOrganizationAndIntegrationIdByQuickBooksRealmId(
+        pool,
+        realmId,
+      );
+
+      expect(lookup).toEqual({
+        organizationId: org.id,
+        integrationId: integration.id,
+      });
+    });
+
+    it("returns null for a realm with no integration at all", async () => {
+      const lookup = await findOrganizationAndIntegrationIdByQuickBooksRealmId(
+        pool,
+        `realm-${randomUUID()}`,
+      );
+
+      expect(lookup).toBeNull();
+    });
+
+    it("returns null for a realm whose integration was disconnected", async () => {
+      const realmId = `realm-${randomUUID()}`;
+      const org = await seedOrganization(pool);
+      const integration = await findOrCreateQuickBooksIntegration(
+        pool,
+        org.id,
+        realmId,
+      );
+      await disconnectQuickBooksIntegration(pool, org.id, integration.id);
+
+      const lookup = await findOrganizationAndIntegrationIdByQuickBooksRealmId(
+        pool,
+        realmId,
+      );
+
+      expect(lookup).toBeNull();
     });
   },
 );

@@ -42,7 +42,8 @@ export async function retryPaymentAction(): Promise<RetryPaymentState> {
     return { error: "Sign in to do this.", clientSecret: null };
   }
 
-  const rateLimit = checkRateLimit(
+  const rateLimit = await checkRateLimit(
+    getPool(),
     `retry-payment:${session.organizationId}`,
     10,
     60 * 60 * 1000,

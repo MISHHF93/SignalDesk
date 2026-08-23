@@ -13,7 +13,7 @@ import {
 
 import { describeActionError } from "../_lib/describe-action-error";
 import {
-  getQuickBooksClientCredentialsForRevoke,
+  getQuickBooksClientCredentials,
   isQuickBooksConfigured,
 } from "../_lib/quickbooks-config";
 import { getCurrentOrganization } from "../_lib/session";
@@ -65,7 +65,7 @@ export async function disconnectQuickBooksAction(
 
       if (tokens) {
         const revoked = await revokeQuickBooksToken(
-          getQuickBooksClientCredentialsForRevoke(),
+          getQuickBooksClientCredentials(),
           tokens.refreshToken,
         );
 

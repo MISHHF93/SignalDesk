@@ -1,0 +1,172 @@
+"use client";
+
+import type { CreateGoalInput } from "@signaldesk/schemas";
+import { METRIC_CATALOG } from "@signaldesk/semantics";
+import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
+
+import type { CreateGoalAction } from "../_lib/actions";
+import { Button } from "./button";
+
+type FormStatus = "idle" | "pending" | "success" | "error";
+
+/**
+ * The Goal Intelligence Engine's one real write UI (Prompt 22,
+ * docs/product-vision-backlog.md, ADR 0035) — follows `CardActions`'
+ * `useState` + `useTransition` + direct typed-action-call pattern rather
+ * than `useActionState`'s FormData convention (this form has typed,
+ * cross-validated fields — target value needs unit conversion, currency
+ * is conditionally required — better expressed as a controlled object
+ * than parsed back out of FormData).
+ */
+export function CreateGoalForm({
+  createGoalAction,
+}: {
+  readonly createGoalAction: CreateGoalAction;
+}) {
+  const router = useRouter();
+  const [metricId, setMetricId] = useState<CreateGoalInput["metricId"]>(
+    METRIC_CATALOG[0]!.id as CreateGoalInput["metricId"],
+  );
+  const [name, setName] = useState("");
+  const [comparisonOperator, setComparisonOperator] = useState<
+    "at_most" | "at_least"
+  >("at_most");
+  const [targetValueInput, setTargetValueInput] = useState("");
+  const [currency, setCurrency] = useState("USD");
+  const [status, setStatus] = useState<FormStatus>("idle");
+  const [message, setMessage] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  const definition = METRIC_CATALOG.find((metric) => metric.id === metricId);
+  const isCurrencyMetric = definition?.unit === "currency";
+
+  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const parsedTargetValue = Number(targetValueInput);
+
+    if (!Number.isFinite(parsedTargetValue) || parsedTargetValue < 0) {
+      setStatus("error");
+      setMessage("Enter a target value of 0 or more.");
+      return;
+    }
+
+    const targetValue = isCurrencyMetric
+      ? Math.round(parsedTargetValue * 100)
+      : Math.round(parsedTargetValue);
+
+    setStatus("pending");
+    setMessage(null);
+
+    startTransition(async () => {
+      const result = await createGoalAction({
+        metricId,
+        name: name.trim() || `${definition?.name ?? metricId} target`,
+        comparisonOperator,
+        targetValue,
+        currency: isCurrencyMetric ? currency : null,
+        idempotencyKey: `goal-form:${metricId}:${comparisonOperator}:${targetValue}:${Date.now()}`,
+      });
+
+      if (result.ok) {
+        setStatus("success");
+        setMessage(
+          result.goal.created
+            ? `Added "${result.goal.name}".`
+            : `Already added "${result.goal.name}" — no duplicate was made.`,
+        );
+        setName("");
+        setTargetValueInput("");
+        // The goals list and any resulting goal.at_risk card are both
+        // server-rendered from data fetched before this submission —
+        // refresh so the new goal (and its real status) actually appears
+        // without a manual reload, the same gap a plain success message
+        // alone would leave.
+        router.refresh();
+      } else {
+        setStatus("error");
+        setMessage(result.error);
+      }
+    });
+  }
+
+  return (
+    <form className="goalForm" onSubmit={handleSubmit}>
+      <div className="goalFormRow">
+        <label>
+          Metric
+          <select
+            value={metricId}
+            onChange={(event) =>
+              setMetricId(event.target.value as CreateGoalInput["metricId"])
+            }
+          >
+            {METRIC_CATALOG.map((metric) => (
+              <option key={metric.id} value={metric.id}>
+                {metric.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Comparison
+          <select
+            value={comparisonOperator}
+            onChange={(event) =>
+              setComparisonOperator(
+                event.target.value as "at_most" | "at_least",
+              )
+            }
+          >
+            <option value="at_most">at most</option>
+            <option value="at_least">at least</option>
+          </select>
+        </label>
+        <label>
+          Target {isCurrencyMetric ? "(USD)" : ""}
+          <input
+            type="number"
+            min={0}
+            step={isCurrencyMetric ? "0.01" : "1"}
+            value={targetValueInput}
+            onChange={(event) => setTargetValueInput(event.target.value)}
+            placeholder={isCurrencyMetric ? "50000" : "10"}
+            required
+          />
+        </label>
+        {isCurrencyMetric ? (
+          <label>
+            Currency
+            <input
+              type="text"
+              maxLength={3}
+              value={currency}
+              onChange={(event) =>
+                setCurrency(event.target.value.toUpperCase())
+              }
+              required
+            />
+          </label>
+        ) : null}
+      </div>
+      <label>
+        Name (optional)
+        <input
+          type="text"
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder={`e.g. "${definition?.name ?? "Metric"} target"`}
+        />
+      </label>
+      <Button type="submit" variant="secondary" disabled={isPending}>
+        {isPending ? "Adding…" : "Add goal"}
+      </Button>
+      {message ? (
+        <p className={`goalFormStatus goalFormStatus-${status}`} role="status">
+          {message}
+        </p>
+      ) : null}
+    </form>
+  );
+}

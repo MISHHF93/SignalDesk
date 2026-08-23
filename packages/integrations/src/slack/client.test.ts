@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { UpstreamProviderError } from "../shared/upstream-error";
 import {
   buildSlackAuthorizationUrl,
   exchangeSlackAuthorizationCode,
@@ -83,9 +84,19 @@ describe("exchangeSlackAuthorizationCode", () => {
       jsonResponse(200, { ok: false, error: "invalid_code" }),
     );
 
-    await expect(
-      exchangeSlackAuthorizationCode(CONFIG, "bad-code"),
-    ).rejects.toThrow(/invalid_code/);
+    let thrown: unknown;
+
+    try {
+      await exchangeSlackAuthorizationCode(CONFIG, "bad-code");
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(UpstreamProviderError);
+    const error = thrown as UpstreamProviderError;
+    expect(error.message).not.toContain("invalid_code");
+    expect(error.message).toContain("Slack token exchange failed");
+    expect(error.rawDetail).toBe("invalid_code");
   });
 
   it("retries on a 5xx before succeeding, reusing the shared retry policy", async () => {

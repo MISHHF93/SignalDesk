@@ -13,6 +13,15 @@ export interface OrganizationBusinessProfile {
    * calculations count only the organization's own working days.
    */
   readonly workingDaysBitmask: number;
+  /**
+   * `"unspecified"` or `"professional_services"` (0033/ADR 0019) — kept as
+   * a plain string here, not the `OrganizationIndustry` union from
+   * `@signaldesk/integrations`, since this package doesn't depend on that
+   * one (matches how `BusinessDomainPurpose` is independently redeclared
+   * in `apps/web/app/_lib/business-snapshot.ts`). Validated at the Zod
+   * boundary (`@signaldesk/schemas`), not here.
+   */
+  readonly industry: string;
 }
 
 interface BusinessProfileRow {
@@ -20,6 +29,7 @@ interface BusinessProfileRow {
   readonly default_expected_response_hours: number;
   readonly high_value_threshold_cents: string;
   readonly working_days_bitmask: number;
+  readonly industry: string;
 }
 
 function toProfile(row: BusinessProfileRow): OrganizationBusinessProfile {
@@ -28,6 +38,7 @@ function toProfile(row: BusinessProfileRow): OrganizationBusinessProfile {
     defaultExpectedResponseHours: row.default_expected_response_hours,
     highValueThresholdCents: Number(row.high_value_threshold_cents),
     workingDaysBitmask: row.working_days_bitmask,
+    industry: row.industry,
   };
 }
 
@@ -37,7 +48,7 @@ export async function getOrganizationBusinessProfile(
 ): Promise<OrganizationBusinessProfile> {
   return withTenantContext(pool, organizationId, async (client) => {
     const result = await client.query<BusinessProfileRow>(
-      `select timezone, default_expected_response_hours, high_value_threshold_cents, working_days_bitmask
+      `select timezone, default_expected_response_hours, high_value_threshold_cents, working_days_bitmask, industry
        from organizations where id = $1`,
       [organizationId],
     );
@@ -61,6 +72,7 @@ export interface UpdateOrganizationBusinessProfileInput {
   readonly defaultExpectedResponseHours?: number | undefined;
   readonly highValueThresholdCents?: number | undefined;
   readonly workingDaysBitmask?: number | undefined;
+  readonly industry?: string | undefined;
 }
 
 /**
@@ -84,15 +96,17 @@ export async function updateOrganizationBusinessProfile(
        set timezone = coalesce($2, timezone),
            default_expected_response_hours = coalesce($3, default_expected_response_hours),
            high_value_threshold_cents = coalesce($4, high_value_threshold_cents),
-           working_days_bitmask = coalesce($5, working_days_bitmask)
+           working_days_bitmask = coalesce($5, working_days_bitmask),
+           industry = coalesce($6, industry)
        where id = $1
-       returning timezone, default_expected_response_hours, high_value_threshold_cents, working_days_bitmask`,
+       returning timezone, default_expected_response_hours, high_value_threshold_cents, working_days_bitmask, industry`,
       [
         organizationId,
         input.timezone ?? null,
         input.defaultExpectedResponseHours ?? null,
         input.highValueThresholdCents ?? null,
         input.workingDaysBitmask ?? null,
+        input.industry ?? null,
       ],
     );
     const row = result.rows[0];

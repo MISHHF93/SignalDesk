@@ -1,0 +1,27 @@
+-- PostgreSQL grants EXECUTE on new functions to PUBLIC by default, which
+-- Supabase's PostgREST layer turns into an anonymous/authenticated RPC
+-- endpoint (e.g. POST /rest/v1/rpc/list_stripe_linked_subscriptions) --
+-- exactly the class of bug migration 0008 already fixed once for the
+-- identity-provisioning functions, repeated here: migrations 0055b and
+-- 0056 each created a SECURITY DEFINER function and granted EXECUTE to
+-- app_runtime, but never revoked the PUBLIC default, leaving both
+-- callable directly over the REST API by anon/authenticated -- a real
+-- cross-tenant enumeration bypass independent of this app's own auth
+-- layer. Confirmed live via mcp__claude_ai_Supabase__get_advisors and
+-- information_schema.role_routine_grants (both anon and authenticated
+-- held EXECUTE) before writing this fix, not assumed.
+--
+-- list_active_organization_ids() returns every organization's id --
+-- confirmed exploitable enumeration, though ids alone are a narrower
+-- leak. list_stripe_linked_subscriptions() is the more serious one: it
+-- returns every organization's stripe_customer_id, stripe_subscription_id,
+-- and live billing status (trial/period/cancellation dates) -- real
+-- cross-tenant billing data, not just ids.
+--
+-- Revoking from `public` removes the implicit default; also revoking
+-- from `anon`/`authenticated` explicitly matches 0008's own
+-- belt-and-suspenders pattern in case either was ever granted some other
+-- way. `app_runtime` and `scheduled_job_runner` keep their own explicit
+-- grants from 0055b/0056 -- this migration touches nothing else.
+revoke execute on function public.list_active_organization_ids() from public, anon, authenticated;
+revoke execute on function public.list_stripe_linked_subscriptions() from public, anon, authenticated;

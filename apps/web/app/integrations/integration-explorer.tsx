@@ -1,14 +1,14 @@
 "use client";
 
 import type {
+  ConnectorCapabilityClass,
   ConnectorDefinition,
-  ConnectorPurpose,
 } from "@signaldesk/integrations";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { ConnectorMark } from "../_components/connector-mark";
-import { purposeLabels } from "../_lib/connector-labels";
+import { capabilityClassLabels } from "../_lib/connector-labels";
 
 function directionLabel(direction: ConnectorDefinition["direction"]): string {
   if (direction === "inbound") return "Inbound design";
@@ -22,29 +22,37 @@ export function IntegrationExplorer({
   connectors: readonly ConnectorDefinition[];
 }) {
   const [query, setQuery] = useState("");
-  const [purpose, setPurpose] = useState<ConnectorPurpose | "all">("all");
-  const purposes = useMemo(
-    () => Array.from(new Set(connectors.map((connector) => connector.purpose))),
+  const [capabilityClass, setCapabilityClass] = useState<
+    ConnectorCapabilityClass | "all"
+  >("all");
+  const capabilityClasses = useMemo(
+    () =>
+      Array.from(
+        new Set(connectors.flatMap((connector) => connector.capabilityClasses)),
+      ),
     [connectors],
   );
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const filteredConnectors = useMemo(
     () =>
       connectors.filter((connector) => {
-        const matchesPurpose =
-          purpose === "all" || connector.purpose === purpose;
+        const matchesCapabilityClass =
+          capabilityClass === "all" ||
+          connector.capabilityClasses.includes(capabilityClass);
         const searchText = [
           connector.name,
           connector.shortDescription,
-          purposeLabels[connector.purpose],
+          ...connector.capabilityClasses.map(
+            (entry) => capabilityClassLabels[entry],
+          ),
           ...connector.capabilities.map((capability) => capability.label),
         ]
           .join(" ")
           .toLocaleLowerCase();
 
-        return matchesPurpose && searchText.includes(normalizedQuery);
+        return matchesCapabilityClass && searchText.includes(normalizedQuery);
       }),
-    [purpose, connectors, normalizedQuery],
+    [capabilityClass, connectors, normalizedQuery],
   );
 
   return (
@@ -83,23 +91,23 @@ export function IntegrationExplorer({
         <div
           className="categoryFilters"
           role="group"
-          aria-label="Filter by business purpose"
+          aria-label="Filter by business capability"
         >
           <button
-            aria-pressed={purpose === "all"}
-            onClick={() => setPurpose("all")}
+            aria-pressed={capabilityClass === "all"}
+            onClick={() => setCapabilityClass("all")}
             type="button"
           >
             All
           </button>
-          {purposes.map((item) => (
+          {capabilityClasses.map((item) => (
             <button
-              aria-pressed={purpose === item}
+              aria-pressed={capabilityClass === item}
               key={item}
-              onClick={() => setPurpose(item)}
+              onClick={() => setCapabilityClass(item)}
               type="button"
             >
-              {purposeLabels[item]}
+              {capabilityClassLabels[item]}
             </button>
           ))}
         </div>
@@ -124,7 +132,7 @@ export function IntegrationExplorer({
                 </div>
 
                 <p className="connectorCategory">
-                  {purposeLabels[connector.purpose]}
+                  {capabilityClassLabels[connector.capabilityClasses[0]!]}
                 </p>
                 <h3>{connector.name}</h3>
                 <p className="connectorDescription">
@@ -170,7 +178,7 @@ export function IntegrationExplorer({
           <button
             onClick={() => {
               setQuery("");
-              setPurpose("all");
+              setCapabilityClass("all");
             }}
             type="button"
           >

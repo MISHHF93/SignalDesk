@@ -21,13 +21,15 @@
     "db:generate": "pnpm --filter @signaldesk/persistence db:generate",
     "db:check": "pnpm --filter @signaldesk/persistence db:check",
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm db:check && pnpm build",
-    "test:production": "node apps/web/scripts/production-readiness-check.mjs"
+    "test:production": "node apps/web/scripts/production-readiness-check.mjs",
+    "launch:canary": "node apps/web/scripts/launch-canary.mjs"
   },
   "devDependencies": {
     "@types/node": "24.13.3",
     "autocannon": "8.0.0",
     "eslint": "9.39.5",
     "eslint-config-next": "16.3.1",
+    "playwright": "1.62.1",
     "prettier": "3.9.6",
     "typescript": "6.0.3",
     "vitest": "4.1.11"

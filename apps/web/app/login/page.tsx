@@ -13,9 +13,14 @@ const OAUTH_ERROR_MESSAGE =
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string; error?: string }>;
+  searchParams: Promise<{
+    next?: string;
+    error?: string;
+    deleted?: string;
+    reset?: string;
+  }>;
 }) {
-  const { next: rawNext, error } = await searchParams;
+  const { next: rawNext, error, deleted, reset } = await searchParams;
   const next = safeNextPath(rawNext);
   // Checks the sanitized value, not merely whether a `next` param was
   // present: `safeNextPath` falls back to exactly "/" for a missing OR
@@ -39,6 +44,22 @@ export default async function LoginPage({
         {error === "oauth" ? (
           <p className="authError" role="alert">
             {OAUTH_ERROR_MESSAGE}
+          </p>
+        ) : null}
+        {deleted === "1" ? (
+          <p
+            className="hubspotSyncStatus hubspotSyncStatus-connected"
+            role="status"
+          >
+            Your organization and its data have been deleted.
+          </p>
+        ) : null}
+        {reset === "1" ? (
+          <p
+            className="hubspotSyncStatus hubspotSyncStatus-connected"
+            role="status"
+          >
+            Your password has been updated. Sign in with your new password.
           </p>
         ) : null}
         <LoginForm next={next} />

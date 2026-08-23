@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 
 import {
+  cancelOrphanedSubscription,
   createStripeBillingClient,
   createStripeCustomer,
   createSubscriptionWithImmediatePayment,
@@ -17,6 +18,7 @@ import {
   getRedeemablePromoPrice,
   recordPromoRedemption,
   resurrectOrganizationSubscription,
+  withAdvisoryLock,
   type DatabasePool,
   type SubscriptionStatus,
 } from "@signaldesk/persistence";
@@ -93,7 +95,8 @@ export async function startCheckoutAction(
     };
   }
 
-  const rateLimit = checkRateLimit(
+  const rateLimit = await checkRateLimit(
+    getPool(),
     `start-checkout:${session.organizationId}`,
     10,
     60 * 60 * 1000,
@@ -133,104 +136,207 @@ export async function startCheckoutAction(
   // `redirect()` throws a special Next.js control-flow error that must
   // propagate uncaught — it cannot be called from inside the try block
   // below, or the catch clause would mistake it for a real failure. The
-  // trial path instead sets this flag and redirects after the try/catch
-  // has fully exited.
+  // trial path instead sets this flag and redirects after the lock has
+  // fully released.
   let trialStarted = false;
 
-  const outcome = await (async (): Promise<StartCheckoutState> => {
-    try {
-      const db = getPool();
+  // A real, cross-instance Postgres advisory lock (`withAdvisoryLock`,
+  // `@signaldesk/persistence`) — the existing-subscription check below and
+  // the real Stripe customer+subscription creation are not atomic, so two
+  // concurrent requests for the same organization could both pass the
+  // check and each create a live, billed Stripe subscription; only one
+  // can win the local insert (`organization_subscriptions_org_unique`),
+  // leaving the other's Stripe subscription orphaned with no local
+  // record. Non-blocking: `lockResult` is `null` when another request
+  // already holds this organization's lock, rather than queuing behind
+  // it.
+  const lockResult = await withAdvisoryLock(
+    getPool(),
+    `start-checkout:${session.organizationId}`,
+    async (): Promise<StartCheckoutState> => {
+      try {
+        const db = getPool();
 
-      const existing = await getOrganizationSubscription(
-        db,
-        session.organizationId,
-      );
+        const existing = await getOrganizationSubscription(
+          db,
+          session.organizationId,
+        );
 
-      if (existing && !RESUBSCRIBABLE_STATUSES.has(existing.status)) {
-        return {
-          error:
-            "Your organization already has a subscription on file. Contact support to change it.",
-          clientSecret: null,
-        };
-      }
+        if (existing && !RESUBSCRIBABLE_STATUSES.has(existing.status)) {
+          return {
+            error:
+              "Your organization already has a subscription on file. Contact support to change it.",
+            clientSecret: null,
+          };
+        }
 
-      // A prior subscription fully ended — resurrect the same row into a
-      // brand new Stripe subscription rather than inserting a second one
-      // (organization_subscriptions_org_unique allows only one row per
-      // organization; see resurrectOrganizationSubscription's doc comment).
-      const isResubscribing = existing !== null;
+        // A prior subscription fully ended — resurrect the same row into
+        // a brand new Stripe subscription rather than inserting a second
+        // one (organization_subscriptions_org_unique allows only one row
+        // per organization; see resurrectOrganizationSubscription's doc
+        // comment).
+        const isResubscribing = existing !== null;
 
-      const plan = await getPlanByKey(db, planKey);
+        const plan = await getPlanByKey(db, planKey);
 
-      if (!plan || !plan.supportsSelfServeCheckout) {
-        return {
-          error: "That plan isn't available for self-serve checkout.",
-          clientSecret: null,
-        };
-      }
+        if (!plan || !plan.supportsSelfServeCheckout) {
+          return {
+            error: "That plan isn't available for self-serve checkout.",
+            clientSecret: null,
+          };
+        }
 
-      const price =
-        typeof promoKey === "string" && promoKey
-          ? await getRedeemablePromoPrice(db, promoKey)
-          : await getCurrentStandardPrice(db, planKey, billingInterval);
+        const price =
+          typeof promoKey === "string" && promoKey
+            ? await getRedeemablePromoPrice(db, promoKey)
+            : await getCurrentStandardPrice(db, planKey, billingInterval);
 
-      if (!price || price.planKey !== planKey) {
-        return {
-          error:
-            typeof promoKey === "string" && promoKey
-              ? "This promotional offer is no longer available."
-              : "Pricing for that plan isn't available right now.",
-          clientSecret: null,
-        };
-      }
+        if (!price || price.planKey !== planKey) {
+          return {
+            error:
+              typeof promoKey === "string" && promoKey
+                ? "This promotional offer is no longer available."
+                : "Pricing for that plan isn't available right now.",
+            clientSecret: null,
+          };
+        }
 
-      const stripePriceId = resolveStripePriceId(price);
+        const stripePriceId = resolveStripePriceId(price);
 
-      if (!stripePriceId) {
-        return {
-          error: "This plan isn't available for checkout yet.",
-          clientSecret: null,
-        };
-      }
+        if (!stripePriceId) {
+          return {
+            error: "This plan isn't available for checkout yet.",
+            clientSecret: null,
+          };
+        }
 
-      const stripe = createStripeBillingClient(getStripeSecretKey());
-      const customer = await createStripeCustomer(stripe, {
-        email,
-        organizationId: session.organizationId,
-      });
-      const stripeMode = getStripeMode();
+        const stripe = createStripeBillingClient(getStripeSecretKey());
+        const customer = await createStripeCustomer(stripe, {
+          email,
+          organizationId: session.organizationId,
+        });
+        const stripeMode = getStripeMode();
 
-      if (wantsTrial) {
-        const trial = await createTrialSubscription(stripe, {
+        if (wantsTrial) {
+          const trial = await createTrialSubscription(stripe, {
+            customerId: customer.id,
+            priceId: stripePriceId,
+            trialDays: 14,
+          });
+
+          const trialSubscriptionInput = {
+            planId: plan.id,
+            planPriceId: price.id,
+            status: "trialing" as const,
+            stripeCustomerId: customer.id,
+            stripeSubscriptionId: trial.subscriptionId,
+            stripeMode,
+            trialEndsAt: trial.trialEndsAt,
+            currentPeriodStart: null,
+            currentPeriodEnd: null,
+          };
+          let savedTrial;
+
+          try {
+            savedTrial = isResubscribing
+              ? await resurrectOrganizationSubscription(
+                  db,
+                  session.organizationId,
+                  trialSubscriptionInput,
+                )
+              : await createOrganizationSubscription(
+                  db,
+                  session.organizationId,
+                  trialSubscriptionInput,
+                );
+          } catch (saveError) {
+            await cancelOrphanedSubscription(
+              stripe,
+              trial.subscriptionId,
+            ).catch((cancelError: unknown) => {
+              console.error(
+                `Failed to cancel orphaned trial subscription ${trial.subscriptionId} after a local save error for organization ${session.organizationId}; needs manual Stripe reconciliation`,
+                cancelError,
+              );
+            });
+            throw saveError;
+          }
+
+          if (!savedTrial) {
+            await cancelOrphanedSubscription(
+              stripe,
+              trial.subscriptionId,
+            ).catch((cancelError: unknown) => {
+              console.error(
+                `Failed to cancel orphaned trial subscription ${trial.subscriptionId} after resurrectOrganizationSubscription returned null for organization ${session.organizationId}; needs manual Stripe reconciliation`,
+                cancelError,
+              );
+            });
+            return {
+              error: "Checkout failed. Please try again.",
+              clientSecret: null,
+            };
+          }
+
+          if (price.promoKey) {
+            await recordPromoRedemption(db, price.id);
+          }
+
+          trialStarted = true;
+          return { error: null, clientSecret: null };
+        }
+
+        const result = await createSubscriptionWithImmediatePayment(stripe, {
           customerId: customer.id,
           priceId: stripePriceId,
-          trialDays: 14,
         });
 
-        const trialSubscriptionInput = {
+        const paidSubscriptionInput = {
           planId: plan.id,
           planPriceId: price.id,
-          status: "trialing" as const,
+          status: "incomplete" as const,
           stripeCustomerId: customer.id,
-          stripeSubscriptionId: trial.subscriptionId,
+          stripeSubscriptionId: result.subscriptionId,
           stripeMode,
-          trialEndsAt: trial.trialEndsAt,
+          trialEndsAt: null,
           currentPeriodStart: null,
           currentPeriodEnd: null,
         };
-        const savedTrial = isResubscribing
-          ? await resurrectOrganizationSubscription(
-              db,
-              session.organizationId,
-              trialSubscriptionInput,
-            )
-          : await createOrganizationSubscription(
-              db,
-              session.organizationId,
-              trialSubscriptionInput,
-            );
+        let savedSubscription;
 
-        if (!savedTrial) {
+        try {
+          savedSubscription = isResubscribing
+            ? await resurrectOrganizationSubscription(
+                db,
+                session.organizationId,
+                paidSubscriptionInput,
+              )
+            : await createOrganizationSubscription(
+                db,
+                session.organizationId,
+                paidSubscriptionInput,
+              );
+        } catch (saveError) {
+          await cancelOrphanedSubscription(stripe, result.subscriptionId).catch(
+            (cancelError: unknown) => {
+              console.error(
+                `Failed to cancel orphaned subscription ${result.subscriptionId} after a local save error for organization ${session.organizationId}; needs manual Stripe reconciliation`,
+                cancelError,
+              );
+            },
+          );
+          throw saveError;
+        }
+
+        if (!savedSubscription) {
+          await cancelOrphanedSubscription(stripe, result.subscriptionId).catch(
+            (cancelError: unknown) => {
+              console.error(
+                `Failed to cancel orphaned subscription ${result.subscriptionId} after resurrectOrganizationSubscription returned null for organization ${session.organizationId}; needs manual Stripe reconciliation`,
+                cancelError,
+              );
+            },
+          );
           return {
             error: "Checkout failed. Please try again.",
             clientSecret: null,
@@ -241,61 +347,27 @@ export async function startCheckoutAction(
           await recordPromoRedemption(db, price.id);
         }
 
-        trialStarted = true;
-        return { error: null, clientSecret: null };
-      }
-
-      const result = await createSubscriptionWithImmediatePayment(stripe, {
-        customerId: customer.id,
-        priceId: stripePriceId,
-      });
-
-      const paidSubscriptionInput = {
-        planId: plan.id,
-        planPriceId: price.id,
-        status: "incomplete" as const,
-        stripeCustomerId: customer.id,
-        stripeSubscriptionId: result.subscriptionId,
-        stripeMode,
-        trialEndsAt: null,
-        currentPeriodStart: null,
-        currentPeriodEnd: null,
-      };
-      const savedSubscription = isResubscribing
-        ? await resurrectOrganizationSubscription(
-            db,
-            session.organizationId,
-            paidSubscriptionInput,
-          )
-        : await createOrganizationSubscription(
-            db,
-            session.organizationId,
-            paidSubscriptionInput,
-          );
-
-      if (!savedSubscription) {
+        return { error: null, clientSecret: result.clientSecret };
+      } catch (error) {
         return {
-          error: "Checkout failed. Please try again.",
+          error: describeActionError(error, "Checkout failed."),
           clientSecret: null,
         };
       }
+    },
+  );
 
-      if (price.promoKey) {
-        await recordPromoRedemption(db, price.id);
-      }
-
-      return { error: null, clientSecret: result.clientSecret };
-    } catch (error) {
-      return {
-        error: describeActionError(error, "Checkout failed."),
-        clientSecret: null,
-      };
-    }
-  })();
+  if (lockResult === null) {
+    return {
+      error:
+        "A checkout is already in progress. Please wait a moment and try again.",
+      clientSecret: null,
+    };
+  }
 
   if (trialStarted) {
     redirect("/billing/checkout/trial-started");
   }
 
-  return outcome;
+  return lockResult;
 }

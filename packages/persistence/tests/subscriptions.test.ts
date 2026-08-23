@@ -12,6 +12,7 @@ import {
   resurrectOrganizationSubscription,
   updateSubscriptionFromStripe,
 } from "../src/subscriptions";
+import { withTenantContext } from "../src/tenant-context";
 import { getTestPool, seedIntegration, seedMembership } from "./support";
 
 describe.skipIf(!process.env.DATABASE_URL)(
@@ -326,6 +327,36 @@ describe.skipIf(!process.env.DATABASE_URL)(
 
       const afterConnections = await getEntitlementUsage(pool, organizationId);
       expect(afterConnections.activeConnectionsUsed).toBe(2);
+    });
+
+    it("still counts a degraded connection against the plan's connection limit", async () => {
+      const { organizationId } = await seedMembership(pool);
+      const starter = await getPlanByKey(pool, "starter");
+
+      await createOrganizationSubscription(pool, organizationId, {
+        planId: starter?.id as string,
+        planPriceId: null,
+        status: "active",
+        stripeCustomerId: `cus_test_${organizationId}`,
+        stripeSubscriptionId: `sub_test_${organizationId}`,
+        stripeMode: "test",
+        trialEndsAt: null,
+        currentPeriodStart: null,
+        currentPeriodEnd: null,
+      });
+
+      const integration = await seedIntegration(pool, organizationId, {
+        sourceSystem: "slack",
+      });
+      await withTenantContext(pool, organizationId, async (client) => {
+        await client.query(
+          "update integrations set status = 'degraded' where id = $1",
+          [integration.id],
+        );
+      });
+
+      const usage = await getEntitlementUsage(pool, organizationId);
+      expect(usage.activeConnectionsUsed).toBe(1);
     });
 
     it("allows adding a connection under the limit and blocks it once at the limit", async () => {

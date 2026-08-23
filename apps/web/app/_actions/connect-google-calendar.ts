@@ -3,13 +3,16 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { buildGoogleCalendarAuthorizationUrl } from "@signaldesk/integrations/google-calendar";
+import {
+  buildGoogleCalendarAuthorizationUrl,
+  generatePkcePair,
+} from "@signaldesk/integrations/google-calendar";
 
 import {
   getGoogleOAuthConfig,
   isGoogleConfigured,
 } from "../_lib/google-config";
-import { issueOAuthState } from "../_lib/oauth-state";
+import { issueOAuthState, issuePkceVerifier } from "../_lib/oauth-state";
 import { getCurrentOrganization } from "../_lib/session";
 
 export interface ConnectGoogleCalendarState {
@@ -19,10 +22,12 @@ export interface ConnectGoogleCalendarState {
 const CALLBACK_PATH = "/integrations/google-calendar/callback";
 
 /**
- * Starts the real Google Calendar OAuth flow. Mirrors `connectGmailAction`
- * exactly — a genuinely separate grant from Gmail's even though both share
- * the same `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` (see
- * app/_lib/google-config.ts's doc comment).
+ * Starts the real Google Calendar OAuth flow, including a real PKCE pair
+ * (see `packages/integrations/src/shared/google-oauth.ts`'s doc comment on
+ * why this confidential client still uses PKCE). Mirrors
+ * `connectGmailAction` otherwise — a genuinely separate grant from
+ * Gmail's even though both share the same `GOOGLE_CLIENT_ID`/
+ * `GOOGLE_CLIENT_SECRET` (see app/_lib/google-config.ts's doc comment).
  */
 export async function connectGoogleCalendarAction(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- useActionState's action signature requires this parameter
@@ -41,7 +46,13 @@ export async function connectGoogleCalendarAction(
   const origin = (await headers()).get("origin") ?? "";
   const config = getGoogleOAuthConfig(origin, CALLBACK_PATH);
   const state = await issueOAuthState("google-calendar");
-  const authorizationUrl = buildGoogleCalendarAuthorizationUrl(config, state);
+  const { verifier, challenge } = generatePkcePair();
+  await issuePkceVerifier("google-calendar", verifier);
+  const authorizationUrl = buildGoogleCalendarAuthorizationUrl(
+    config,
+    state,
+    challenge,
+  );
 
   redirect(authorizationUrl);
 }

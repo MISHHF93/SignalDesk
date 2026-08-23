@@ -17,10 +17,10 @@
     "@signaldesk/domain": "workspace:*",
     "@signaldesk/schemas": "workspace:*",
     "drizzle-orm": "0.45.2",
-    "pg": "8.16.3"
+    "pg": "8.23.0"
   },
   "devDependencies": {
-    "@types/pg": "8.15.5",
+    "@types/pg": "8.23.1",
     "drizzle-kit": "0.31.10"
   }
 }

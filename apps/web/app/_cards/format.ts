@@ -10,6 +10,28 @@ export function formatCardCurrency(
   }).format(amountCents / 100);
 }
 
+/**
+ * Real event-type strings use two conventions depending on origin:
+ * underscore-separated for `internal_cost_events` (e.g.
+ * `claude_specialist_invocation`) and dot-separated `domain.action` for
+ * general `audit_events` (e.g. `sync.completed`, `integration.connected`)
+ * — split on both rather than assuming one.
+ */
+const EVENT_TYPE_WORD_OVERRIDES: Record<string, string> = {
+  ai: "AI",
+};
+
+export function formatEventType(eventType: string): string {
+  return eventType
+    .split(/[._]/)
+    .map(
+      (word) =>
+        EVENT_TYPE_WORD_OVERRIDES[word.toLowerCase()] ??
+        word.charAt(0).toUpperCase() + word.slice(1),
+    )
+    .join(" ");
+}
+
 export function formatRelativeTime(date: Date, now: Date): string {
   const elapsedMinutes = Math.max(
     0,

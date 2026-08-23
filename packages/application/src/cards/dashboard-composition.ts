@@ -1,6 +1,7 @@
-import type {
-  IntelligenceType,
-  PrioritizedFinding,
+import {
+  correlateFindingsByName,
+  type IntelligenceType,
+  type PrioritizedFinding,
 } from "@signaldesk/intelligence";
 import type {
   ActionProposal,
@@ -10,27 +11,52 @@ import type {
 
 /**
  * Which findings currently have a registered UI presentation. A finding
- * type with no entry here (for example `lead.ownership_gap`, which nothing
- * in today's data ever triggers) is deliberately not composed into a card —
+ * type with no entry here is deliberately not composed into a card —
  * building unused UI for it now would be exactly the premature-building the
  * AI Business Node mission warns against. Add an entry once a real card
  * type exists for it.
+ *
+ * `lead.ownership_gap` was the one real gap here (frontend/backend audit,
+ * 2026-08-21): `ownershipIntelligence` was already registered and
+ * evaluating on every render, but this map had no entry for it, so
+ * `composeCards` silently dropped the finding before it ever reached a
+ * card — not a hypothetical, since every real HubSpot-ingested lead has
+ * `owner: null` today (the Associations/Contacts API is never called at
+ * ingest), so this finding fires on essentially every real connected lead.
  */
 const CARD_TYPE_BY_FINDING_TYPE: Partial<Record<IntelligenceType, CardType>> = {
-  "lead.untouched": "stuck",
   "lead.follow_up_risk": "lead_risk",
   "integration.unconnected": "integration_health",
+  "lead.ownership_gap": "ownership_gap",
   "invoice.overdue": "invoice_risk",
   "task.overdue": "task_risk",
+  "agent.investigation": "agent_recommendation",
+  "payment.received": "payment_received",
+  "goal.at_risk": "goal_variance",
+  "message.awaiting_reply": "message_follow_up",
+  "ticket.stuck": "ticket_risk",
 };
 
 function buildActionProposals(finding: PrioritizedFinding): ActionProposal[] {
+  // Every registered deterministic capability (packages/intelligence's
+  // registry.ts — 9 today, a number worth re-checking rather than trusting
+  // this comment, since it has already gone stale once as capabilities were
+  // added) leaves generatedBy undefined and keeps emitting exactly what
+  // this produced before the Agent Fabric existed. Only a reconciled
+  // agent.investigation finding
+  // (agent-result-reconciler.ts) sets generatedBy: "agent", which is the
+  // one case that must require approval — see actionProposalSchema's
+  // riskClass/requiresApproval pairing invariant, @signaldesk/schemas.
+  const isAgentAuthored = finding.generatedBy === "agent";
+
   return (finding.recommendedActionTypes ?? []).map((actionType) => ({
     id: `${finding.id}:${actionType}`,
     actionType,
-    riskClass: "low_risk_internal",
+    riskClass: isAgentAuthored
+      ? "agent_assisted_internal"
+      : "low_risk_internal",
     label: "Create follow-up task",
-    requiresApproval: false,
+    requiresApproval: isAgentAuthored,
   }));
 }
 
@@ -43,6 +69,12 @@ export function composeCards(
   findings: readonly PrioritizedFinding[],
 ): readonly IntelligenceCard[] {
   const cards: IntelligenceCard[] = [];
+  // Computed against exactly this list — deliberately not the pre-
+  // admission full finding set, since a `relatedFindingIds` entry that
+  // pointed at a deferred (unrendered) card would be a dead reference;
+  // see `correlateFindingsByName`'s own doc comment for why this is a
+  // presentation hint, not a merge.
+  const correlationGroups = correlateFindingsByName(findings);
 
   for (const finding of findings) {
     const cardType = CARD_TYPE_BY_FINDING_TYPE[finding.type];
@@ -50,6 +82,11 @@ export function composeCards(
     if (!cardType) {
       continue;
     }
+
+    const correlationGroup = correlationGroups.get(finding.id);
+    const relatedFindingIds = correlationGroup?.findingIds.filter(
+      (id) => id !== finding.id,
+    );
 
     cards.push({
       id: finding.id,
@@ -67,6 +104,9 @@ export function composeCards(
         : {}),
       recommendedActions: buildActionProposals(finding),
       freshness: finding.freshness,
+      ...(relatedFindingIds && relatedFindingIds.length > 0
+        ? { relatedFindingIds }
+        : {}),
     });
   }
 

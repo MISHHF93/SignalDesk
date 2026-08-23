@@ -1,9 +1,18 @@
-// Production smoke test + lightweight load test, run against a real
-// `next start` (production mode, not `next dev`) instance — this repo has
-// never exercised production mode before this script existed. Requires
-// `pnpm build` to have already produced `.next/`.
+// Production smoke test + lightweight load test. Two modes:
+//   1. Local (default): spawns a real `next start` (production mode, not
+//      `next dev`) instance and tests that — requires `pnpm build` to have
+//      already produced `.next/`. Verifies the build, not a live deploy.
+//   2. Remote (`--url`): tests an already-deployed URL directly, no local
+//      server spawned — the actual "verify the live deployment" case
+//      named in docs/deployment-runbook.md, run right after a real Vercel
+//      deploy. Skips the load-test pass by default against a remote URL
+//      (a 10-connection/10s burst against someone else's production
+//      traffic is a real-world load test, not a smoke test — pass
+//      `--load` to opt in deliberately).
 //
-// Usage: node scripts/production-readiness-check.mjs [--port 3100]
+// Usage:
+//   node scripts/production-readiness-check.mjs [--port 3100]
+//   node scripts/production-readiness-check.mjs --url https://your-deploy.vercel.app [--load]
 
 import { execFileSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -20,7 +29,13 @@ const PORT =
   portFlagIndex !== -1 && args[portFlagIndex + 1]
     ? Number(args[portFlagIndex + 1])
     : 3100;
-const BASE_URL = `http://localhost:${PORT}`;
+const urlFlagIndex = args.indexOf("--url");
+const REMOTE_URL =
+  urlFlagIndex !== -1 && args[urlFlagIndex + 1] ? args[urlFlagIndex + 1] : null;
+const RUN_LOAD_TEST = REMOTE_URL === null || args.includes("--load");
+const BASE_URL = REMOTE_URL
+  ? REMOTE_URL.replace(/\/+$/, "")
+  : `http://localhost:${PORT}`;
 const READY_TIMEOUT_MS = 30_000;
 
 // [path, expected HTTP status]. Ground truth taken from the same routes'
@@ -39,7 +54,12 @@ const SMOKE_ROUTES = [
   ["/profile", 200],
   ["/billing", 200],
   ["/briefs", 200],
+  ["/legal/terms", 200],
+  ["/legal/privacy", 200],
+  ["/support", 200],
   ["/api/business/snapshot", 401],
+  ["/api/health", 200],
+  ["/api/cron/morning-brief", 401],
 ];
 
 // Routes worth a load-test pass: both render a real page for a
@@ -172,36 +192,55 @@ function printLoadResult(path, stats) {
 }
 
 async function main() {
-  console.log(`Starting production server on port ${PORT}...`);
-  const { child, getOutput } = startProductionServer();
+  let cleanup = () => {};
 
-  const cleanup = () => {
-    killServerTree(child);
-  };
-  process.on("exit", cleanup);
-  process.on("SIGINT", () => {
-    cleanup();
-    process.exit(130);
-  });
+  if (REMOTE_URL) {
+    console.log(`Testing already-deployed URL: ${BASE_URL}`);
+    const reachable = await waitForReady(Date.now() + READY_TIMEOUT_MS);
+    if (!reachable) {
+      console.error(
+        `${BASE_URL}/login did not respond within ${READY_TIMEOUT_MS}ms.`,
+      );
+      process.exit(1);
+    }
+  } else {
+    console.log(`Starting production server on port ${PORT}...`);
+    const { child, getOutput } = startProductionServer();
 
-  const ready = await waitForReady(Date.now() + READY_TIMEOUT_MS);
-  if (!ready) {
-    console.error(
-      `Production server did not become ready within ${READY_TIMEOUT_MS}ms.`,
-    );
-    console.error("Server output so far:\n" + getOutput());
-    cleanup();
-    process.exit(1);
+    cleanup = () => {
+      killServerTree(child);
+    };
+    process.on("exit", cleanup);
+    process.on("SIGINT", () => {
+      cleanup();
+      process.exit(130);
+    });
+
+    const ready = await waitForReady(Date.now() + READY_TIMEOUT_MS);
+    if (!ready) {
+      console.error(
+        `Production server did not become ready within ${READY_TIMEOUT_MS}ms.`,
+      );
+      console.error("Server output so far:\n" + getOutput());
+      cleanup();
+      process.exit(1);
+    }
+    console.log("Production server is ready.");
   }
-  console.log("Production server is ready.");
 
   const smokeResults = await runSmokeChecks();
   printSmokeResults(smokeResults);
   const smokeFailed = smokeResults.some((result) => !result.pass);
 
-  for (const path of LOAD_TEST_ROUTES) {
-    const stats = await runLoadTest(path);
-    printLoadResult(path, stats);
+  if (RUN_LOAD_TEST) {
+    for (const path of LOAD_TEST_ROUTES) {
+      const stats = await runLoadTest(path);
+      printLoadResult(path, stats);
+    }
+  } else {
+    console.log(
+      "\nSkipping load test against a remote deployment (pass --load to run it deliberately).",
+    );
   }
 
   cleanup();

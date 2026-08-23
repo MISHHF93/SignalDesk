@@ -10,7 +10,10 @@ import {
 } from "@signaldesk/persistence";
 
 import { getGoogleOAuthConfig } from "../../../_lib/google-config";
-import { consumeOAuthState } from "../../../_lib/oauth-state";
+import {
+  consumeOAuthState,
+  consumePkceVerifier,
+} from "../../../_lib/oauth-state";
 import { checkRateLimit, getClientIp } from "../../../_lib/rate-limit";
 import { getCurrentOrganization } from "../../../_lib/session";
 
@@ -26,7 +29,8 @@ function getPool() {
 /**
  * Completes the Google Calendar OAuth flow: stores tokens in Vault and
  * records which Google account connected. No data sync yet — mirrors the
- * other callbacks' structure exactly.
+ * other callbacks' structure, plus a real PKCE `code_verifier` exchange
+ * (see `google-oauth.ts`'s doc comment on why).
  */
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
@@ -47,7 +51,8 @@ export async function GET(request: Request) {
     return redirectTo("error");
   }
 
-  const rateLimit = checkRateLimit(
+  const rateLimit = await checkRateLimit(
+    getPool(),
     `google-calendar-callback:${await getClientIp()}`,
     20,
     60 * 60 * 1000,
@@ -69,8 +74,9 @@ export async function GET(request: Request) {
   // browser was issued when it started the flow (RFC 6749 §10.12) — never
   // trust a client-supplied value alone.
   const stateIsValid = await consumeOAuthState("google-calendar", state);
+  const codeVerifier = await consumePkceVerifier("google-calendar");
 
-  if (!stateIsValid) {
+  if (!stateIsValid || !codeVerifier) {
     return redirectTo("error");
   }
 
@@ -84,7 +90,11 @@ export async function GET(request: Request) {
 
   try {
     const config = getGoogleOAuthConfig(origin, CALLBACK_PATH);
-    const tokens = await exchangeGoogleCalendarAuthorizationCode(config, code);
+    const tokens = await exchangeGoogleCalendarAuthorizationCode(
+      config,
+      code,
+      codeVerifier,
+    );
 
     const integration = await findOrCreateGoogleCalendarIntegration(
       getPool(),

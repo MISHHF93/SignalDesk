@@ -4,11 +4,17 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { DatabasePool } from "../src/client";
 import { ingestHubSpotDeal } from "../src/hubspot-sync";
-import { getPriorityLead } from "../src/leads";
+import { listLeadsForAttention } from "../src/leads";
 import { withTenantContext } from "../src/tenant-context";
-import { getTestPool, seedIntegration, seedOrganization } from "./support";
+import {
+  getTestPool,
+  seedIntegration,
+  seedOrganization,
+  seedSyncJob,
+} from "./support";
 
 function fixtureInput(
+  syncJobId: string,
   overrides: Partial<Parameters<typeof ingestHubSpotDeal>[3]> = {},
 ) {
   return {
@@ -25,15 +31,19 @@ function fixtureInput(
     expectedResponseHours: 24,
     sourceCreatedAt: new Date("2026-08-17T17:00:00.000Z"),
     lastInteractionAt: null,
+    syncJobId,
+    ownerName: null,
     ...overrides,
   };
 }
 
-// Exercises getPriorityLead against the live database — the join across
-// leads/source_records/memberships/users, and the "oldest untouched lead
-// first, else most recent" selection heuristic.
+// Exercises listLeadsForAttention against the live database — the join
+// across leads/source_records/memberships/users, the "oldest untouched
+// lead first, else most recent" ordering, and the multi-lead cap
+// (`MAX_LEADS_FOR_ATTENTION`) that replaced the previous single-record
+// `getPriorityLead` stopgap.
 describe.skipIf(!process.env.DATABASE_URL)(
-  "getPriorityLead (live database)",
+  "listLeadsForAttention (live database)",
   () => {
     let pool: DatabasePool;
 
@@ -45,12 +55,12 @@ describe.skipIf(!process.env.DATABASE_URL)(
       await pool.end();
     });
 
-    it("returns null for an organization with no leads yet", async () => {
+    it("returns an empty list for an organization with no leads yet", async () => {
       const org = await seedOrganization(pool);
 
-      const lead = await getPriorityLead(pool, org.id);
+      const leads = await listLeadsForAttention(pool, org.id);
 
-      expect(lead).toBeNull();
+      expect(leads).toEqual([]);
     });
 
     it("reads back a real ingested lead with correct source provenance", async () => {
@@ -58,7 +68,8 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const integration = await seedIntegration(pool, org.id, {
         sourceSystem: "hubspot",
       });
-      const input = fixtureInput();
+      const job = await seedSyncJob(pool, org.id, integration.id, "hubspot");
+      const input = fixtureInput(job.id);
 
       const ingestResult = await ingestHubSpotDeal(
         pool,
@@ -67,9 +78,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
         input,
       );
 
-      const lead = await getPriorityLead(pool, org.id);
+      const leads = await listLeadsForAttention(pool, org.id);
 
-      expect(lead).not.toBeNull();
+      expect(leads).toHaveLength(1);
+      const lead = leads[0];
       expect(lead?.id).toBe(ingestResult.leadId);
       expect(lead?.contactName).toBe(input.contactName);
       expect(lead?.companyName).toBe(input.companyName);
@@ -84,17 +96,18 @@ describe.skipIf(!process.env.DATABASE_URL)(
       expect(lead?.source.recordDigestSha256).toBe(input.rawPayloadSha256);
     });
 
-    it("prefers the oldest untouched lead over a more recent, already-touched one", async () => {
+    it("returns every at-risk lead, not just one — orders the oldest untouched lead first", async () => {
       const org = await seedOrganization(pool);
       const integration = await seedIntegration(pool, org.id, {
         sourceSystem: "hubspot",
       });
+      const job = await seedSyncJob(pool, org.id, integration.id, "hubspot");
 
       const touchedRecent = await ingestHubSpotDeal(
         pool,
         org.id,
         integration.id,
-        fixtureInput({
+        fixtureInput(job.id, {
           sourceCreatedAt: new Date("2026-08-18T10:00:00.000Z"),
           lastInteractionAt: new Date("2026-08-18T11:00:00.000Z"),
         }),
@@ -103,16 +116,22 @@ describe.skipIf(!process.env.DATABASE_URL)(
         pool,
         org.id,
         integration.id,
-        fixtureInput({
+        fixtureInput(job.id, {
           sourceCreatedAt: new Date("2026-08-01T10:00:00.000Z"),
           lastInteractionAt: null,
         }),
       );
 
-      const lead = await getPriorityLead(pool, org.id);
+      const leads = await listLeadsForAttention(pool, org.id);
+      const ids = leads.map((lead) => lead.id);
 
-      expect(lead?.id).toBe(untouchedOld.leadId);
-      expect(lead?.id).not.toBe(touchedRecent.leadId);
+      // Both real leads are returned — the previous single-lead stopgap
+      // silently hid whichever one this test didn't happen to pick.
+      expect(ids).toContain(touchedRecent.leadId);
+      expect(ids).toContain(untouchedOld.leadId);
+      expect(ids.indexOf(untouchedOld.leadId!)).toBeLessThan(
+        ids.indexOf(touchedRecent.leadId!),
+      );
     });
 
     it("cannot see another organization's leads", async () => {
@@ -121,12 +140,18 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const integrationB = await seedIntegration(pool, orgB.id, {
         sourceSystem: "hubspot",
       });
+      const job = await seedSyncJob(pool, orgB.id, integrationB.id, "hubspot");
 
-      await ingestHubSpotDeal(pool, orgB.id, integrationB.id, fixtureInput());
+      await ingestHubSpotDeal(
+        pool,
+        orgB.id,
+        integrationB.id,
+        fixtureInput(job.id),
+      );
 
-      const lead = await getPriorityLead(pool, orgA.id);
+      const leads = await listLeadsForAttention(pool, orgA.id);
 
-      expect(lead).toBeNull();
+      expect(leads).toEqual([]);
     });
 
     it("stops surfacing a lead once its source integration is disconnected", async () => {
@@ -134,14 +159,15 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const integration = await seedIntegration(pool, org.id, {
         sourceSystem: "hubspot",
       });
+      const job = await seedSyncJob(pool, org.id, integration.id, "hubspot");
       const ingestResult = await ingestHubSpotDeal(
         pool,
         org.id,
         integration.id,
-        fixtureInput(),
+        fixtureInput(job.id),
       );
 
-      expect(await getPriorityLead(pool, org.id)).not.toBeNull();
+      expect(await listLeadsForAttention(pool, org.id)).toHaveLength(1);
 
       await withTenantContext(pool, org.id, async (client) => {
         await client.query(
@@ -150,13 +176,38 @@ describe.skipIf(!process.env.DATABASE_URL)(
         );
       });
 
-      const lead = await getPriorityLead(pool, org.id);
+      const leads = await listLeadsForAttention(pool, org.id);
 
-      expect(lead).toBeNull();
+      expect(leads).toEqual([]);
       expect(ingestResult.leadId).not.toBeNull();
     });
 
-    it("falls back to a different integration's lead when one is disconnected", async () => {
+    it("still surfaces a lead when its source integration is degraded, not disconnected", async () => {
+      const org = await seedOrganization(pool);
+      const integration = await seedIntegration(pool, org.id, {
+        sourceSystem: "hubspot",
+      });
+      const job = await seedSyncJob(pool, org.id, integration.id, "hubspot");
+      const ingestResult = await ingestHubSpotDeal(
+        pool,
+        org.id,
+        integration.id,
+        fixtureInput(job.id),
+      );
+
+      await withTenantContext(pool, org.id, async (client) => {
+        await client.query(
+          "update integrations set status = 'degraded' where id = $1",
+          [integration.id],
+        );
+      });
+
+      const leads = await listLeadsForAttention(pool, org.id);
+
+      expect(leads.map((lead) => lead.id)).toContain(ingestResult.leadId);
+    });
+
+    it("keeps a different integration's lead visible when one integration is disconnected", async () => {
       const org = await seedOrganization(pool);
       const hubspotIntegration = await seedIntegration(pool, org.id, {
         sourceSystem: "hubspot",
@@ -165,12 +216,24 @@ describe.skipIf(!process.env.DATABASE_URL)(
         sourceSystem: "hubspot",
         externalAccountId: "second-hubspot-account",
       });
+      const firstJob = await seedSyncJob(
+        pool,
+        org.id,
+        hubspotIntegration.id,
+        "hubspot",
+      );
+      const secondJob = await seedSyncJob(
+        pool,
+        org.id,
+        otherIntegration.id,
+        "hubspot",
+      );
 
       await ingestHubSpotDeal(
         pool,
         org.id,
         hubspotIntegration.id,
-        fixtureInput({
+        fixtureInput(firstJob.id, {
           sourceCreatedAt: new Date("2026-08-01T10:00:00.000Z"),
           lastInteractionAt: null,
         }),
@@ -182,7 +245,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         pool,
         org.id,
         otherIntegration.id,
-        fixtureInput({
+        fixtureInput(secondJob.id, {
           sourceCreatedAt: new Date("2026-08-05T10:00:00.000Z"),
           lastInteractionAt: null,
         }),
@@ -195,9 +258,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
         );
       });
 
-      const lead = await getPriorityLead(pool, org.id);
+      const leads = await listLeadsForAttention(pool, org.id);
 
-      expect(lead?.id).toBe(secondLead.leadId);
+      expect(leads).toHaveLength(1);
+      expect(leads[0]?.id).toBe(secondLead.leadId);
     });
   },
 );

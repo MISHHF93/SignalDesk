@@ -15,9 +15,27 @@
  *    user/workspace connected is a GraphQL query against `viewer` using
  *    the fresh access token, so this client makes one real extra API call
  *    right after the token exchange — see `fetchLinearViewer`.
+ *
+ * PKCE: unlike HubSpot/Jira, Linear's own current docs (fetched this
+ * session, dated 2026) document real, working PKCE support on this exact
+ * `/authorize` + `/token` pair — a `code_challenge`/`code_challenge_method`
+ * pair at `/authorize` and a required `code_verifier` at `/token`, with
+ * `client_secret` explicitly listed as merely "(optional)" once PKCE is in
+ * use, not replaced by it. Per RFC 9700 (current OAuth Security BCP)
+ * recommending PKCE with S256 for every client type, confidential and
+ * public alike, this client sends a real PKCE pair *in addition to* the
+ * existing `client_secret` rather than instead of it — matching
+ * `microsoft-oauth.ts`'s precedent for the same reasoning.
  */
 
 import { fetchWithRetry } from "../shared/fetch-with-retry";
+import {
+  throwUpstreamError,
+  UpstreamProviderError,
+} from "../shared/upstream-error";
+import { generatePkcePair, type PkcePair } from "../shared/pkce";
+
+export { generatePkcePair, type PkcePair };
 
 const AUTHORIZE_URL = "https://linear.app/oauth/authorize";
 const TOKEN_URL = "https://api.linear.app/oauth/token";
@@ -38,6 +56,7 @@ export interface LinearOAuthConfig {
 export function buildLinearAuthorizationUrl(
   config: Pick<LinearOAuthConfig, "clientId" | "redirectUri">,
   state: string,
+  codeChallenge: string,
 ): string {
   const url = new URL(AUTHORIZE_URL);
   url.searchParams.set("client_id", config.clientId);
@@ -49,6 +68,8 @@ export function buildLinearAuthorizationUrl(
   // the authorizing user, never as a service-account "app" actor (which
   // carries a different 30-day, no-refresh-token token shape entirely).
   url.searchParams.set("actor", "user");
+  url.searchParams.set("code_challenge", codeChallenge);
+  url.searchParams.set("code_challenge_method", "S256");
   return url.toString();
 }
 
@@ -67,6 +88,7 @@ interface RawLinearTokenResponse {
 export async function exchangeLinearAuthorizationCode(
   config: LinearOAuthConfig,
   code: string,
+  codeVerifier: string,
 ): Promise<LinearTokenResponse> {
   const response = await fetchWithRetry(TOKEN_URL, {
     method: "POST",
@@ -77,13 +99,12 @@ export async function exchangeLinearAuthorizationCode(
       client_secret: config.clientSecret,
       redirect_uri: config.redirectUri,
       code,
+      code_verifier: codeVerifier,
     }),
   });
 
   if (!response.ok) {
-    throw new Error(
-      `Linear token request failed: ${response.status} ${await response.text()}`,
-    );
+    await throwUpstreamError("Linear token request", response);
   }
 
   const payload = (await response.json()) as RawLinearTokenResponse;
@@ -134,16 +155,15 @@ export async function fetchLinearViewer(
   });
 
   if (!response.ok) {
-    throw new Error(
-      `Linear viewer query failed: ${response.status} ${await response.text()}`,
-    );
+    await throwUpstreamError("Linear viewer query", response);
   }
 
   const payload = (await response.json()) as LinearViewerGraphQlResponse;
 
   if (payload.errors?.length) {
-    throw new Error(
-      `Linear viewer query failed: ${payload.errors.map((e) => e.message).join(", ")}`,
+    throw new UpstreamProviderError(
+      "Linear viewer query failed. Please try again, or reconnect this integration if the problem continues.",
+      payload.errors.map((e) => e.message).join(", "),
     );
   }
 

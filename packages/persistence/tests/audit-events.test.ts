@@ -102,6 +102,53 @@ describe.skipIf(!process.env.DATABASE_URL)(
         }),
       ).rejects.toThrow(/no membership found/i);
     });
+
+    it("writes an agent-attributed audit event with no membership involved", async () => {
+      const { organizationId, userId } = await seedMembership(pool);
+
+      await recordAuditEvent(pool, organizationId, {
+        userId,
+        actorKind: "agent",
+        actorAgentId: "claude-specialist",
+        eventType: "agent.task.completed",
+        subjectType: "agent_task_result",
+        subjectId: "77777777-7777-4777-8777-777777777777",
+        outcome: "succeeded",
+        metadata: {},
+      });
+
+      const row = await withTenantContext(
+        pool,
+        organizationId,
+        async (client) => {
+          const result = await client.query(
+            "select actor_kind, actor_agent_id, actor_membership_id from audit_events where subject_id = $1",
+            ["77777777-7777-4777-8777-777777777777"],
+          );
+          return result.rows[0];
+        },
+      );
+
+      expect(row.actor_kind).toBe("agent");
+      expect(row.actor_agent_id).toBe("claude-specialist");
+      expect(row.actor_membership_id).toBeNull();
+    });
+
+    it("rejects actorKind: agent with no actorAgentId", async () => {
+      const { organizationId, userId } = await seedMembership(pool);
+
+      await expect(
+        recordAuditEvent(pool, organizationId, {
+          userId,
+          actorKind: "agent",
+          eventType: "agent.task.completed",
+          subjectType: "agent_task_result",
+          subjectId: "88888888-8888-4888-8888-888888888888",
+          outcome: "succeeded",
+          metadata: {},
+        }),
+      ).rejects.toThrow(/actorAgentId is required/i);
+    });
   },
 );
 

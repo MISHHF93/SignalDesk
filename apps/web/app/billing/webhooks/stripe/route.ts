@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import {
   constructStripeWebhookEvent,
   createStripeBillingClient,
+  mapStripeSubscriptionToSyncFields,
+  type RawStripeSubscription,
 } from "@signaldesk/integrations/stripe-billing";
 import {
   createDatabasePool,
@@ -26,39 +28,21 @@ function getPool(): DatabasePool {
   return pool;
 }
 
-// A deliberately loose read of just the fields this handler needs, cast
-// via `as unknown as` from Stripe's real event payload rather than typed
-// against the installed `stripe` SDK's `Subscription`/`Invoice` types —
-// `current_period_start`/`current_period_end` moved off the Subscription
-// object onto each SubscriptionItem in Stripe's current API (verified
-// against docs.stripe.com/api/subscriptions/object this session, not
-// training data), which the installed SDK version's types may not yet
-// reflect at the top level either way. Every subscription this app
-// creates has exactly one price item, so `items.data[0]` is that item.
-interface RawSubscription {
-  readonly id: string;
-  readonly customer: string;
-  readonly status: SubscriptionStatus;
-  readonly trial_end: number | null;
-  readonly cancel_at_period_end: boolean;
-  readonly canceled_at: number | null;
-  readonly items: {
-    readonly data: ReadonlyArray<{
-      readonly current_period_start: number;
-      readonly current_period_end: number;
-    }>;
-  };
-}
-
 interface RawInvoice {
   readonly subscription: string | null;
 }
 
-function toDate(unixSeconds: number | null): Date | null {
-  return unixSeconds === null ? null : new Date(unixSeconds * 1000);
-}
-
-async function syncSubscription(subscription: RawSubscription): Promise<void> {
+/**
+ * Resolves which organization owns this Stripe subscription (webhooks
+ * identify the subscription, not the organization) and mirrors Stripe's
+ * current state onto it, via the same `mapStripeSubscriptionToSyncFields`
+ * mapping the reconciliation sweep (`api/cron/billing-reconciliation/
+ * route.ts`) reads Stripe's raw payload through — one tested source of
+ * truth for both paths, not two independent guesses.
+ */
+async function syncSubscription(
+  subscription: RawStripeSubscription,
+): Promise<void> {
   const db = getPool();
   const organizationId =
     (await findOrganizationIdByStripeSubscriptionId(db, subscription.id)) ??
@@ -71,15 +55,11 @@ async function syncSubscription(subscription: RawSubscription): Promise<void> {
     return;
   }
 
-  const item = subscription.items.data[0];
+  const fields = mapStripeSubscriptionToSyncFields(subscription);
 
   await updateSubscriptionFromStripe(db, organizationId, subscription.id, {
-    status: subscription.status,
-    trialEndsAt: toDate(subscription.trial_end),
-    currentPeriodStart: item ? toDate(item.current_period_start) : null,
-    currentPeriodEnd: item ? toDate(item.current_period_end) : null,
-    cancelAtPeriodEnd: subscription.cancel_at_period_end,
-    canceledAt: toDate(subscription.canceled_at),
+    ...fields,
+    status: fields.status as SubscriptionStatus,
   });
 }
 
@@ -110,6 +90,17 @@ async function handleInvoicePaymentFailed(invoice: RawInvoice): Promise<void> {
  * canceled). Signature verified via Stripe's own SDK
  * (`constructStripeWebhookEvent`'s HMAC check), never trusted unverified —
  * this is a public, unauthenticated endpoint by necessity.
+ *
+ * Real replay protection already comes from the SDK, not just the
+ * signature check: `constructStripeWebhookEvent` calls the Node SDK's
+ * `stripe.webhooks.constructEvent(payload, header, secret)` with no
+ * explicit `tolerance` argument, and that method's own default (confirmed
+ * against the installed SDK — `Webhook.DEFAULT_TOLERANCE = 300` in
+ * `stripe/cjs/Webhooks.js`) rejects any `stripe-signature` header whose
+ * embedded `t=` timestamp is more than 5 minutes old, throwing before this
+ * handler ever runs. A captured signature stops verifying on its own —
+ * unlike QuickBooks' HMAC scheme (`quickbooks/webhook/route.ts`), which
+ * carries no timestamp and needed its own realm-scoped rate limit instead.
  *
  * `invoice.paid` is intentionally not specially handled: the
  * `customer.subscription.updated` event Stripe sends alongside it already
@@ -154,7 +145,9 @@ export async function POST(request: Request): Promise<NextResponse> {
       case "customer.subscription.created":
       case "customer.subscription.updated":
       case "customer.subscription.deleted":
-        await syncSubscription(event.data.object as unknown as RawSubscription);
+        await syncSubscription(
+          event.data.object as unknown as RawStripeSubscription,
+        );
         break;
       case "invoice.payment_failed":
         await handleInvoicePaymentFailed(
@@ -162,7 +155,8 @@ export async function POST(request: Request): Promise<NextResponse> {
         );
         break;
       case "customer.subscription.trial_will_end": {
-        const subscription = event.data.object as unknown as RawSubscription;
+        const subscription = event.data
+          .object as unknown as RawStripeSubscription;
         console.log(
           `Stripe trial ending soon for subscription ${subscription.id}`,
         );

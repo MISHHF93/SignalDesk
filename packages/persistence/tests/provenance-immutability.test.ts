@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { DatabasePool } from "../src/client";
+import { QueryFailedError } from "../src/query-error";
 import { withTenantContext } from "../src/tenant-context";
 import {
   getTestPool,
@@ -175,9 +176,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
           integration.id,
           integration.sourceSystem,
         );
+        let thrown: unknown;
 
-        await expect(
-          seedSourceRecord(
+        try {
+          await seedSourceRecord(
             pool,
             org.id,
             integration.id,
@@ -185,8 +187,19 @@ describe.skipIf(!process.env.DATABASE_URL)(
             {
               idempotencyKey: record.idempotencyKey,
             },
-          ),
-        ).rejects.toThrow(/duplicate key value/i);
+          );
+        } catch (error) {
+          thrown = error;
+        }
+
+        // withTenantContext wraps a real unique-constraint violation
+        // (query-error.ts) rather than let the raw driver message — which
+        // can echo back the literal conflicting value — reach a
+        // client-visible error.
+        expect(thrown).toBeInstanceOf(QueryFailedError);
+        expect((thrown as QueryFailedError).rawDetail).toContain(
+          "duplicate key value",
+        );
       });
     });
   },

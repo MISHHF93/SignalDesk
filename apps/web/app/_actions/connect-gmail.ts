@@ -3,13 +3,16 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { buildGmailAuthorizationUrl } from "@signaldesk/integrations/gmail";
+import {
+  buildGmailAuthorizationUrl,
+  generatePkcePair,
+} from "@signaldesk/integrations/gmail";
 
 import {
   getGoogleOAuthConfig,
   isGoogleConfigured,
 } from "../_lib/google-config";
-import { issueOAuthState } from "../_lib/oauth-state";
+import { issueOAuthState, issuePkceVerifier } from "../_lib/oauth-state";
 import { getCurrentOrganization } from "../_lib/session";
 
 export interface ConnectGmailState {
@@ -19,10 +22,12 @@ export interface ConnectGmailState {
 const CALLBACK_PATH = "/integrations/gmail/callback";
 
 /**
- * Starts the real Gmail OAuth flow. Mirrors `connectHubSpotAction`
- * exactly — no integration row is created here, only once the real Google
- * account id (the id_token's `sub` claim) is known, in the callback after
- * a successful exchange.
+ * Starts the real Gmail OAuth flow, including a real PKCE pair (see
+ * `packages/integrations/src/shared/google-oauth.ts`'s doc comment on why
+ * this confidential client still uses PKCE). Mirrors `connectHubSpotAction`
+ * otherwise — no integration row is created here, only once the real
+ * Google account id (the id_token's `sub` claim) is known, in the
+ * callback after a successful exchange.
  */
 export async function connectGmailAction(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- useActionState's action signature requires this parameter
@@ -41,7 +46,9 @@ export async function connectGmailAction(
   const origin = (await headers()).get("origin") ?? "";
   const config = getGoogleOAuthConfig(origin, CALLBACK_PATH);
   const state = await issueOAuthState("gmail");
-  const authorizationUrl = buildGmailAuthorizationUrl(config, state);
+  const { verifier, challenge } = generatePkcePair();
+  await issuePkceVerifier("gmail", verifier);
+  const authorizationUrl = buildGmailAuthorizationUrl(config, state, challenge);
 
   redirect(authorizationUrl);
 }

@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+import { evaluatePolicy } from "@signaldesk/domain";
+
 import type { DatabasePool } from "./client";
 import { withTenantContext } from "./tenant-context";
 
@@ -363,8 +365,11 @@ export interface EntitlementUsage {
  * Real usage vs. real entitlements — `usersUsed`/`activeConnectionsUsed`
  * are live counts against `memberships`/`integrations` (the same tables
  * every other part of this app already treats as the source of truth),
- * never a cached or estimated number. Limits fold in any purchased
- * add-ons (organization_subscription_addons) on top of the plan's base
+ * never a cached or estimated number. `activeConnectionsUsed` counts
+ * `degraded` connections alongside `active` ones (ADR 0043) — a
+ * degraded connection still occupies a real, live connection slot; it
+ * hasn't been disconnected. Limits fold in any purchased add-ons
+ * (organization_subscription_addons) on top of the plan's base
  * entitlement. A null limit means negotiated/unbounded (Enterprise, or no
  * subscription row at all yet).
  */
@@ -386,7 +391,7 @@ export async function getEntitlementUsage(
          (select count(*) from public.memberships
             where organization_id = $1 and status = 'active') as users_used,
          (select count(*) from public.integrations
-            where organization_id = $1 and status = 'active') as active_connections_used,
+            where organization_id = $1 and status in ('active', 'degraded')) as active_connections_used,
          ent.included_users,
          ent.included_active_connections,
          ent.capability_flags,
@@ -459,13 +464,23 @@ export async function getEntitlementUsage(
  * Called before creating a new integration row in every OAuth callback
  * route. A null limit (negotiated/Enterprise) never blocks.
  */
+/**
+ * Routed through the shared `evaluatePolicy` (`@signaldesk/domain`, ADR
+ * 0028) rather than checking the limit inline — the same evaluator
+ * `AgentGatewayService` (apps/web) uses for its own, unrelated capability
+ * check. External behavior is unchanged: still a plain boolean, so no
+ * caller needs to change.
+ */
 export async function canAddActiveConnection(
   pool: DatabasePool,
   organizationId: string,
 ): Promise<boolean> {
   const usage = await getEntitlementUsage(pool, organizationId);
   return (
-    usage.activeConnectionsLimit === null ||
-    usage.activeConnectionsUsed < usage.activeConnectionsLimit
+    evaluatePolicy({
+      kind: "connector_connection_limit",
+      activeConnectionsUsed: usage.activeConnectionsUsed,
+      activeConnectionsLimit: usage.activeConnectionsLimit,
+    }).outcome === "allow"
   );
 }

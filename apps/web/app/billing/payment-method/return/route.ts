@@ -69,6 +69,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     const paymentMethodId = await retrieveSetupIntentPaymentMethod(
       stripe,
       setupIntentId,
+      subscription.stripeCustomerId,
     );
 
     if (!paymentMethodId) {

@@ -1,8 +1,11 @@
+import { createHash } from "node:crypto";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildGoogleAuthorizationUrl,
   exchangeGoogleAuthorizationCode,
+  generatePkcePair,
   GOOGLE_IDENTITY_SCOPES,
   revokeGoogleToken,
   type GoogleOAuthConfig,
@@ -39,10 +42,33 @@ const READ_SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly",
 ];
 
+describe("generatePkcePair", () => {
+  it("derives a real S256 challenge from the verifier", () => {
+    const { verifier, challenge } = generatePkcePair();
+
+    expect(verifier.length).toBeGreaterThanOrEqual(43);
+    expect(challenge).toBe(
+      createHash("sha256").update(verifier).digest("base64url"),
+    );
+  });
+
+  it("generates a different pair every call", () => {
+    const first = generatePkcePair();
+    const second = generatePkcePair();
+
+    expect(first.verifier).not.toBe(second.verifier);
+  });
+});
+
 describe("buildGoogleAuthorizationUrl", () => {
-  it("builds a real authorize URL with client id, redirect uri, scopes, offline access, forced consent, and state", () => {
+  it("builds a real authorize URL with client id, redirect uri, scopes, offline access, forced consent, state, and PKCE params", () => {
     const url = new URL(
-      buildGoogleAuthorizationUrl(CONFIG, READ_SCOPES, "nonce-123"),
+      buildGoogleAuthorizationUrl(
+        CONFIG,
+        READ_SCOPES,
+        "nonce-123",
+        "challenge-abc",
+      ),
     );
 
     expect(url.origin + url.pathname).toBe(
@@ -55,6 +81,8 @@ describe("buildGoogleAuthorizationUrl", () => {
     expect(url.searchParams.get("access_type")).toBe("offline");
     expect(url.searchParams.get("prompt")).toBe("consent");
     expect(url.searchParams.get("state")).toBe("nonce-123");
+    expect(url.searchParams.get("code_challenge")).toBe("challenge-abc");
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
   });
 });
 
@@ -72,7 +100,7 @@ describe("exchangeGoogleAuthorizationCode", () => {
     vi.useRealTimers();
   });
 
-  it("maps a successful response and decodes the id_token's sub/email claims", async () => {
+  it("maps a successful response, decodes the id_token's sub/email claims, and sends the code_verifier", async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse(200, {
         access_token: "at-1",
@@ -86,7 +114,11 @@ describe("exchangeGoogleAuthorizationCode", () => {
       }),
     );
 
-    const result = await exchangeGoogleAuthorizationCode(CONFIG, "auth-code");
+    const result = await exchangeGoogleAuthorizationCode(
+      CONFIG,
+      "auth-code",
+      "verifier-xyz",
+    );
 
     expect(result).toEqual({
       accessToken: "at-1",
@@ -95,6 +127,11 @@ describe("exchangeGoogleAuthorizationCode", () => {
       googleUserId: "108293847562",
       email: "alex@example.test",
     });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://oauth2.googleapis.com/token");
+    const body = init.body as URLSearchParams;
+    expect(body.get("code_verifier")).toBe("verifier-xyz");
   });
 
   it("throws when Google omits the refresh_token", async () => {
@@ -107,7 +144,7 @@ describe("exchangeGoogleAuthorizationCode", () => {
     );
 
     await expect(
-      exchangeGoogleAuthorizationCode(CONFIG, "auth-code"),
+      exchangeGoogleAuthorizationCode(CONFIG, "auth-code", "verifier-xyz"),
     ).rejects.toThrow(/refresh_token/);
   });
 
@@ -121,7 +158,7 @@ describe("exchangeGoogleAuthorizationCode", () => {
     );
 
     await expect(
-      exchangeGoogleAuthorizationCode(CONFIG, "auth-code"),
+      exchangeGoogleAuthorizationCode(CONFIG, "auth-code", "verifier-xyz"),
     ).rejects.toThrow(/id_token/);
   });
 
@@ -137,7 +174,11 @@ describe("exchangeGoogleAuthorizationCode", () => {
         }),
       );
 
-    const resultPromise = exchangeGoogleAuthorizationCode(CONFIG, "auth-code");
+    const resultPromise = exchangeGoogleAuthorizationCode(
+      CONFIG,
+      "auth-code",
+      "verifier-xyz",
+    );
     await vi.runAllTimersAsync();
     const result = await resultPromise;
 

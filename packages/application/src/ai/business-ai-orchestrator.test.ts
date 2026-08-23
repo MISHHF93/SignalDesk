@@ -1,4 +1,5 @@
-import type { Lead } from "@signaldesk/domain";
+﻿import type { Invoice, Lead } from "@signaldesk/domain";
+import { DEFAULT_MAX_ADMITTED_FINDINGS } from "@signaldesk/intelligence";
 import { describe, expect, it } from "vitest";
 
 import { createBusinessAIOrchestrator } from "./business-ai-orchestrator";
@@ -31,6 +32,26 @@ function lead(overrides: Partial<Lead> = {}): Lead {
   };
 }
 
+function overdueInvoice(id: string): Invoice {
+  return {
+    id,
+    organizationId: "org_001",
+    customerName: `Customer ${id}`,
+    amountCents: 250_000,
+    currency: "USD",
+    dueAt: new Date("2026-08-01T00:00:00.000Z"),
+    status: "open",
+    source: {
+      integrationId: "e635f8c7-a8fd-4cca-8e6e-9836d790518a",
+      system: "quickbooks",
+      externalRecordId: `invoice-${id}`,
+      sourceVersion: "1",
+      recordDigestSha256: "a".repeat(64),
+      lastSyncedAt: new Date("2026-08-18T13:56:00.000Z"),
+    },
+  };
+}
+
 describe("createBusinessAIOrchestrator", () => {
   it("runs the Intelligence Core and composes prioritized findings into cards", async () => {
     const orchestrator = createBusinessAIOrchestrator({
@@ -38,19 +59,25 @@ describe("createBusinessAIOrchestrator", () => {
     });
 
     const attention = await orchestrator.getAttention({
-      lead: lead(),
+      leads: [lead()],
       now: NOW,
       overdueInvoices: [],
       connectedIntegrationSlugs: [],
       highValueThresholdCents: 1_000_000,
       overdueTasks: [],
+      recentPayments: [],
       workingDaysBitmask: 0b1111111,
       timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
     });
 
-    expect(attention.findings.length).toBeGreaterThanOrEqual(3);
+    expect(attention.findings.length).toBeGreaterThanOrEqual(2);
     expect(attention.cards.map((card) => card.type)).toEqual(
-      expect.arrayContaining(["stuck", "lead_risk", "integration_health"]),
+      expect.arrayContaining(["lead_risk", "integration_health"]),
     );
     // Findings and cards are both already in priority order (highest first).
     const scores = attention.findings.map((finding) => finding.priorityScore);
@@ -63,14 +90,20 @@ describe("createBusinessAIOrchestrator", () => {
     });
 
     const attention = await orchestrator.getAttention({
-      lead: lead(),
+      leads: [lead()],
       now: NOW,
       overdueInvoices: [],
       connectedIntegrationSlugs: [],
       highValueThresholdCents: 1_000_000,
       overdueTasks: [],
+      recentPayments: [],
       workingDaysBitmask: 0b1111111,
       timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
     });
 
     expect(
@@ -86,14 +119,20 @@ describe("createBusinessAIOrchestrator", () => {
     });
 
     const attention = await orchestrator.getAttention({
-      lead: lead({ owner: null }),
+      leads: [lead({ owner: null })],
       now: NOW,
       overdueInvoices: [],
       connectedIntegrationSlugs: [],
       highValueThresholdCents: 1_000_000,
       overdueTasks: [],
+      recentPayments: [],
       workingDaysBitmask: 0b1111111,
       timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
     });
 
     expect(
@@ -109,14 +148,20 @@ describe("createBusinessAIOrchestrator", () => {
     });
 
     const attention = await orchestrator.getAttention({
-      lead: null,
+      leads: [],
       now: NOW,
       overdueInvoices: [],
       connectedIntegrationSlugs: [],
       highValueThresholdCents: 1_000_000,
       overdueTasks: [],
+      recentPayments: [],
       workingDaysBitmask: 0b1111111,
       timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
     });
 
     expect(attention.findings.map((finding) => finding.type)).toEqual([
@@ -125,6 +170,46 @@ describe("createBusinessAIOrchestrator", () => {
     expect(attention.cards.map((card) => card.type)).toEqual([
       "integration_health",
     ]);
+  });
+
+  it("caps admitted cards below the total finding count and reports the honest deferred count", async () => {
+    const orchestrator = createBusinessAIOrchestrator({
+      provider: createDeterministicProvider(),
+    });
+    const manyOverdueInvoices = Array.from(
+      { length: DEFAULT_MAX_ADMITTED_FINDINGS + 8 },
+      (_, i) => overdueInvoice(`inv-${i}`),
+    );
+
+    const attention = await orchestrator.getAttention({
+      leads: [],
+      now: NOW,
+      overdueInvoices: manyOverdueInvoices,
+      connectedIntegrationSlugs: ["quickbooks"],
+      highValueThresholdCents: 1_000_000,
+      overdueTasks: [],
+      recentPayments: [],
+      workingDaysBitmask: 0b1111111,
+      timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
+    });
+
+    // The real, complete picture is still on `findings` — admission never
+    // discards evidence, only bounds what's presented as cards. (Other
+    // capabilities, e.g. integration-health, may contribute a finding or
+    // two of their own alongside the overdue-invoice ones, so this checks
+    // "at least the real invoices," not an exact total.)
+    expect(attention.findings.length).toBeGreaterThanOrEqual(
+      manyOverdueInvoices.length,
+    );
+    expect(attention.cards.length).toBe(DEFAULT_MAX_ADMITTED_FINDINGS);
+    expect(attention.deferredCount).toBe(
+      attention.findings.length - DEFAULT_MAX_ADMITTED_FINDINGS,
+    );
   });
 
   it("routes the Command Bar through interpretCommand", async () => {

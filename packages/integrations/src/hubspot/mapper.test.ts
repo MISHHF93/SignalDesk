@@ -7,7 +7,10 @@ import { describe, expect, it } from "vitest";
 import { parseSourceLeadRecord } from "@signaldesk/schemas";
 import { randomUUID } from "node:crypto";
 
-import { mapHubSpotDealToSourceLeadRecord } from "./mapper";
+import {
+  detectHubSpotDealDefaultedFields,
+  mapHubSpotDealToSourceLeadRecord,
+} from "./mapper";
 import type { HubSpotDeal } from "./client";
 
 const NOW = new Date("2026-08-18T14:00:00.000Z");
@@ -149,6 +152,31 @@ describe("mapHubSpotDealToSourceLeadRecord", () => {
 
     expect(lead.owner).toBeNull();
     expect(lead.valueCents).toBe(0);
+  });
+
+  it("detectHubSpotDealDefaultedFields reports nothing for a real, complete deal", () => {
+    expect(detectHubSpotDealDefaultedFields(deal())).toEqual([]);
+  });
+
+  it("detectHubSpotDealDefaultedFields flags a blank dealname as defaulted", () => {
+    expect(
+      detectHubSpotDealDefaultedFields(
+        deal({ properties: { ...deal().properties, dealname: "" } }),
+      ),
+    ).toEqual(["dealname"]);
+    expect(
+      detectHubSpotDealDefaultedFields(
+        deal({ properties: { ...deal().properties, dealname: undefined } }),
+      ),
+    ).toEqual(["dealname"]);
+  });
+
+  it("detectHubSpotDealDefaultedFields does NOT flag a missing amount — a normal, honest state for an early-pipeline deal, not schema drift", () => {
+    expect(
+      detectHubSpotDealDefaultedFields(
+        deal({ properties: { ...deal().properties, amount: undefined } }),
+      ),
+    ).toEqual([]);
   });
 
   it("produces a different digest for a different deal payload", () => {

@@ -1,30 +1,28 @@
 import type { IntelligenceCard } from "@signaldesk/schemas";
 
+import {
+  CARD_FRESHNESS_LABELS,
+  CARD_SEVERITY_LABELS,
+} from "../_lib/visual-state";
 import { formatRelativeTime } from "./format";
 
-const severityLabel: Record<IntelligenceCard["severity"], string> = {
-  info: "Info",
-  low: "Low priority",
-  medium: "Medium priority",
-  high: "High priority",
-  critical: "Critical",
-};
-
-const freshnessLabel: Record<IntelligenceCard["freshness"]["status"], string> =
-  {
-    fresh: "Fresh",
-    aging: "Aging",
-    stale: "Stale",
-    unknown: "Freshness unknown",
-  };
-
 export function CardBadges({ card }: { card: IntelligenceCard }) {
+  const relatedCount = card.relatedFindingIds?.length ?? 0;
+
   return (
     <div className="badgeRow">
       <span className="priorityBadge" data-severity={card.severity}>
-        {severityLabel[card.severity]}
+        {CARD_SEVERITY_LABELS[card.severity]}
       </span>
-      <span className="objectBadge">{card.type.replace("_", " ")}</span>
+      <span className="objectBadge">{card.type.replace(/_/g, " ")}</span>
+      {relatedCount > 0 ? (
+        <span
+          className="relatedBadge"
+          title={`${relatedCount} other item${relatedCount === 1 ? "" : "s"} on this page mention the same customer — may describe the same real situation, not necessarily duplicates.`}
+        >
+          +{relatedCount} related
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -87,7 +85,7 @@ export function WhyDisclosure({ card }: { card: IntelligenceCard }) {
         )}
 
         <p>
-          {freshnessLabel[card.freshness.status]} · synced{" "}
+          {CARD_FRESHNESS_LABELS[card.freshness.status]} · synced{" "}
           {formatRelativeTime(card.freshness.asOf, new Date())}
         </p>
       </div>

@@ -4,9 +4,28 @@
  * docs this session rather than assumed from training data. No write
  * endpoints are implemented; ADR 0008 scopes this connector to reading
  * Deals only.
+ *
+ * No PKCE here, unlike `microsoft-oauth.ts`: current IETF guidance (RFC
+ * 9700) recommends it for every client type, and this session checked
+ * specifically rather than assuming HubSpot follows that guidance —
+ * HubSpot's own token-exchange docs list only `grant_type`/`code`/
+ * `redirect_uri`/`client_id`/`client_secret`, with no `code_verifier`,
+ * and HubSpot's developer community has open, unresolved feature
+ * requests asking for PKCE support on the standard OAuth API (e.g.
+ * community.hubspot.com's "OAuth2: Support Authorization Code Flow with
+ * Proof Key for Code Exchange (PKCE)" thread) — confirming it's a real,
+ * currently-missing gap on HubSpot's side, not an oversight here. (Their
+ * separate MCP server enforces PKCE, but that's a different OAuth
+ * surface this connector doesn't use.) Sending `code_challenge` anyway
+ * would be inert at best — HubSpot's authorization server has no
+ * documented handling for it — and dishonestly implies a protection this
+ * flow doesn't actually have; the real defense here remains the
+ * single-use `state` CSRF nonce (`oauth-state.ts`) plus the confidential
+ * client's `client_secret`.
  */
 
 import { fetchWithRetry } from "../shared/fetch-with-retry";
+import { throwUpstreamError } from "../shared/upstream-error";
 
 const AUTHORIZE_URL = "https://app.hubspot.com/oauth/authorize";
 const TOKEN_URL = "https://api.hubapi.com/oauth/v1/token";
@@ -60,9 +79,7 @@ async function requestHubSpotToken(
   });
 
   if (!response.ok) {
-    throw new Error(
-      `HubSpot token request failed: ${response.status} ${await response.text()}`,
-    );
+    await throwUpstreamError("HubSpot token request", response);
   }
 
   const payload = (await response.json()) as RawHubSpotTokenResponse;
@@ -157,9 +174,75 @@ export async function fetchHubSpotDeals(
   });
 
   if (!response.ok) {
-    throw new Error(
-      `HubSpot deals fetch failed: ${response.status} ${await response.text()}`,
-    );
+    await throwUpstreamError("HubSpot deals fetch", response);
+  }
+
+  const payload = (await response.json()) as {
+    results: HubSpotDeal[];
+    paging?: { next?: { after: string } };
+  };
+
+  return {
+    results: payload.results,
+    nextAfter: payload.paging?.next?.after ?? null,
+  };
+}
+
+/**
+ * Fetches one page of deals modified since `sinceCursorIso` (an ISO
+ * timestamp — HubSpot's own response shape, e.g. the cursor this app
+ * already computes from `hs_lastmodifieddate`/`updatedAt`), oldest-
+ * modified-first. Unlike `fetchHubSpotDeals` (the plain list GET used for
+ * a full/initial pull), incremental filtering requires HubSpot's Search
+ * API (`POST /crm/v3/objects/deals/search`) — the basic list endpoint has
+ * no filter parameter. Verified against HubSpot's current CRM Search API
+ * docs this session (developers.hubspot.com/docs/api/crm/search), not
+ * assumed: filter values must be Unix milliseconds even though response
+ * timestamps are ISO strings, so `sinceCursorIso` is converted here; the
+ * search endpoint's own result cap (10,000 total per query, per HubSpot's
+ * docs) is a real limit this app doesn't currently need to work around,
+ * since `MAX_DEAL_PAGES` (sync-hubspot.ts) already bounds a single sync
+ * run far below that.
+ */
+export async function fetchHubSpotDealsModifiedSince(
+  accessToken: string,
+  sinceCursorIso: string,
+  after?: string,
+): Promise<HubSpotDealsPage> {
+  const sinceMillis = String(new Date(sinceCursorIso).getTime());
+
+  const response = await fetchWithRetry(
+    `${API_BASE_URL}/crm/v3/objects/deals/search`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        filterGroups: [
+          {
+            filters: [
+              {
+                propertyName: "hs_lastmodifieddate",
+                operator: "GT",
+                value: sinceMillis,
+              },
+            ],
+          },
+        ],
+        properties: DEAL_PROPERTIES,
+        sorts: [
+          { propertyName: "hs_lastmodifieddate", direction: "ASCENDING" },
+        ],
+        limit: 100,
+        ...(after ? { after } : {}),
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    await throwUpstreamError("HubSpot deals search", response);
   }
 
   const payload = (await response.json()) as {
@@ -236,9 +319,7 @@ export async function fetchHubSpotOwners(
     });
 
     if (!response.ok) {
-      throw new Error(
-        `HubSpot owners fetch failed: ${response.status} ${await response.text()}`,
-      );
+      await throwUpstreamError("HubSpot owners fetch", response);
     }
 
     const payload = (await response.json()) as {

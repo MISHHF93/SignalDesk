@@ -4,7 +4,7 @@ export {
   type AssembleBusinessSnapshotInput,
   type BusinessContextProfile,
   type BusinessCoverageSummary,
-  type BusinessDomainPurpose,
+  type BusinessDomainCapabilityClass,
   type BusinessSnapshot,
   type BusinessSnapshotPulse,
   type ConnectorHealthSummary,
@@ -22,8 +22,21 @@ export {
 } from "./severity-counts";
 export {
   generateDailyBrief,
+  generateSinceYouLeftBrief,
   type DailyBriefContent,
+  type PreviousBriefReference,
+  type SinceYouLeftBriefContent,
 } from "./artifacts/daily-brief";
+export {
+  simulateInvoicePaymentScenario,
+  type InvoicePaymentScenarioResult,
+  type OverdueExposureByCurrency,
+} from "./scenarios/invoice-payment-scenario";
+export {
+  summarizeCardFeedback,
+  type CardFeedbackEntry,
+  type CardTypeFeedbackSummary,
+} from "./evaluation/card-feedback-summary";
 export type {
   AIProvider,
   DashboardCommandContext,
@@ -31,6 +44,11 @@ export type {
   StructuredGenerationTask,
 } from "./ai/ai-provider";
 export { createDeterministicProvider } from "./ai/deterministic-provider";
+export {
+  createClaudeProvider,
+  DEFAULT_CLAUDE_MODEL,
+  type ClaudeProviderOptions,
+} from "./ai/claude-provider";
 export { parseCommand, type ParseCommandResult } from "./ai/parse-command";
 export {
   createBusinessAIOrchestrator,
@@ -47,3 +65,24 @@ export {
   getLeadAttention,
   type LeadAttentionResult,
 } from "@signaldesk/intelligence";
+export { AGENT_REGISTRY, getAgentById } from "./agents/agent-card";
+export {
+  selectAgent,
+  AgentRoutingError,
+  type AgentAvailability,
+  type SelectAgentOptions,
+} from "./agents/agent-router";
+export {
+  runParallelSpecialists,
+  type SpecialistDispatch,
+  type SpecialistInput,
+} from "./agents/parallel-specialist-coordinator";
+export {
+  reconcileSpecialistResults,
+  type ReconciliationOutcome,
+} from "./agents/agent-result-reconciler";
+export {
+  createConsoleErrorReporter,
+  type ErrorReporter,
+  type ErrorReportContext,
+} from "./observability/error-reporter";

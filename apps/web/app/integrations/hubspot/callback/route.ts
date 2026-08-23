@@ -1,27 +1,20 @@
 import { NextResponse } from "next/server";
 
-import {
-  exchangeHubSpotAuthorizationCode,
-  fetchHubSpotDeals,
-  fetchHubSpotOwners,
-  mapHubSpotDealToSourceLeadRecord,
-  type HubSpotDeal,
-} from "@signaldesk/integrations/hubspot";
+import { exchangeHubSpotAuthorizationCode } from "@signaldesk/integrations/hubspot";
 import {
   canAddActiveConnection,
   createDatabasePool,
   findOrCreateHubSpotIntegration,
   getOrganizationBusinessProfile,
-  ingestHubSpotDeal,
   recordAuditEvent,
   storeHubSpotTokens,
 } from "@signaldesk/persistence";
-import { parseSourceLeadRecord } from "@signaldesk/schemas";
 
 import { getHubSpotOAuthConfig } from "../../../_lib/hubspot-config";
 import { consumeOAuthState } from "../../../_lib/oauth-state";
 import { checkRateLimit, getClientIp } from "../../../_lib/rate-limit";
 import { getCurrentOrganization } from "../../../_lib/session";
+import { syncHubSpotDeals } from "../../../_lib/sync-hubspot";
 
 let pool: ReturnType<typeof createDatabasePool> | undefined;
 
@@ -30,19 +23,14 @@ function getPool() {
   return pool;
 }
 
-// Bounds the synchronous-in-request initial sync to at most 2,000 deals
-// (20 pages of 100). This is a stopgap so one very large HubSpot account
-// can't hang the OAuth callback indefinitely — a real background sync job
-// (ADR 0008's explicit future work) is what removes this cap, not a higher
-// number here.
-const MAX_DEAL_PAGES = 20;
-
 /**
  * Completes the HubSpot OAuth flow and runs a one-time initial sync
  * (ADR 0008): stores tokens in Vault, then fetches and ingests every open
- * deal up to `MAX_DEAL_PAGES` pages. Incremental/recurring sync is
- * explicitly future work — this proves the pipe works end to end, not a
- * production sync engine.
+ * deal via `syncHubSpotDeals` — the same function "Sync Now"
+ * (`_actions/sync-hubspot.ts`) calls later, so the two can never silently
+ * drift into different behavior. Recurring/background sync is still
+ * explicitly future work; this and "Sync Now" are both synchronous,
+ * on-demand runs.
  */
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
@@ -61,7 +49,8 @@ export async function GET(request: Request) {
     return redirectTo("error");
   }
 
-  const rateLimit = checkRateLimit(
+  const rateLimit = await checkRateLimit(
+    getPool(),
     `hubspot-callback:${await getClientIp()}`,
     20,
     60 * 60 * 1000,
@@ -130,93 +119,38 @@ export async function GET(request: Request) {
       session.organizationId,
     );
 
-    const owners = await fetchHubSpotOwners(tokens.accessToken);
-    const ownerNamesById = new Map(
-      owners.map((owner) => [
-        owner.id,
-        [owner.firstName, owner.lastName].filter(Boolean).join(" ") ||
-          owner.email ||
-          owner.id,
-      ]),
-    );
+    let ingested: number;
+    let skipped: number;
+    let defaultedNameCount: number;
 
-    const now = new Date();
-    let ingested = 0;
-    let skipped = 0;
-    let after: string | undefined;
-
-    for (let page = 0; page < MAX_DEAL_PAGES; page += 1) {
-      const dealsPage = await fetchHubSpotDeals(tokens.accessToken, after);
-
-      for (const deal of dealsPage.results as readonly HubSpotDeal[]) {
-        // Real runtime validation of external data at the boundary
-        // (`sourceLeadRecordSchema`'s own contract) — one malformed or
-        // out-of-bounds deal (e.g. a deal name over the 500-character
-        // limit the schema enforces precisely because HubSpot's own field
-        // limits aren't a security control this app can rely on) is
-        // skipped rather than aborting the whole sync for every other
-        // deal in this account.
-        let lead: ReturnType<typeof parseSourceLeadRecord>;
-
-        try {
-          lead = parseSourceLeadRecord(
-            mapHubSpotDealToSourceLeadRecord(deal, {
-              now,
-              ownerNamesById,
-              expectedResponseHours:
-                businessProfile.defaultExpectedResponseHours,
-            }),
-            {
-              organizationId: session.organizationId,
-              integrationId: integration.id,
-            },
-          );
-        } catch (validationError) {
-          console.error(
-            `Skipping HubSpot deal ${deal.id}: failed validation`,
-            validationError,
-          );
-          skipped += 1;
-          continue;
-        }
-
-        const result = await ingestHubSpotDeal(
-          getPool(),
-          session.organizationId,
-          integration.id,
-          {
-            externalRecordId: lead.source.externalRecordId,
-            sourceVersion: lead.source.sourceVersion,
-            rawPayloadSha256: lead.source.recordDigestSha256,
-            rawPayloadByteLength: JSON.stringify(deal).length,
-            observedAt: now,
-            contactName: lead.contactName,
-            companyName: lead.companyName,
-            stage: lead.stage,
-            valueCents: lead.valueCents,
-            currency: lead.currency,
-            expectedResponseHours: lead.expectedResponseHours,
-            sourceCreatedAt: lead.createdAt,
-            lastInteractionAt: lead.lastInteractionAt,
-          },
-        );
-
-        if (result.inserted) {
-          ingested += 1;
-        }
-      }
-
-      if (!dealsPage.nextAfter) {
-        break;
-      }
-
-      after = dealsPage.nextAfter;
-    }
-
-    if (skipped > 0) {
-      console.error(
-        `HubSpot initial sync for integration ${integration.id}: skipped ${skipped} deal(s) that failed validation.`,
-      );
+    try {
+      ({ ingested, skipped, defaultedNameCount } = await syncHubSpotDeals(
+        getPool(),
+        session.organizationId,
+        integration.id,
+        tokens.accessToken,
+        businessProfile.defaultExpectedResponseHours,
+        "initial",
+      ));
+    } catch (syncError) {
+      // Authorization already succeeded and was audited above — a sync
+      // failure here is a materially different, worth-distinguishing
+      // outcome from "never connected," so it gets its own audit event
+      // rather than falling into the generic catch below.
+      await recordAuditEvent(getPool(), session.organizationId, {
+        userId: session.userId,
+        eventType: "sync.failed",
+        subjectType: "integration",
+        subjectId: integration.id,
+        outcome: "failed",
+        metadata: {
+          sourceSystem: "hubspot",
+          trigger: "initial",
+          error:
+            syncError instanceof Error ? syncError.message : String(syncError),
+        },
+      });
+      throw syncError;
     }
 
     await recordAuditEvent(getPool(), session.organizationId, {
@@ -225,7 +159,13 @@ export async function GET(request: Request) {
       subjectType: "integration",
       subjectId: integration.id,
       outcome: "succeeded",
-      metadata: { sourceSystem: "hubspot", dealsIngested: ingested },
+      metadata: {
+        sourceSystem: "hubspot",
+        dealsIngested: ingested,
+        skipped,
+        defaultedNameCount,
+        trigger: "initial",
+      },
     });
 
     return NextResponse.redirect(

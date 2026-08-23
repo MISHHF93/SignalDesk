@@ -41,7 +41,8 @@ export async function startPaymentMethodSetupAction(): Promise<StartPaymentMetho
     return { ok: false, error: "Sign in to do this." };
   }
 
-  const rateLimit = checkRateLimit(
+  const rateLimit = await checkRateLimit(
+    getPool(),
     `payment-method-setup:${session.organizationId}`,
     10,
     60 * 60 * 1000,

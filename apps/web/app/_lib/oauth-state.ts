@@ -14,6 +14,10 @@ function pkceCookieName(providerName: string): string {
   return `${providerName}_pkce_verifier`;
 }
 
+function subdomainCookieName(providerName: string): string {
+  return `${providerName}_subdomain`;
+}
+
 /**
  * A real, single-use, server-stored CSRF nonce for a provider's OAuth flow
  * (RFC 6749 §10.12's `state` guidance), parameterized by provider name so
@@ -96,4 +100,40 @@ export async function consumePkceVerifier(
   cookieStore.delete(name);
 
   return verifier ?? null;
+}
+
+/**
+ * Same single-use, server-stored, provider-scoped cookie mechanism as
+ * `issuePkceVerifier`/`consumePkceVerifier`, holding a Zendesk subdomain
+ * instead of a PKCE verifier — needed only by Zendesk today, the one
+ * connector whose authorize/token hosts are subdomain-scoped from the
+ * very first request (see `@signaldesk/integrations/zendesk`'s client.ts
+ * doc comment), so the subdomain the user typed into the connect form
+ * must survive the redirect round trip the same way a PKCE verifier does.
+ */
+export async function issueOAuthSubdomain(
+  providerName: string,
+  subdomain: string,
+): Promise<void> {
+  const cookieStore = await cookies();
+
+  cookieStore.set(subdomainCookieName(providerName), subdomain, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: MAX_AGE_SECONDS,
+    path: "/",
+  });
+}
+
+export async function consumeOAuthSubdomain(
+  providerName: string,
+): Promise<string | null> {
+  const cookieStore = await cookies();
+  const name = subdomainCookieName(providerName);
+  const subdomain = cookieStore.get(name)?.value;
+
+  cookieStore.delete(name);
+
+  return subdomain ?? null;
 }

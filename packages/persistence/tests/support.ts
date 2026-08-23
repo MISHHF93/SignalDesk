@@ -4,6 +4,7 @@ import type { PoolClient } from "pg";
 
 import { createDatabasePool, type DatabasePool } from "../src/client";
 import { provisionIdentityAndOrganization } from "../src/identity";
+import { startSyncJob, type SyncJobEntityType } from "../src/sync-jobs";
 import { withTenantContext } from "../src/tenant-context";
 
 export function getTestPool(): DatabasePool {
@@ -88,6 +89,32 @@ export async function seedSourceRecord(
   });
 
   return { id, idempotencyKey };
+}
+
+/**
+ * Starts a real `sync_jobs` row for tests that need a real `syncJobId` to
+ * pass to an ingest function (`ingestQuickBooksInvoice`/`ingestHubSpotDeal`/
+ * `ingestAsanaTask`/`ingestQuickBooksPayment`) now that `source_records`
+ * really foreign-keys to it (ADR 0029) — a random UUID would fail the FK.
+ */
+export async function seedSyncJob(
+  pool: DatabasePool,
+  organizationId: string,
+  integrationId: string,
+  sourceSystem: string,
+  entityType: SyncJobEntityType = "lead",
+): Promise<{ id: string }> {
+  const job = await startSyncJob(
+    pool,
+    organizationId,
+    integrationId,
+    sourceSystem,
+    entityType,
+    "manual",
+    null,
+  );
+
+  return { id: job.id };
 }
 
 /**

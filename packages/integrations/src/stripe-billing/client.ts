@@ -21,8 +21,17 @@
 
 import Stripe from "stripe";
 
+/**
+ * `maxNetworkRetries` isn't a Stripe default (the SDK ships with 0) — every
+ * other real provider client in this codebase (`fetchWithRetry`,
+ * `packages/integrations/src/shared/`) retries transient/429 failures, and
+ * billing-mutation calls (checkout, add-on changes) are exactly the kind of
+ * request where an unretried transient network blip becomes a customer-
+ * visible checkout failure. Stripe's SDK applies exponential backoff
+ * automatically once this is set.
+ */
 export function createStripeBillingClient(secretKey: string): Stripe {
-  return new Stripe(secretKey);
+  return new Stripe(secretKey, { maxNetworkRetries: 3 });
 }
 
 export interface CreateStripeCustomerInput {
@@ -199,12 +208,33 @@ export async function createSetupIntentForCustomer(
  * server-side return handler needs this to know what to attach. `null`
  * (not thrown) for a SetupIntent Stripe reports as not actually
  * succeeded/populated yet — the caller decides how to react.
+ *
+ * `expectedCustomerId` is required and enforced here, not left to the
+ * caller: `setupIntentId` arrives as a client-supplied query parameter
+ * on a real, unauthenticated-by-Stripe redirect (see
+ * `apps/web/app/billing/payment-method/return/route.ts`), and every
+ * SetupIntent this app creates is bound to a specific customer at
+ * creation (`createSetupIntentForCustomer`). Without this check, a
+ * caller who substituted a *different* organization's real (if
+ * unguessable) `setup_intent` value could have that organization's
+ * payment method attached to their own subscription instead — this
+ * function refuses to return a payment method id for a SetupIntent
+ * that doesn't belong to the customer the caller says it should.
  */
 export async function retrieveSetupIntentPaymentMethod(
   stripe: Stripe,
   setupIntentId: string,
+  expectedCustomerId: string,
 ): Promise<string | null> {
   const setupIntent = await stripe.setupIntents.retrieve(setupIntentId);
+  const actualCustomerId =
+    typeof setupIntent.customer === "string"
+      ? setupIntent.customer
+      : (setupIntent.customer?.id ?? null);
+
+  if (actualCustomerId !== expectedCustomerId) {
+    return null;
+  }
 
   return typeof setupIntent.payment_method === "string"
     ? setupIntent.payment_method
@@ -350,6 +380,24 @@ export async function resumeSubscription(
   await stripe.subscriptions.update(subscriptionId, {
     cancel_at_period_end: false,
   });
+}
+
+/**
+ * Compensating cleanup for start-checkout.ts's one real gap the advisory
+ * lock doesn't close: Stripe subscription creation succeeding while the
+ * follow-up local save (`createOrganizationSubscription`/
+ * `resurrectOrganizationSubscription`) then fails or throws, which would
+ * otherwise leave a live, billed Stripe subscription with no local record
+ * (`resurrectOrganizationSubscription`'s own doc comment already names
+ * this exact risk). Immediate cancellation, not `cancel_at_period_end` —
+ * unlike a customer-initiated cancel, this subscription was never actually
+ * saved locally, so nothing should keep billing for it.
+ */
+export async function cancelOrphanedSubscription(
+  stripe: Stripe,
+  subscriptionId: string,
+): Promise<void> {
+  await stripe.subscriptions.cancel(subscriptionId);
 }
 
 export interface PreviewInvoiceResult {

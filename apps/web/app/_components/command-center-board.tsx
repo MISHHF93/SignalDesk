@@ -4,13 +4,66 @@ import type { FilterDefinition, IntelligenceCard } from "@signaldesk/schemas";
 import { useMemo, useState, useTransition } from "react";
 
 import type {
+  ApproveAgentActionProposalAction,
   CreateInternalTaskAction,
+  DismissAgentActionProposalAction,
   ParseCommandAction,
+  RecordCardFeedbackAction,
+  RunAgentInvestigationAction,
+  SimulateInvoicePaymentAction,
 } from "../_lib/actions";
 import { buildTaskTitle } from "../_lib/task-title";
+import {
+  useBusinessSnapshot,
+  type SnapshotCard,
+} from "../_lib/use-business-snapshot";
 import { renderCard } from "../_cards/registry";
 import { Button } from "./button";
 import { CommandBar } from "./command-bar";
+import { RecentActivityPanel } from "./recent-activity-panel";
+
+// Live UI (Phase 2 of the implementation roadmap): a plain interval, not
+// WebSocket/SSE — the cheapest real prerequisite, reusing the existing
+// rate-limited `/api/business/snapshot` route (30 req/min) rather than a
+// new transport. None of the 8 registered deterministic capabilities call
+// any AI provider, so a poll tick costs a database read, not an LLM call.
+const POLL_INTERVAL_MS = 45_000;
+
+/**
+ * `useBusinessSnapshot` returns cards with every `Date` field serialized
+ * to a JSON string (`BusinessSnapshotJSON`, the real shape a `fetch` of
+ * `/api/business/snapshot` actually receives) — this restores the two
+ * real `Date` fields `IntelligenceCard` has
+ * (`freshness.asOf`, `sources[].lastSyncedAt`) so a polled card is a
+ * genuine `IntelligenceCard`, not a lookalike that breaks the first time
+ * something (e.g. `WhyDisclosure`'s relative-time formatting) calls a
+ * `Date` method on it.
+ */
+function reviveCard(card: SnapshotCard): IntelligenceCard {
+  return {
+    ...card,
+    sources: card.sources.map((source) => ({
+      ...source,
+      lastSyncedAt: new Date(source.lastSyncedAt),
+    })),
+    freshness: {
+      ...card.freshness,
+      asOf: new Date(card.freshness.asOf),
+    },
+    // `intelligenceCardSchema` infers `recommendedActions`/
+    // `relatedFindingIds` as plain (mutable) arrays; the generic JSON-
+    // revival mapped type makes every array `readonly`. Real values are
+    // identical either way — this is just satisfying the schema-inferred
+    // type's own shape. Assigned directly (not a conditional spread) since
+    // a conditional spread's inferred type keeps the earlier `...card`
+    // spread's `readonly` variant in the union even when this branch
+    // would otherwise override it.
+    recommendedActions: [...card.recommendedActions],
+    relatedFindingIds: card.relatedFindingIds
+      ? [...card.relatedFindingIds]
+      : undefined,
+  };
+}
 
 function matchesFilter(
   card: IntelligenceCard,
@@ -20,7 +73,12 @@ function matchesFilter(
     const amountCents = card.financialContext?.amountCents ?? 0;
     const thresholdDollars =
       typeof filter.value === "number" ? filter.value : Number(filter.value);
-    const thresholdCents = thresholdDollars * 100;
+    // Every other dollar->cents conversion in this codebase rounds
+    // (connector mappers, update-business-profile.ts) — this one didn't,
+    // so float imprecision (e.g. 0.55 * 100 === 55.00000000000001) could
+    // silently exclude a card sitting exactly on the typed threshold from
+    // a "show items over $X" filter (found by a deep audit, 2026-08-22).
+    const thresholdCents = Math.round(thresholdDollars * 100);
 
     return filter.operator === "gte"
       ? amountCents >= thresholdCents
@@ -29,6 +87,18 @@ function matchesFilter(
 
   if (filter.field === "severity") {
     return filter.operator === "eq" ? card.severity === filter.value : true;
+  }
+
+  if (filter.field === "text") {
+    // Business Search's real deterministic match (Prompt 31,
+    // docs/product-vision-backlog.md, ADR 0040) — a case-insensitive
+    // substring match against the card's own title and summary, which
+    // already carry the real entity name every capability puts there
+    // (customer name, contact name, task name, goal name — see each
+    // capability's own finding-building code). No separate entity search
+    // query: this reuses exactly the cards already rendered.
+    const haystack = `${card.title} ${card.summary}`.toLowerCase();
+    return haystack.includes(String(filter.value).toLowerCase());
   }
 
   // field === "owner"
@@ -52,6 +122,7 @@ const filterFieldLabel: Record<FilterDefinition["field"], string> = {
   financialAmount: "Value",
   severity: "Severity",
   owner: "Owner",
+  text: "Search",
 };
 
 // Distinguishes genuine creations from idempotent replays (a re-run of
@@ -81,6 +152,10 @@ function describeCommandTaskResult(
 }
 
 function describeFilter(filter: FilterDefinition): string {
+  if (filter.field === "text") {
+    return `${filterFieldLabel.text}: "${filter.value}"`;
+  }
+
   const operator = filter.operator === "gte" ? "≥" : "=";
   const value =
     filter.field === "financialAmount"
@@ -94,10 +169,33 @@ export function CommandCenterBoard({
   initialCards,
   createTaskAction,
   parseCommandAction,
+  runAgentInvestigationAction,
+  aiInvestigationAvailable,
+  approveAgentActionProposalAction,
+  dismissAgentActionProposalAction,
+  simulateInvoicePaymentAction,
+  recordCardFeedbackAction,
 }: {
   initialCards: readonly IntelligenceCard[];
   createTaskAction: CreateInternalTaskAction;
   parseCommandAction: ParseCommandAction;
+  /**
+   * Optional: absent when the Agent Fabric feature isn't wired in for this
+   * deployment. When present, "investigate risk" in the command bar becomes
+   * a real, business-wide investigation instead of an unrecognized command.
+   */
+  runAgentInvestigationAction?: RunAgentInvestigationAction;
+  /** The real, live `isAgentFabricEnabled()` kill-switch state
+   * (`_lib/agent-config.ts`), computed server-side — distinct from
+   * `runAgentInvestigationAction` being wired at all: the action can be
+   * present but the org-wide switch still off. Passed through to
+   * `CommandBar` so that's surfaced proactively rather than only
+   * discovered after typing "investigate" and getting a decline back. */
+  aiInvestigationAvailable: boolean;
+  approveAgentActionProposalAction?: ApproveAgentActionProposalAction;
+  dismissAgentActionProposalAction?: DismissAgentActionProposalAction;
+  simulateInvoicePaymentAction?: SimulateInvoicePaymentAction;
+  recordCardFeedbackAction?: RecordCardFeedbackAction;
 }) {
   const [activeFilters, setActiveFilters] = useState<
     readonly FilterDefinition[]
@@ -105,14 +203,40 @@ export function CommandCenterBoard({
   const [focusedCardId, setFocusedCardId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  // Cards the Agent Fabric added this session — concatenated with
+  // whichever deterministic card list is current (the server-rendered
+  // initialCards until the first poll lands, the polled snapshot after)
+  // rather than replacing them, since an investigation only ever adds one
+  // reconciled recommendation on top of what the deterministic side
+  // already showed. A poll tick never carries a prior agent investigation
+  // result — that's real client-session state, not something
+  // `getTodaysAttention` recomputes — so it's never a candidate for
+  // replacement here.
+  const [agentCards, setAgentCards] = useState<readonly IntelligenceCard[]>([]);
+  const { snapshot: polledSnapshot } = useBusinessSnapshot({
+    pollIntervalMs: POLL_INTERVAL_MS,
+  });
+
+  // Prefer the freshest polled cards once a poll has actually completed;
+  // fall back to the real server-rendered set before that (never an empty
+  // flash while the first background poll is still in flight).
+  const deterministicCards = useMemo(
+    () => polledSnapshot?.cards.map(reviveCard) ?? initialCards,
+    [polledSnapshot, initialCards],
+  );
+
+  const allCards = useMemo(
+    () => [...deterministicCards, ...agentCards],
+    [deterministicCards, agentCards],
+  );
 
   const visibleCards = useMemo(() => {
     if (focusedCardId) {
-      return initialCards.filter((card) => card.id === focusedCardId);
+      return allCards.filter((card) => card.id === focusedCardId);
     }
 
-    return applyFilters(initialCards, activeFilters);
-  }, [initialCards, activeFilters, focusedCardId]);
+    return applyFilters(allCards, activeFilters);
+  }, [allCards, activeFilters, focusedCardId]);
 
   function clearView() {
     setActiveFilters([]);
@@ -136,7 +260,7 @@ export function CommandCenterBoard({
       if (intent.type === "filter") {
         setFocusedCardId(null);
         setActiveFilters(intent.filters);
-        const matchCount = applyFilters(initialCards, intent.filters).length;
+        const matchCount = applyFilters(allCards, intent.filters).length;
         setStatusMessage(
           matchCount === 0
             ? "No cards match that filter right now."
@@ -158,7 +282,7 @@ export function CommandCenterBoard({
         intent.type === "propose_action" &&
         intent.actionType === "create_internal_task"
       ) {
-        const targets = initialCards.filter((card) =>
+        const targets = allCards.filter((card) =>
           intent.targets.includes(card.id),
         );
         let created = 0;
@@ -184,6 +308,34 @@ export function CommandCenterBoard({
         return;
       }
 
+      if (intent.type === "agent_investigate") {
+        if (!runAgentInvestigationAction) {
+          setStatusMessage("AI investigation is not available.");
+          return;
+        }
+
+        const investigation = await runAgentInvestigationAction();
+
+        if (!investigation.ok) {
+          setStatusMessage(`Investigation failed. ${investigation.error}`);
+          return;
+        }
+
+        const newCard = investigation.card;
+
+        if (newCard) {
+          setFocusedCardId(null);
+          setActiveFilters([]);
+          setAgentCards((current) => [
+            ...current.filter((card) => card.id !== newCard.id),
+            newCard,
+          ]);
+        }
+
+        setStatusMessage(investigation.message);
+        return;
+      }
+
       setStatusMessage("That command isn't supported yet.");
     });
   }
@@ -194,6 +346,7 @@ export function CommandCenterBoard({
         isPending={isPending}
         statusMessage={statusMessage}
         onSubmitCommand={handleSubmitCommand}
+        aiInvestigationAvailable={aiInvestigationAvailable}
       />
 
       {focusedCardId || activeFilters.length > 0 ? (
@@ -221,15 +374,29 @@ export function CommandCenterBoard({
 
       {visibleCards.length === 0 ? (
         <p className="noCardsMessage">
-          {initialCards.length === 0
+          {allCards.length === 0
             ? "No cards need your attention right now."
             : "Nothing matches the current view."}
         </p>
       ) : (
         <div className="dynamicCardStack">
-          {visibleCards.map((card) => renderCard(card, createTaskAction))}
+          {visibleCards.map((card) =>
+            renderCard(
+              card,
+              createTaskAction,
+              approveAgentActionProposalAction,
+              dismissAgentActionProposalAction,
+              simulateInvoicePaymentAction,
+              recordCardFeedbackAction,
+            ),
+          )}
         </div>
       )}
+
+      <RecentActivityPanel
+        recentActions={polledSnapshot?.recentActions ?? []}
+        now={new Date()}
+      />
     </>
   );
 }

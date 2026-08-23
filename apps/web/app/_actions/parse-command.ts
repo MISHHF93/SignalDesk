@@ -21,11 +21,22 @@ export async function parseCommandAction(
   rawText: string,
   visibleCards: readonly IntelligenceCard[],
 ): Promise<ParseCommandResult> {
-  const session = await getCurrentOrganization();
+  try {
+    const session = await getCurrentOrganization();
 
-  if (!session) {
+    if (!session) {
+      return { recognized: false, rawText: rawText.trim() };
+    }
+
+    return await businessAIOrchestrator.interpretCommand(rawText, visibleCards);
+  } catch {
+    // `ParseCommandResult` has no error variant to widen for this — it's
+    // "recognized" or "not," never "failed to check." A thrown session
+    // lookup (e.g. a real DB error) is honestly indistinguishable from
+    // "couldn't process this command" from the caller's point of view,
+    // matching the same fallback already used when there's no session at
+    // all, rather than letting the exception surface as a raw error
+    // boundary.
     return { recognized: false, rawText: rawText.trim() };
   }
-
-  return businessAIOrchestrator.interpretCommand(rawText, visibleCards);
 }

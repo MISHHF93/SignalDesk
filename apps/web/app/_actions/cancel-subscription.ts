@@ -49,7 +49,8 @@ export async function cancelSubscriptionAction(
     return { error: "Sign in to manage your subscription." };
   }
 
-  const rateLimit = checkRateLimit(
+  const rateLimit = await checkRateLimit(
+    getPool(),
     `cancel-subscription:${session.organizationId}`,
     10,
     60 * 60 * 1000,

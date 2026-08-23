@@ -17,10 +17,50 @@
  * so the connected account can show a real label, matching Slack's own
  * precedent rather than leaving it null the way HubSpot/Stripe/QuickBooks
  * must.
+ *
+ * PKCE (checked this session, 2026, against multiple current Google
+ * sources rather than assumed — the same discipline `hubspot/client.ts`'s
+ * doc comment applies to reach the opposite conclusion for that
+ * provider): Google's own "Using OAuth 2.0 for Web Server Applications"
+ * prose page (developers.google.com/identity/protocols/oauth2/web-server)
+ * does not itself list `code_challenge`/`code_verifier` among that flow's
+ * documented parameters — only the separate native/installed-app page
+ * (developers.google.com/identity/protocols/oauth2/native-app) narrates
+ * PKCE. But three independent, authoritative signals confirm the
+ * underlying authorize/token endpoints (`accounts.google.com/o/oauth2/v2/
+ * auth` and `oauth2.googleapis.com/token` — the exact same endpoints this
+ * module already calls) implement RFC 7636 generically, not gated by
+ * client type: (1) Google's own OAuth engineer announced on the IETF
+ * oauth-wg mailing list that Google "rolled out full PKCE (RFC7636)
+ * support on our OAuth endpoints" as an endpoint-wide change, not scoped
+ * to one app type (mailarchive.ietf.org/arch/msg/oauth/
+ * xpx5jVTTy0LqKThdYh9aqUIba1c/); (2) Google's own officially-maintained
+ * `google-auth-library-nodejs`'s `OAuth2Client` — the same generic class
+ * used for confidential, client-secret-bearing web-server flows, not a
+ * separate "installed app" class — implements
+ * `generateCodeVerifierAsync()`/`generateAuthUrl({code_challenge,
+ * code_challenge_method})`/`getToken({codeVerifier})` with no client-type
+ * restriction in its source; and (3) Auth.js/NextAuth.js's built-in
+ * Google provider — a widely-used third party that specifically targets
+ * Google's server-side, client-secret flow — defaults to `checks:
+ * ["pkce", "state"]`, i.e. it ships PKCE on by default for exactly this
+ * flow. Given that convergent evidence (Google's own protocol-level
+ * statement, Google's own library, and independent third-party practice),
+ * this is treated as genuine, verified support — not the HubSpot case,
+ * where the provider's own docs enumerate a parameter list that excludes
+ * `code_verifier` and an open community thread confirms it as a real,
+ * unresolved gap. Sending PKCE here is a real, working defense-in-depth
+ * layer, matching current IETF guidance (RFC 9700) for confidential
+ * clients, exactly as `microsoft-oauth.ts` already does for the same
+ * reason.
  */
 
 import { fetchWithRetry } from "./fetch-with-retry";
+import { throwUpstreamError } from "./upstream-error";
 import { decodeJwtPayload } from "./jwt";
+import { generatePkcePair, type PkcePair } from "./pkce";
+
+export { generatePkcePair, type PkcePair };
 
 const AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -38,6 +78,7 @@ export function buildGoogleAuthorizationUrl(
   config: Pick<GoogleOAuthConfig, "clientId" | "redirectUri">,
   scopes: readonly string[],
   state: string,
+  codeChallenge: string,
 ): string {
   const url = new URL(AUTHORIZE_URL);
   url.searchParams.set("client_id", config.clientId);
@@ -51,6 +92,8 @@ export function buildGoogleAuthorizationUrl(
   url.searchParams.set("access_type", "offline");
   url.searchParams.set("prompt", "consent");
   url.searchParams.set("state", state);
+  url.searchParams.set("code_challenge", codeChallenge);
+  url.searchParams.set("code_challenge_method", "S256");
   return url.toString();
 }
 
@@ -84,6 +127,7 @@ function decodeGoogleIdToken(idToken: string): GoogleIdTokenClaims {
 export async function exchangeGoogleAuthorizationCode(
   config: GoogleOAuthConfig,
   code: string,
+  codeVerifier: string,
 ): Promise<GoogleTokenResponse> {
   const response = await fetchWithRetry(TOKEN_URL, {
     method: "POST",
@@ -94,13 +138,12 @@ export async function exchangeGoogleAuthorizationCode(
       client_id: config.clientId,
       client_secret: config.clientSecret,
       redirect_uri: config.redirectUri,
+      code_verifier: codeVerifier,
     }),
   });
 
   if (!response.ok) {
-    throw new Error(
-      `Google token request failed: ${response.status} ${await response.text()}`,
-    );
+    await throwUpstreamError("Google token request", response);
   }
 
   const payload = (await response.json()) as RawGoogleTokenResponse;
@@ -126,6 +169,50 @@ export async function exchangeGoogleAuthorizationCode(
     googleUserId: claims.sub,
     email: claims.email ?? null,
   };
+}
+
+export interface GoogleRefreshedAccessToken {
+  readonly accessToken: string;
+  readonly expiresIn: number;
+}
+
+/**
+ * Refreshes an expired/expiring access token (Phase 4b, implementation
+ * roadmap — the real prerequisite for a Gmail "Sync Now" run more than
+ * ~1 hour after connecting, the same real gap `ensureFreshHubSpotAccessToken`
+ * already solves for HubSpot). Verified against Google's current identity
+ * platform docs this session, not assumed: the refresh grant never
+ * returns a new `refresh_token` (Google doesn't rotate it on refresh —
+ * the original from the authorization-code exchange stays valid), so the
+ * caller keeps its already-stored `refreshToken` unchanged and only
+ * re-persists the new `accessToken`/`expiresAt`, mirroring
+ * `refreshHubSpotAccessToken`'s own contract.
+ */
+export async function refreshGoogleAccessToken(
+  config: GoogleOAuthConfig,
+  refreshToken: string,
+): Promise<GoogleRefreshedAccessToken> {
+  const response = await fetchWithRetry(TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: config.clientId,
+      client_secret: config.clientSecret,
+    }),
+  });
+
+  if (!response.ok) {
+    await throwUpstreamError("Google token refresh", response);
+  }
+
+  const payload = (await response.json()) as {
+    access_token: string;
+    expires_in: number;
+  };
+
+  return { accessToken: payload.access_token, expiresIn: payload.expires_in };
 }
 
 /**

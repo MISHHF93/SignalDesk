@@ -15,6 +15,17 @@ export interface ProvisionIdentityInput {
   readonly identityProviderSubject: string;
   readonly displayName: string;
   readonly primaryEmail: string;
+  /**
+   * A real, pending, unexpired invite token whose email matches
+   * `primaryEmail` (Phase 3, implementation roadmap) — when present and
+   * valid, the new user joins that invite's organization with its role
+   * instead of provisioning their own solo one. `undefined`/`null`
+   * (every existing caller before this) is the function's original,
+   * unchanged behavior — see `provision_identity_and_organization`'s own
+   * doc comment (drizzle/0046) for why this couldn't be a second,
+   * parallel function instead.
+   */
+  readonly inviteToken?: string | null;
 }
 
 export interface ProvisionIdentityResult {
@@ -23,11 +34,13 @@ export interface ProvisionIdentityResult {
 }
 
 /**
- * Creates a new user, a solo organization for them, and an `owner`
- * membership, all in one atomic call. In production this runs automatically
- * via the `on_auth_user_created` trigger on `auth.users`; tests call it
- * directly to seed a real identity, since `users` has no ordinary INSERT
- * policy for app_runtime to use instead.
+ * Creates a new user and either joins a real pending invite's
+ * organization (see `inviteToken` above) or provisions a solo
+ * organization for them, with a real membership either way, all in one
+ * atomic call. In production this runs automatically via the
+ * `on_auth_user_created` trigger on `auth.users`; tests call it directly
+ * to seed a real identity, since `users` has no ordinary INSERT policy
+ * for app_runtime to use instead.
  */
 export async function provisionIdentityAndOrganization(
   pool: DatabasePool,
@@ -38,12 +51,13 @@ export async function provisionIdentityAndOrganization(
     user_id: string;
   }>(
     `select organization_id, user_id
-     from provision_identity_and_organization($1, $2, $3, $4)`,
+     from provision_identity_and_organization($1, $2, $3, $4, $5)`,
     [
       input.identityProvider,
       input.identityProviderSubject,
       input.displayName,
       input.primaryEmail,
+      input.inviteToken ?? null,
     ],
   );
 

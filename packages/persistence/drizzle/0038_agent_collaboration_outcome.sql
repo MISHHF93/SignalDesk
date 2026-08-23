@@ -1,0 +1,4 @@
+ALTER TABLE "agent_collaborations" ADD COLUMN "outcome" text;--> statement-breakpoint
+ALTER TABLE "agent_collaborations" ADD COLUMN "reviewed_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "agent_collaborations" ADD CONSTRAINT "agent_collaborations_outcome_allowed" CHECK ("agent_collaborations"."outcome" is null or "agent_collaborations"."outcome" in ('approved', 'dismissed'));--> statement-breakpoint
+ALTER TABLE "agent_collaborations" ADD CONSTRAINT "agent_collaborations_outcome_reviewed_consistent" CHECK (("agent_collaborations"."outcome" is null and "agent_collaborations"."reviewed_at" is null) or ("agent_collaborations"."outcome" is not null and "agent_collaborations"."reviewed_at" is not null));

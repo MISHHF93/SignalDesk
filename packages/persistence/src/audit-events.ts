@@ -11,12 +11,34 @@ import { resolveMembershipId } from "./membership";
 import { withTenantContext } from "./tenant-context";
 
 export interface RecordAuditEventInput {
-  readonly userId: string;
+  /**
+   * The human user who triggered this event — required (checked at call
+   * time, not just by the type) whenever `actorKind` is `"user"`, the
+   * default. Omit it entirely when `actorKind` is `"agent"`: an
+   * agent-attributed event has no human actor to resolve a membership for,
+   * so there is nothing honest to pass here.
+   */
+  readonly userId?: string;
   readonly eventType: string;
   readonly subjectType: string;
   readonly subjectId: string;
   readonly outcome: "succeeded" | "failed" | "denied" | "allowed" | "recorded";
   readonly metadata: Record<string, unknown>;
+  /**
+   * Defaults to `"user"` — every existing call site is unaffected. Pass
+   * `"agent"` (with `actorAgentId` set) to attribute this event to an
+   * AGENT_REGISTRY specialist instead of a human membership (see
+   * AgentGatewayService, apps/web/app/_lib/agent-gateway.ts). Pass
+   * `"integration"` for an event recorded by an unauthenticated
+   * server-to-server flow with no human or agent actor (e.g. the
+   * QuickBooks webhook handler) — no membership or agent id is resolved
+   * or required, matching the DB's own `audit_events_actor_kind_allowed`/
+   * `audit_events_actor_membership_consistent` checks, which already
+   * allow `'system'`/`'integration'` with both id columns null.
+   */
+  readonly actorKind?: "user" | "agent" | "integration";
+  /** Required when `actorKind` is `"agent"`; ignored otherwise. */
+  readonly actorAgentId?: string;
 }
 
 /**
@@ -35,11 +57,27 @@ export async function insertAuditEvent(
   organizationId: string,
   input: RecordAuditEventInput,
 ): Promise<void> {
-  const membershipId = await resolveMembershipId(
-    client,
-    organizationId,
-    input.userId,
-  );
+  const actorKind = input.actorKind ?? "user";
+
+  if (actorKind === "agent" && !input.actorAgentId) {
+    throw new Error(
+      'insertAuditEvent: actorAgentId is required when actorKind is "agent"',
+    );
+  }
+  if (actorKind === "user" && !input.userId) {
+    throw new Error(
+      'insertAuditEvent: userId is required when actorKind is "user"',
+    );
+  }
+
+  // Only a real human actor resolves to a membership row — an agent actor
+  // is a static AGENT_REGISTRY catalog id, never a membership, so skipping
+  // this entirely (rather than passing null through resolveMembershipId,
+  // which would throw) is the correct branch, not a shortcut.
+  const membershipId =
+    actorKind === "user"
+      ? await resolveMembershipId(client, organizationId, input.userId!)
+      : null;
 
   const eventId = randomUUID();
   const metadataJson = JSON.stringify(input.metadata);
@@ -51,17 +89,19 @@ export async function insertAuditEvent(
 
   await client.query(
     `insert into audit_events (
-       id, organization_id, actor_membership_id, actor_kind, event_type, event_schema_version,
+       id, organization_id, actor_membership_id, actor_kind, actor_agent_id, event_type, event_schema_version,
        subject_type, subject_id, correlation_id, idempotency_key, outcome,
        payload_digest, event_digest, metadata, retention_class, retain_until, occurred_at
      ) values (
-       $1, $2, $3, 'user', $4, 1, $5, $6, $7, $8, $9,
-       $10, $11, $12::jsonb, $13, now() + $14::interval, now()
+       $1, $2, $3, $4, $5, $6, 1, $7, $8, $9, $10, $11,
+       $12, $13, $14::jsonb, $15, now() + $16::interval, now()
      )`,
     [
       eventId,
       organizationId,
       membershipId,
+      actorKind,
+      actorKind === "agent" ? input.actorAgentId : null,
       input.eventType,
       input.subjectType,
       input.subjectId,

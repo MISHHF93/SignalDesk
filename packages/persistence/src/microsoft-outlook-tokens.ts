@@ -33,6 +33,17 @@ export async function storeMicrosoftOutlookTokens(
   });
 }
 
+/**
+ * No production caller today — unlike most connectors' disconnect
+ * actions, `disconnectMicrosoftOutlookAction` never reads the stored
+ * token back to revoke it, because Microsoft has no real single-token
+ * revoke endpoint to call (see that action's own doc comment). Kept
+ * real and tested (not deleted) as the honest counterpart to
+ * `storeMicrosoftOutlookTokens` for whenever a real read path (a token
+ * refresh, a "last connected" detail view) needs it — found unwired in
+ * a dead-code audit this session and disclosed here rather than left
+ * undocumented.
+ */
 export async function getMicrosoftOutlookTokens(
   pool: DatabasePool,
   organizationId: string,

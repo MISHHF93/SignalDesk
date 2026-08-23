@@ -3,6 +3,7 @@ import type {
   PrioritizedFinding,
 } from "@signaldesk/intelligence";
 import {
+  applyAttentionAdmission,
   prioritizeFindings,
   runIntelligenceCapabilities,
 } from "@signaldesk/intelligence";
@@ -13,8 +14,19 @@ import type { AIProvider, DashboardCommandContext } from "./ai-provider";
 import { parseCommand, type ParseCommandResult } from "./parse-command";
 
 export interface BusinessAttention {
+  /** Every real finding, prioritized — including ones admission deferred.
+   * Callers that need the complete picture (metrics, exports, the Daily
+   * Brief) should read this, not `cards`. */
   readonly findings: readonly PrioritizedFinding[];
+  /** Only the admitted findings, composed into cards — see
+   * `applyAttentionAdmission` (`@signaldesk/intelligence`) for why this is
+   * capped rather than one card per finding. */
   readonly cards: readonly IntelligenceCard[];
+  /** How many real, prioritized findings exist below the admission cap —
+   * `0` when everything fit. Never silently dropped: a caller surfacing
+   * `cards` should also surface this count, honestly, rather than letting
+   * the cap look like "nothing else needs attention." */
+  readonly deferredCount: number;
 }
 
 export interface BusinessAIOrchestrator {
@@ -49,9 +61,10 @@ export function createBusinessAIOrchestrator(
     ): Promise<BusinessAttention> {
       const findings = await runIntelligenceCapabilities(context);
       const prioritized = prioritizeFindings(findings);
-      const cards = composeCards(prioritized);
+      const { admitted, deferredCount } = applyAttentionAdmission(prioritized);
+      const cards = composeCards(admitted);
 
-      return { findings: prioritized, cards };
+      return { findings: prioritized, cards, deferredCount };
     },
 
     async interpretCommand(

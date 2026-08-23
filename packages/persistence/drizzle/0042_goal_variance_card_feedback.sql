@@ -1,0 +1,2 @@
+ALTER TABLE "card_feedback" DROP CONSTRAINT "card_feedback_card_type_allowed";--> statement-breakpoint
+ALTER TABLE "card_feedback" ADD CONSTRAINT "card_feedback_card_type_allowed" CHECK ("card_feedback"."card_type" in ('stuck', 'lead_risk', 'integration_health', 'invoice_risk', 'task_risk', 'agent_recommendation', 'payment_received', 'goal_variance'));

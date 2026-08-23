@@ -1,12 +1,29 @@
 import { describe, expect, it, vi } from "vitest";
 import type Stripe from "stripe";
 
-import {
+// Only `createStripeBillingClient` ever calls `new Stripe(...)` — every
+// other function under test receives a pre-built client via `fakeStripe`,
+// so mocking the constructor here cannot affect any other test in this
+// file.
+const stripeConstructorMock = vi.fn();
+
+vi.mock("stripe", () => {
+  class MockStripe {
+    constructor(...args: unknown[]) {
+      stripeConstructorMock(...args);
+    }
+  }
+  return { default: MockStripe };
+});
+
+const {
   addSubscriptionAddonItem,
   attachDefaultPaymentMethod,
+  cancelOrphanedSubscription,
   cancelSubscriptionAtPeriodEnd,
   constructStripeWebhookEvent,
   createSetupIntentForCustomer,
+  createStripeBillingClient,
   createStripeCustomer,
   createSubscriptionWithImmediatePayment,
   createTrialSubscription,
@@ -17,7 +34,7 @@ import {
   retrieveIncompleteSubscriptionClientSecret,
   retrieveSetupIntentPaymentMethod,
   updateSubscriptionPrice,
-} from "./client";
+} = await import("./client");
 
 /** A minimal stand-in for the Stripe SDK client, typed loosely enough to
  * avoid re-declaring the entire real interface — each test wires up only
@@ -25,6 +42,16 @@ import {
 function fakeStripe(overrides: Record<string, unknown>): Stripe {
   return overrides as unknown as Stripe;
 }
+
+describe("createStripeBillingClient", () => {
+  it("configures automatic network retries, unlike the Stripe SDK's zero-retry default", () => {
+    createStripeBillingClient("sk_test_123");
+
+    expect(stripeConstructorMock).toHaveBeenCalledWith("sk_test_123", {
+      maxNetworkRetries: 3,
+    });
+  });
+});
 
 describe("createStripeCustomer", () => {
   it("creates a customer with organizationId in metadata", async () => {
@@ -114,7 +141,7 @@ describe("createSubscriptionWithImmediatePayment", () => {
       id: "sub_456",
       status: "incomplete",
       latest_invoice: {
-        confirmation_secret: { client_secret: "pi_123_secret_abc" },
+        confirmation_secret: { client_secret: "pi_123_secret_abc" }, // gitleaks:allow — fake test fixture, not a real Stripe secret
       },
     });
     const stripe = fakeStripe({ subscriptions: { create } });
@@ -127,7 +154,7 @@ describe("createSubscriptionWithImmediatePayment", () => {
     expect(result).toEqual({
       subscriptionId: "sub_456",
       status: "incomplete",
-      clientSecret: "pi_123_secret_abc",
+      clientSecret: "pi_123_secret_abc", // gitleaks:allow — fake test fixture, not a real Stripe secret
     });
     expect(create).toHaveBeenCalledWith({
       customer: "cus_123",
@@ -177,7 +204,7 @@ describe("retrieveIncompleteSubscriptionClientSecret", () => {
       id: "sub_456",
       status: "incomplete",
       latest_invoice: {
-        confirmation_secret: { client_secret: "pi_123_secret_abc" },
+        confirmation_secret: { client_secret: "pi_123_secret_abc" }, // gitleaks:allow — fake test fixture, not a real Stripe secret
       },
     });
     const stripe = fakeStripe({ subscriptions: { retrieve } });
@@ -253,13 +280,17 @@ describe("createSetupIntentForCustomer", () => {
 });
 
 describe("retrieveSetupIntentPaymentMethod", () => {
-  it("returns the payment method id from a completed SetupIntent", async () => {
-    const retrieve = vi.fn().mockResolvedValue({ payment_method: "pm_123" });
+  it("returns the payment method id from a completed SetupIntent belonging to the expected customer", async () => {
+    const retrieve = vi.fn().mockResolvedValue({
+      payment_method: "pm_123",
+      customer: "cus_real",
+    });
     const stripe = fakeStripe({ setupIntents: { retrieve } });
 
     const paymentMethodId = await retrieveSetupIntentPaymentMethod(
       stripe,
       "seti_123",
+      "cus_real",
     );
 
     expect(paymentMethodId).toBe("pm_123");
@@ -267,26 +298,78 @@ describe("retrieveSetupIntentPaymentMethod", () => {
   });
 
   it("returns null when the SetupIntent has no payment method yet", async () => {
-    const retrieve = vi.fn().mockResolvedValue({ payment_method: null });
+    const retrieve = vi
+      .fn()
+      .mockResolvedValue({ payment_method: null, customer: "cus_real" });
     const stripe = fakeStripe({ setupIntents: { retrieve } });
 
     const paymentMethodId = await retrieveSetupIntentPaymentMethod(
       stripe,
       "seti_123",
+      "cus_real",
     );
 
     expect(paymentMethodId).toBeNull();
   });
 
   it("returns null when payment_method is an expanded object rather than an id string", async () => {
-    const retrieve = vi
-      .fn()
-      .mockResolvedValue({ payment_method: { id: "pm_123" } });
+    const retrieve = vi.fn().mockResolvedValue({
+      payment_method: { id: "pm_123" },
+      customer: "cus_real",
+    });
     const stripe = fakeStripe({ setupIntents: { retrieve } });
 
     const paymentMethodId = await retrieveSetupIntentPaymentMethod(
       stripe,
       "seti_123",
+      "cus_real",
+    );
+
+    expect(paymentMethodId).toBeNull();
+  });
+
+  it("refuses a SetupIntent that belongs to a different customer — the cross-tenant guard", async () => {
+    const retrieve = vi.fn().mockResolvedValue({
+      payment_method: "pm_123",
+      customer: "cus_someone_else",
+    });
+    const stripe = fakeStripe({ setupIntents: { retrieve } });
+
+    const paymentMethodId = await retrieveSetupIntentPaymentMethod(
+      stripe,
+      "seti_123",
+      "cus_real",
+    );
+
+    expect(paymentMethodId).toBeNull();
+  });
+
+  it("refuses a SetupIntent with an expanded customer object that doesn't match", async () => {
+    const retrieve = vi.fn().mockResolvedValue({
+      payment_method: "pm_123",
+      customer: { id: "cus_someone_else" },
+    });
+    const stripe = fakeStripe({ setupIntents: { retrieve } });
+
+    const paymentMethodId = await retrieveSetupIntentPaymentMethod(
+      stripe,
+      "seti_123",
+      "cus_real",
+    );
+
+    expect(paymentMethodId).toBeNull();
+  });
+
+  it("refuses a SetupIntent with no customer at all", async () => {
+    const retrieve = vi
+      .fn()
+      .mockResolvedValue({ payment_method: "pm_123", customer: null });
+    const stripe = fakeStripe({ setupIntents: { retrieve } });
+
+    const paymentMethodId = await retrieveSetupIntentPaymentMethod(
+      stripe,
+      "seti_123",
+      "cus_real",
     );
 
     expect(paymentMethodId).toBeNull();
@@ -435,6 +518,17 @@ describe("cancelSubscriptionAtPeriodEnd / resumeSubscription", () => {
     expect(update).toHaveBeenCalledWith("sub_123", {
       cancel_at_period_end: false,
     });
+  });
+});
+
+describe("cancelOrphanedSubscription", () => {
+  it("cancels immediately, unlike cancelSubscriptionAtPeriodEnd", async () => {
+    const cancel = vi.fn().mockResolvedValue({});
+    const stripe = fakeStripe({ subscriptions: { cancel } });
+
+    await cancelOrphanedSubscription(stripe, "sub_orphan_123");
+
+    expect(cancel).toHaveBeenCalledWith("sub_orphan_123");
   });
 });
 

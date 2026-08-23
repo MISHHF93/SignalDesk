@@ -48,7 +48,8 @@ export async function GET(request: Request) {
     return redirectTo("error");
   }
 
-  const rateLimit = checkRateLimit(
+  const rateLimit = await checkRateLimit(
+    getPool(),
     `slack-callback:${await getClientIp()}`,
     20,
     60 * 60 * 1000,

@@ -1,0 +1,21 @@
+title = "SignalDesk secret-scanning config"
+
+# Extends gitleaks' own default rule set (https://github.com/gitleaks/gitleaks)
+# rather than replacing it — this repo has no reason to narrow real-world
+# secret-detection coverage, only to keep noisy/irrelevant paths out of scope.
+[extend]
+useDefault = true
+
+[allowlist]
+paths = [
+  '''node_modules/''',
+  '''\.next/''',
+  '''\.turbo/''',
+  '''dist/''',
+  '''coverage/''',
+  '''pnpm-lock\.yaml''',
+  # Never committed (.gitignore) — real local secrets, correctly out of
+  # scope for a scan of what could actually reach a shared branch.
+  '''\.env\.local$''',
+  '''\.env\.[^.]+\.local$''',
+]

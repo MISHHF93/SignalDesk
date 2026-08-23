@@ -92,14 +92,14 @@ export function ManageAddonForm({
 
           return (
             <li key={addon.addonKey}>
-              <div>
+              <dl>
                 <dt>{addon.name}</dt>
                 <dd>
                   {describeGrant(addon)} —{" "}
                   {formatCents(addon.amountCents, addon.billingInterval)}
                   {owned ? " — active" : null}
                 </dd>
-              </div>
+              </dl>
               {owned ? (
                 <Button
                   variant="ghost"

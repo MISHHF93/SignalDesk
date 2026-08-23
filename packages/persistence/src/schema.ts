@@ -67,6 +67,20 @@ export const organizations = pgTable(
     weeklyRecapEnabled: boolean("weekly_recap_enabled")
       .notNull()
       .default(false),
+    // Set only by anonymize_organization() (0032) — a real "delete my
+    // organization" request. A deactivated org can never resolve to a
+    // valid session again (resolve_memberships_for_identity excludes it),
+    // but its row and audit trail survive, matching ADR 0003's provenance
+    // principle. See ADR 0018.
+    deactivatedAt: timestamp("deactivated_at", {
+      mode: "date",
+      withTimezone: true,
+    }),
+    // "unspecified" (default) or "professional_services" (0033/ADR 0019) —
+    // used only to recommend which ConnectorPurposes matter most on the
+    // /integrations Business Data Map. See `industryProfiles` in
+    // @signaldesk/integrations for the one real profile.
+    industry: text("industry").notNull().default("unspecified"),
     ...timestamps,
   },
   (table) => [
@@ -94,6 +108,10 @@ export const organizations = pgTable(
     check(
       "organizations_working_days_bitmask_range",
       sql`${table.workingDaysBitmask} between 0 and 127`,
+    ),
+    check(
+      "organizations_industry_allowed",
+      sql`${table.industry} in ('unspecified', 'professional_services')`,
     ),
   ],
 );
@@ -180,6 +198,14 @@ export const integrations = pgTable(
     // returns one (HubSpot's token exchange doesn't), so this stays
     // honestly unset rather than guessed at.
     externalAccountLabel: text("external_account_label"),
+    // Which of this connector's declared capability ids this connection
+    // has enabled (ADR 0021/ConnectorSettings) — empty by default, since
+    // no connector has a real write action to gate yet. Not wired to any
+    // UI in this pass; see connector-settings.ts's doc comment.
+    enabledCapabilityIds: text("enabled_capability_ids")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
     ...timestamps,
   },
   (table) => [
@@ -208,6 +234,102 @@ export const integrations = pgTable(
     check(
       "integrations_status_allowed",
       sql`${table.status} in ('pending', 'active', 'degraded', 'disconnected', 'revoked')`,
+    ),
+  ],
+);
+
+// One row per real sync run (ADR 0021) — observability for the three
+// connectors with a real one-time sync-on-connect (HubSpot, QuickBooks,
+// Asana). Tracks status/counts/timing and a computed cursor value without
+// wiring that cursor into the fetch query yet — see
+// ConnectorReadiness.incrementalSyncImplemented, @signaldesk/integrations.
+export const syncJobs = pgTable(
+  "sync_jobs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    integrationId: uuid("integration_id").notNull(),
+    sourceSystem: text("source_system").notNull(),
+    // Which canonical entity this run synced — distinct from sourceSystem
+    // (FK'd to the connector's own source_system, so it can't double as an
+    // entity discriminator). Added when QuickBooks gained a second synced
+    // entity type (payments, alongside invoices) under the same
+    // source_system: without this, "the previous run's cursorAfter" would
+    // read whichever entity type happened to sync most recently, silently
+    // corrupting the other entity's incremental-sync cursor.
+    entityType: text("entity_type").notNull(),
+    trigger: text("trigger").notNull(),
+    status: text("status").notNull().default("running"),
+    itemsIngested: integer("items_ingested").notNull().default(0),
+    itemsSkipped: integer("items_skipped").notNull().default(0),
+    cursorBefore: text("cursor_before"),
+    cursorAfter: text("cursor_after"),
+    errorMessage: text("error_message"),
+    startedAt: timestamp("started_at", { mode: "date", withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    completedAt: timestamp("completed_at", {
+      mode: "date",
+      withTimezone: true,
+    }),
+  },
+  (table) => [
+    // Lets source_records reference a specific run (Prompt 12,
+    // docs/product-vision-backlog.md, ADR 0029) — a real trace identity
+    // from "which sync run produced this record," reusing this row's own
+    // id rather than inventing a parallel correlation-id string.
+    unique("sync_jobs_org_id_id_unique").on(table.organizationId, table.id),
+    // Covers sync_jobs_org_integration_source_fk — flagged by Supabase's
+    // performance advisor as an unindexed foreign key (frontend/backend
+    // audit follow-up, 2026-08-21): the existing started-at index below
+    // shares this FK's first two columns but not its third
+    // (source_system), so it isn't a full covering index for this FK.
+    index("sync_jobs_org_integration_source_index").on(
+      table.organizationId,
+      table.integrationId,
+      table.sourceSystem,
+    ),
+    index("sync_jobs_org_integration_started_index").on(
+      table.organizationId,
+      table.integrationId,
+      table.startedAt,
+    ),
+    foreignKey({
+      name: "sync_jobs_org_integration_source_fk",
+      columns: [table.organizationId, table.integrationId, table.sourceSystem],
+      foreignColumns: [
+        integrations.organizationId,
+        integrations.id,
+        integrations.sourceSystem,
+      ],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    check(
+      "sync_jobs_source_system_not_blank",
+      sql`length(btrim(${table.sourceSystem})) > 0`,
+    ),
+    check(
+      "sync_jobs_trigger_allowed",
+      sql`${table.trigger} in ('initial', 'manual', 'webhook')`,
+    ),
+    check(
+      "sync_jobs_entity_type_allowed",
+      sql`${table.entityType} in ('lead', 'invoice', 'payment', 'task', 'message', 'support_ticket')`,
+    ),
+    check(
+      "sync_jobs_status_allowed",
+      sql`${table.status} in ('running', 'succeeded', 'failed')`,
+    ),
+    check(
+      "sync_jobs_items_ingested_nonnegative",
+      sql`${table.itemsIngested} >= 0`,
+    ),
+    check(
+      "sync_jobs_items_skipped_nonnegative",
+      sql`${table.itemsSkipped} >= 0`,
     ),
   ],
 );
@@ -254,6 +376,12 @@ export const sourceRecords = pgTable(
       mode: "date",
       withTimezone: true,
     }),
+    // Which sync_jobs run produced this record (Prompt 12,
+    // docs/product-vision-backlog.md, ADR 0029) — a real trace identity
+    // from provider event through normalization, using the run's own id
+    // rather than a parallel correlation-id string. Nullable: rows
+    // ingested before this column existed have no run to point back to.
+    syncJobId: uuid("sync_job_id"),
     ...timestamps,
   },
   (table) => [
@@ -277,6 +405,10 @@ export const sourceRecords = pgTable(
       table.organizationId,
       table.observedAt,
     ),
+    index("source_records_org_sync_job_index").on(
+      table.organizationId,
+      table.syncJobId,
+    ),
     foreignKey({
       name: "source_records_org_integration_source_fk",
       columns: [table.organizationId, table.integrationId, table.sourceSystem],
@@ -285,6 +417,13 @@ export const sourceRecords = pgTable(
         integrations.id,
         integrations.sourceSystem,
       ],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    foreignKey({
+      name: "source_records_org_sync_job_fk",
+      columns: [table.organizationId, table.syncJobId],
+      foreignColumns: [syncJobs.organizationId, syncJobs.id],
     })
       .onUpdate("restrict")
       .onDelete("restrict"),
@@ -342,6 +481,15 @@ export const leads = pgTable(
     ownerMembershipId: uuid("owner_membership_id"),
     contactName: text("contact_name").notNull(),
     companyName: text("company_name"),
+    // Real plumbing, honestly unpopulated by any ingest function today
+    // (Phase 4b, implementation roadmap) — mapHubSpotDealToSourceLeadRecord
+    // never calls the Associations/Contacts API, so this stays null for
+    // every real lead until a separately-scoped "HubSpot contact-email
+    // enrichment" phase ships. Exists now so messages.lead_id has a real
+    // column to resolve against, the same "real column, disclosed as
+    // unpopulated" pattern source_records.rawPayloadStorageKey already
+    // established.
+    contactEmail: text("contact_email"),
     stage: text("stage").notNull(),
     valueCents: bigint("value_cents", { mode: "bigint" }),
     currency: text("currency"),
@@ -410,6 +558,10 @@ export const leads = pgTable(
       "leads_value_currency_pair",
       sql`(${table.valueCents} is null and ${table.currency} is null) or (${table.valueCents} is not null and ${table.currency} is not null)`,
     ),
+    check(
+      "leads_contact_email_not_blank_when_present",
+      sql`${table.contactEmail} is null or length(btrim(${table.contactEmail})) > 0`,
+    ),
   ],
 );
 
@@ -466,6 +618,64 @@ export const invoices = pgTable(
     ),
     check(
       "invoices_canonical_schema_version_positive",
+      sql`${table.canonicalSchemaVersion} > 0`,
+    ),
+  ],
+);
+
+export const payments = pgTable(
+  "payments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    sourceRecordId: uuid("source_record_id").notNull(),
+    customerName: text("customer_name").notNull(),
+    amountCents: bigint("amount_cents", { mode: "bigint" }).notNull(),
+    currency: text("currency").notNull(),
+    receivedAt: timestamp("received_at", {
+      mode: "date",
+      withTimezone: true,
+    }).notNull(),
+    invoiceAllocations: jsonb("invoice_allocations")
+      .notNull()
+      .default(sql`'[]'::jsonb`),
+    canonicalSchemaVersion: integer("canonical_schema_version").notNull(),
+    normalizationVersion: text("normalization_version").notNull(),
+    normalizedAt: timestamp("normalized_at", {
+      mode: "date",
+      withTimezone: true,
+    })
+      .defaultNow()
+      .notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    unique("payments_org_id_id_unique").on(table.organizationId, table.id),
+    unique("payments_org_source_record_unique").on(
+      table.organizationId,
+      table.sourceRecordId,
+    ),
+    foreignKey({
+      name: "payments_org_source_record_fk",
+      columns: [table.organizationId, table.sourceRecordId],
+      foreignColumns: [sourceRecords.organizationId, sourceRecords.id],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    index("payments_org_received_index").on(
+      table.organizationId,
+      table.receivedAt,
+    ),
+    check(
+      "payments_customer_name_not_blank",
+      sql`length(btrim(${table.customerName})) > 0`,
+    ),
+    check("payments_amount_nonnegative", sql`${table.amountCents} >= 0`),
+    check("payments_currency_format", sql`${table.currency} ~ '^[A-Z]{3}$'`),
+    check(
+      "payments_canonical_schema_version_positive",
       sql`${table.canonicalSchemaVersion} > 0`,
     ),
   ],
@@ -528,6 +738,14 @@ export const tasks = pgTable(
     sourceRecordId: uuid("source_record_id").notNull(),
     name: text("name").notNull(),
     assigneeName: text("assignee_name"),
+    // Ownership Engine (Prompt 29, docs/product-vision-backlog.md, ADR
+    // 0039) — resolved at ingest time from `assigneeName` via
+    // `resolveMembershipIdByDisplayName` (an exact, case-insensitive
+    // display-name match; `null` when no real member's name matches).
+    // Mirrors `leads.ownerMembershipId`'s own shape, but unlike that
+    // column (declared in ADR 0003 and still never populated by any real
+    // HubSpot ingest path today), this one is actually written.
+    ownerMembershipId: uuid("owner_membership_id"),
     dueAt: timestamp("due_at", { mode: "date", withTimezone: true }).notNull(),
     completed: boolean("completed").notNull(),
     canonicalSchemaVersion: integer("canonical_schema_version").notNull(),
@@ -553,14 +771,230 @@ export const tasks = pgTable(
     })
       .onUpdate("restrict")
       .onDelete("restrict"),
+    foreignKey({
+      name: "tasks_org_owner_membership_fk",
+      columns: [table.organizationId, table.ownerMembershipId],
+      foreignColumns: [memberships.organizationId, memberships.id],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
     index("tasks_org_completed_due_index").on(
       table.organizationId,
       table.completed,
       table.dueAt,
     ),
+    // Covers tasks_org_owner_membership_fk — flagged by Supabase's
+    // performance advisor as an unindexed foreign key (frontend/backend
+    // audit follow-up, 2026-08-21).
+    index("tasks_org_owner_membership_index").on(
+      table.organizationId,
+      table.ownerMembershipId,
+    ),
     check("tasks_name_not_blank", sql`length(btrim(${table.name})) > 0`),
     check(
       "tasks_canonical_schema_version_positive",
+      sql`${table.canonicalSchemaVersion} > 0`,
+    ),
+  ],
+);
+
+// A real, ingested email message (Phase 4b, implementation roadmap) — the
+// first canonical entity whose value is close to its raw content rather
+// than a small structured summary of it (unlike leads/invoices/tasks).
+// `bodyPreview` deliberately has no query function in this package that
+// ever selects it for anything above the ingest path itself — see
+// messages.ts's own doc comment. `leadId` resolves via `leads.contactEmail`
+// at ingest time and is honestly expected to be null for effectively every
+// row today, since no ingest function populates that column yet.
+export const messages = pgTable(
+  "messages",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    sourceRecordId: uuid("source_record_id").notNull(),
+    leadId: uuid("lead_id"),
+    externalThreadId: text("external_thread_id").notNull(),
+    direction: text("direction").notNull(),
+    counterpartyEmail: text("counterparty_email").notNull(),
+    counterpartyName: text("counterparty_name"),
+    subject: text("subject").notNull(),
+    snippet: text("snippet"),
+    // Deterministically extracted, hard-truncated (5,000 chars) plain
+    // text — real evidentiary content for a future extraction phase, but
+    // never selected by any query above the ingest path (see messages.ts).
+    // No field-level encryption beyond ordinary tenant RLS protects this —
+    // a real, disclosed limitation, see docs/adr/0050-gmail-message-
+    // ingestion.md.
+    bodyPreview: text("body_preview"),
+    bodyTruncated: boolean("body_truncated").notNull().default(false),
+    occurredAt: timestamp("occurred_at", {
+      mode: "date",
+      withTimezone: true,
+    }).notNull(),
+    // Real plumbing (application-set at ingest, not a DB default) — no
+    // reaper enforces this yet; Vercel Cron is the named future mechanism.
+    retainUntil: timestamp("retain_until", {
+      mode: "date",
+      withTimezone: true,
+    }),
+    canonicalSchemaVersion: integer("canonical_schema_version").notNull(),
+    normalizationVersion: text("normalization_version").notNull(),
+    normalizedAt: timestamp("normalized_at", {
+      mode: "date",
+      withTimezone: true,
+    })
+      .defaultNow()
+      .notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    unique("messages_org_id_id_unique").on(table.organizationId, table.id),
+    unique("messages_org_source_record_unique").on(
+      table.organizationId,
+      table.sourceRecordId,
+    ),
+    foreignKey({
+      name: "messages_org_source_record_fk",
+      columns: [table.organizationId, table.sourceRecordId],
+      foreignColumns: [sourceRecords.organizationId, sourceRecords.id],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    foreignKey({
+      name: "messages_org_lead_fk",
+      columns: [table.organizationId, table.leadId],
+      foreignColumns: [leads.organizationId, leads.id],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    index("messages_org_occurred_at_index").on(
+      table.organizationId,
+      table.occurredAt,
+    ),
+    index("messages_org_thread_occurred_index").on(
+      table.organizationId,
+      table.externalThreadId,
+      table.occurredAt,
+    ),
+    index("messages_org_lead_index").on(table.organizationId, table.leadId),
+    check(
+      "messages_direction_allowed",
+      sql`${table.direction} in ('inbound', 'outbound')`,
+    ),
+    check(
+      "messages_external_thread_id_not_blank",
+      sql`length(btrim(${table.externalThreadId})) > 0`,
+    ),
+    check(
+      "messages_counterparty_email_not_blank",
+      sql`length(btrim(${table.counterpartyEmail})) > 0`,
+    ),
+    check(
+      "messages_subject_not_blank",
+      sql`length(btrim(${table.subject})) > 0`,
+    ),
+    check(
+      "messages_canonical_schema_version_positive",
+      sql`${table.canonicalSchemaVersion} > 0`,
+    ),
+  ],
+);
+
+// A real, ingested support ticket (first shipped for Zendesk) — the first
+// canonical entity added after `messages`, and the first support-domain
+// entity in this Business Graph at all (docs/product-vision-backlog.md's
+// "Customer Operations Intelligence" entry confirms no `Customer`/
+// `Account`/`Contact` entity exists yet). Deliberately carries no
+// cross-entity link the way `messages.leadId` does — `requester_name` is
+// plain free text, not a resolved relationship, since there is no
+// `Customer` entity to resolve it against. `owner_membership_id` reuses
+// the exact Ownership Engine pattern `tasks.owner_membership_id` already
+// established (Prompt 29, ADR 0039): resolved at ingest time from
+// `assignee_name` via `resolveMembershipIdByDisplayName`. `due_at` is
+// honestly nullable — real Zendesk tickets only carry a due date for
+// "task"-type tickets, a minority case; `last_activity_at` (the source's
+// own `updated_at`) is what the stuck-ticket risk evaluator actually keys
+// on, not `due_at` — see `evaluateTicketStuck` (`@signaldesk/domain`).
+export const supportTickets = pgTable(
+  "support_tickets",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    sourceRecordId: uuid("source_record_id").notNull(),
+    subject: text("subject").notNull(),
+    status: text("status").notNull(),
+    priority: text("priority"),
+    requesterName: text("requester_name"),
+    assigneeName: text("assignee_name"),
+    ownerMembershipId: uuid("owner_membership_id"),
+    dueAt: timestamp("due_at", { mode: "date", withTimezone: true }),
+    lastActivityAt: timestamp("last_activity_at", {
+      mode: "date",
+      withTimezone: true,
+    }).notNull(),
+    canonicalSchemaVersion: integer("canonical_schema_version").notNull(),
+    normalizationVersion: text("normalization_version").notNull(),
+    normalizedAt: timestamp("normalized_at", {
+      mode: "date",
+      withTimezone: true,
+    })
+      .defaultNow()
+      .notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    unique("support_tickets_org_id_id_unique").on(
+      table.organizationId,
+      table.id,
+    ),
+    unique("support_tickets_org_source_record_unique").on(
+      table.organizationId,
+      table.sourceRecordId,
+    ),
+    foreignKey({
+      name: "support_tickets_org_source_record_fk",
+      columns: [table.organizationId, table.sourceRecordId],
+      foreignColumns: [sourceRecords.organizationId, sourceRecords.id],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    foreignKey({
+      name: "support_tickets_org_owner_membership_fk",
+      columns: [table.organizationId, table.ownerMembershipId],
+      foreignColumns: [memberships.organizationId, memberships.id],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    index("support_tickets_org_status_activity_index").on(
+      table.organizationId,
+      table.status,
+      table.lastActivityAt,
+    ),
+    // Covers support_tickets_org_owner_membership_fk — matching the same
+    // unindexed-FK advisor finding tasks_org_owner_membership_index was
+    // added to fix.
+    index("support_tickets_org_owner_membership_index").on(
+      table.organizationId,
+      table.ownerMembershipId,
+    ),
+    check(
+      "support_tickets_subject_not_blank",
+      sql`length(btrim(${table.subject})) > 0`,
+    ),
+    check(
+      "support_tickets_status_allowed",
+      sql`${table.status} in ('new', 'open', 'pending', 'hold', 'solved', 'closed')`,
+    ),
+    check(
+      "support_tickets_priority_allowed",
+      sql`${table.priority} is null or ${table.priority} in ('urgent', 'high', 'normal', 'low')`,
+    ),
+    check(
+      "support_tickets_canonical_schema_version_positive",
       sql`${table.canonicalSchemaVersion} > 0`,
     ),
   ],
@@ -738,6 +1172,89 @@ export const recommendations = pgTable(
   ],
 );
 
+// A real, narrow first slice of Adaptive Attention (Prompt 17,
+// docs/product-vision-backlog.md, ADR 0032) — deliberately not built on
+// top of `signals`/`recommendations` above: both are real DDL with zero
+// application code anywhere (a genuine orphaned-table finding made while
+// building this table — see README's Priority 0 item 5), and a human's
+// reaction to a finding is a different concept than the finding itself,
+// not an extension of either. `findingId` is the deterministic id every
+// IntelligenceCapability already produces
+// (`{capabilityId}:{organizationId}:{entityId}`) — no persisted Signal
+// entity is required for feedback to attach to something stable.
+export const cardFeedback = pgTable(
+  "card_feedback",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    membershipId: uuid("membership_id").notNull(),
+    findingId: text("finding_id").notNull(),
+    cardType: text("card_type").notNull(),
+    feedback: text("feedback").notNull(),
+    createdAt: timestamp("created_at", { mode: "date", withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    unique("card_feedback_org_id_id_unique").on(table.organizationId, table.id),
+    foreignKey({
+      name: "card_feedback_org_membership_fk",
+      columns: [table.organizationId, table.membershipId],
+      foreignColumns: [memberships.organizationId, memberships.id],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    index("card_feedback_org_finding_index").on(
+      table.organizationId,
+      table.findingId,
+    ),
+    // Covers card_feedback_org_membership_fk — flagged by Supabase's
+    // performance advisor as an unindexed foreign key (frontend/backend
+    // audit follow-up, 2026-08-21).
+    index("card_feedback_org_membership_index").on(
+      table.organizationId,
+      table.membershipId,
+    ),
+    // Backs listRecentCardFeedback's `order by created_at desc limit 200` —
+    // without this, that query must scan every row for the tenant and sort
+    // in memory instead of walking an index in order (found in a real audit
+    // of every "recent list" query's index coverage against its own ORDER
+    // BY column, this session).
+    index("card_feedback_org_created_at_index").on(
+      table.organizationId,
+      table.createdAt,
+    ),
+    check(
+      "card_feedback_finding_id_not_blank",
+      sql`length(btrim(${table.findingId})) > 0`,
+    ),
+    // Kept in sync with cardTypeSchema (@signaldesk/schemas), plus one
+    // deliberate exception: 'stuck' was retired as a real CardType during
+    // Phase 1's lead-risk/stuck-finding fusion (implementation roadmap),
+    // but real historical card_feedback rows with card_type = 'stuck'
+    // still exist (44 in the live dev project, confirmed before writing
+    // this) — dropping it from this list would break a live CHECK
+    // constraint against real, already-stored data, not just stop future
+    // inserts. Kept here for read/historical compatibility only; no
+    // current code path can ever insert 'stuck' again (it isn't a valid
+    // CardType in TypeScript). 'ownership_gap'/'message_follow_up'/
+    // 'ticket_risk' were added as real CardTypes after this constraint
+    // was written and neither renders CardFeedbackButtons today, so this
+    // was stale but not an active bug — fixed now rather than left as a
+    // landmine for whichever of the three wires feedback in next.
+    check(
+      "card_feedback_card_type_allowed",
+      sql`${table.cardType} in ('stuck', 'lead_risk', 'integration_health', 'ownership_gap', 'invoice_risk', 'task_risk', 'agent_recommendation', 'payment_received', 'goal_variance', 'message_follow_up', 'ticket_risk')`,
+    ),
+    check(
+      "card_feedback_feedback_allowed",
+      sql`${table.feedback} in ('useful', 'not_relevant')`,
+    ),
+  ],
+);
+
 export const auditEvents = pgTable(
   "audit_events",
   {
@@ -747,6 +1264,11 @@ export const auditEvents = pgTable(
       .references(() => organizations.id, { onDelete: "restrict" }),
     actorMembershipId: uuid("actor_membership_id"),
     actorKind: text("actor_kind").notNull(),
+    // Set only when actorKind = 'agent' (0034/Agent Fabric) — a static
+    // in-code catalog id (AGENT_REGISTRY, @signaldesk/application), not a
+    // FK: agent ids are code, not a database-owned table, same reasoning
+    // as integrations.sourceSystem being text.
+    actorAgentId: text("actor_agent_id"),
     eventType: text("event_type").notNull(),
     eventSchemaVersion: integer("event_schema_version").notNull(),
     subjectType: text("subject_type").notNull(),
@@ -817,11 +1339,14 @@ export const auditEvents = pgTable(
     ),
     check(
       "audit_events_actor_kind_allowed",
-      sql`${table.actorKind} in ('user', 'system', 'integration')`,
+      sql`${table.actorKind} in ('user', 'system', 'integration', 'agent')`,
     ),
+    // Three-way (0034, was a two-way user/non-user check): 'user' carries
+    // actor_membership_id only, 'agent' carries actor_agent_id only,
+    // 'system'/'integration' carry neither.
     check(
       "audit_events_actor_membership_consistent",
-      sql`(${table.actorKind} = 'user' and ${table.actorMembershipId} is not null) or (${table.actorKind} <> 'user' and ${table.actorMembershipId} is null)`,
+      sql`(${table.actorKind} = 'user' and ${table.actorMembershipId} is not null and ${table.actorAgentId} is null) or (${table.actorKind} = 'agent' and ${table.actorAgentId} is not null and ${table.actorMembershipId} is null) or (${table.actorKind} in ('system', 'integration') and ${table.actorMembershipId} is null and ${table.actorAgentId} is null)`,
     ),
     check(
       "audit_events_schema_version_positive",
@@ -880,6 +1405,323 @@ export const internalTasks = pgTable(
     check(
       "internal_tasks_idempotency_key_not_blank",
       sql`length(btrim(${table.idempotencyKey})) > 0`,
+    ),
+  ],
+);
+
+// Goal Intelligence (Prompt 22, docs/product-vision-backlog.md, ADR 0035):
+// a goal's own definition only — status/variance is never stored, computed
+// live by @signaldesk/goals from the current @signaldesk/semantics metric
+// value, the same "recomputed fresh each read" choice PrioritizedFinding
+// and MetricValue already make. Append-only like card_feedback above (no
+// update/delete policy): removing a stale goal is an explicitly disclosed
+// gap in this first slice, not an oversight.
+export const goals = pgTable(
+  "goals",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    ownerMembershipId: uuid("owner_membership_id").notNull(),
+    // A static @signaldesk/semantics METRIC_CATALOG id, not a FK — same
+    // "static in-code catalog id" precedent as auditEvents.actorAgentId.
+    // The check constraint below still enforces a closed, known set; widen
+    // it (a migration) the day a sixth real metric is added.
+    metricId: text("metric_id").notNull(),
+    name: text("name").notNull(),
+    comparisonOperator: text("comparison_operator").notNull(),
+    targetValue: bigint("target_value", { mode: "bigint" }).notNull(),
+    // Only meaningful when the target metric's unit is "currency" — see
+    // @signaldesk/goals' evaluateGoal doc comment for how this is matched
+    // against a metric that produced more than one currency group.
+    currency: text("currency"),
+    idempotencyKey: text("idempotency_key").notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    unique("goals_org_id_id_unique").on(table.organizationId, table.id),
+    unique("goals_org_idempotency_unique").on(
+      table.organizationId,
+      table.idempotencyKey,
+    ),
+    foreignKey({
+      name: "goals_org_owner_membership_fk",
+      columns: [table.organizationId, table.ownerMembershipId],
+      foreignColumns: [memberships.organizationId, memberships.id],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    index("goals_org_metric_index").on(table.organizationId, table.metricId),
+    // Covers goals_org_owner_membership_fk — flagged by Supabase's
+    // performance advisor as an unindexed foreign key (frontend/backend
+    // audit follow-up, 2026-08-21).
+    index("goals_org_owner_membership_index").on(
+      table.organizationId,
+      table.ownerMembershipId,
+    ),
+    // Backs listGoals's `order by created_at desc limit 100` — without
+    // this, the query must scan every goal for the tenant and sort in
+    // memory instead of walking an index in order. Read on every
+    // command-center page render and every Daily Brief generation, so
+    // this is a real hot path.
+    index("goals_org_created_at_index").on(
+      table.organizationId,
+      table.createdAt,
+    ),
+    check(
+      "goals_metric_id_allowed",
+      sql`${table.metricId} in ('accounts_receivable', 'overdue_receivable_exposure', 'pipeline_value', 'cash_collected_recent', 'open_task_backlog')`,
+    ),
+    check("goals_name_not_blank", sql`length(btrim(${table.name})) > 0`),
+    check(
+      "goals_comparison_operator_allowed",
+      sql`${table.comparisonOperator} in ('at_most', 'at_least')`,
+    ),
+    check("goals_target_value_nonnegative", sql`${table.targetValue} >= 0`),
+    check(
+      "goals_currency_format",
+      sql`${table.currency} is null or ${table.currency} ~ '^[A-Z]{3}$'`,
+    ),
+    check(
+      "goals_idempotency_key_not_blank",
+      sql`length(btrim(${table.idempotencyKey})) > 0`,
+    ),
+  ],
+);
+
+// Agent Fabric (0034/ADR 0020): one row per "investigate risk" run.
+// Deliberately NOT a lead-scoped row like signals/recommendations above —
+// a collaboration reconciles findings across independent entities (real
+// overdue invoices AND real overdue tasks), so it cannot honestly hang off
+// one leadId/sourceRecordId the way those tables' hard FK requires.
+export const agentCollaborations = pgTable(
+  "agent_collaborations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    triggeredByMembershipId: uuid("triggered_by_membership_id").notNull(),
+    // Only value today — see AGENT_REGISTRY/runParallelSpecialists,
+    // @signaldesk/application. Widen the check constraint below, not this
+    // comment, when a second collaboration pattern is real.
+    pattern: text("pattern").notNull(),
+    objective: text("objective").notNull(),
+    status: text("status").notNull().default("running"),
+    reconciledSummary: text("reconciled_summary"),
+    reconciledConfidenceBasisPoints: integer(
+      "reconciled_confidence_basis_points",
+    ),
+    contradictionsDetected: boolean("contradictions_detected")
+      .notNull()
+      .default(false),
+    correlationId: text("correlation_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    startedAt: timestamp("started_at", { mode: "date", withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    completedAt: timestamp("completed_at", {
+      mode: "date",
+      withTimezone: true,
+    }),
+    // A first real slice of Decision Intelligence (Prompt 16,
+    // docs/product-vision-backlog.md, ADR 0027): whether a human approved
+    // or dismissed this recommendation, and when — set by the same
+    // Server Actions that already write the audit_events row for this
+    // decision, so this is a queryable mirror of that outcome, not a
+    // second source of truth for it.
+    outcome: text("outcome"),
+    reviewedAt: timestamp("reviewed_at", { mode: "date", withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    unique("agent_collaborations_org_id_id_unique").on(
+      table.organizationId,
+      table.id,
+    ),
+    unique("agent_collaborations_org_idempotency_unique").on(
+      table.organizationId,
+      table.idempotencyKey,
+    ),
+    foreignKey({
+      name: "agent_collaborations_org_actor_membership_fk",
+      columns: [table.organizationId, table.triggeredByMembershipId],
+      foreignColumns: [memberships.organizationId, memberships.id],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    index("agent_collaborations_org_status_index").on(
+      table.organizationId,
+      table.status,
+    ),
+    // Backs listRecentAgentCollaborations's `order by started_at desc
+    // limit 20` — without this, the query must scan every collaboration
+    // for the tenant and sort in memory instead of walking an index in
+    // order.
+    index("agent_collaborations_org_started_at_index").on(
+      table.organizationId,
+      table.startedAt,
+    ),
+    // Covers agent_collaborations_org_actor_membership_fk — flagged by
+    // Supabase's performance advisor as an unindexed foreign key
+    // (frontend/backend audit follow-up, 2026-08-21).
+    index("agent_collaborations_org_actor_membership_index").on(
+      table.organizationId,
+      table.triggeredByMembershipId,
+    ),
+    check(
+      "agent_collaborations_pattern_allowed",
+      sql`${table.pattern} in ('parallel_specialists')`,
+    ),
+    check(
+      "agent_collaborations_status_allowed",
+      sql`${table.status} in ('running', 'completed', 'failed')`,
+    ),
+    check(
+      "agent_collaborations_objective_not_blank",
+      sql`length(btrim(${table.objective})) > 0`,
+    ),
+    check(
+      "agent_collaborations_idempotency_key_not_blank",
+      sql`length(btrim(${table.idempotencyKey})) > 0`,
+    ),
+    check(
+      "agent_collaborations_confidence_range",
+      sql`${table.reconciledConfidenceBasisPoints} is null or (${table.reconciledConfidenceBasisPoints} >= 0 and ${table.reconciledConfidenceBasisPoints} <= 10000)`,
+    ),
+    check(
+      "agent_collaborations_completion_consistent",
+      sql`(${table.status} = 'running' and ${table.completedAt} is null) or (${table.status} in ('completed', 'failed') and ${table.completedAt} is not null)`,
+    ),
+    check(
+      "agent_collaborations_outcome_allowed",
+      sql`${table.outcome} is null or ${table.outcome} in ('approved', 'dismissed')`,
+    ),
+    check(
+      "agent_collaborations_outcome_reviewed_consistent",
+      sql`(${table.outcome} is null and ${table.reviewedAt} is null) or (${table.outcome} is not null and ${table.reviewedAt} is not null)`,
+    ),
+  ],
+);
+
+// One row per specialist call within a collaboration — the real, durable
+// evidence behind "two backends genuinely ran in parallel" (agentId
+// distinguishes claude-specialist from deterministic-specialist).
+export const agentTaskResults = pgTable(
+  "agent_task_results",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    collaborationId: uuid("collaboration_id").notNull(),
+    // Static AGENT_REGISTRY catalog id, not a FK — see auditEvents.actorAgentId.
+    agentId: text("agent_id").notNull(),
+    capability: text("capability").notNull(),
+    status: text("status").notNull(),
+    claims: jsonb("claims").notNull(),
+    evidenceIds: jsonb("evidence_ids").notNull(),
+    confidenceBasisPoints: integer("confidence_basis_points"),
+    startedAt: timestamp("started_at", {
+      mode: "date",
+      withTimezone: true,
+    }).notNull(),
+    completedAt: timestamp("completed_at", {
+      mode: "date",
+      withTimezone: true,
+    }).notNull(),
+  },
+  (table) => [
+    unique("agent_task_results_org_id_id_unique").on(
+      table.organizationId,
+      table.id,
+    ),
+    foreignKey({
+      name: "agent_task_results_org_collaboration_fk",
+      columns: [table.organizationId, table.collaborationId],
+      foreignColumns: [
+        agentCollaborations.organizationId,
+        agentCollaborations.id,
+      ],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    index("agent_task_results_org_collaboration_index").on(
+      table.organizationId,
+      table.collaborationId,
+    ),
+    check(
+      "agent_task_results_status_allowed",
+      sql`${table.status} in ('completed', 'abstained', 'failed')`,
+    ),
+    check(
+      "agent_task_results_agent_id_not_blank",
+      sql`length(btrim(${table.agentId})) > 0`,
+    ),
+    check(
+      "agent_task_results_confidence_range",
+      sql`${table.confidenceBasisPoints} is null or (${table.confidenceBasisPoints} >= 0 and ${table.confidenceBasisPoints} <= 10000)`,
+    ),
+  ],
+);
+
+// One row per capability grant minted for a specialist call — the real
+// session boundary (expiresAt) AgentGatewayService enforces before ever
+// calling a provider. Deliberately not reused across tasks: a fresh grant
+// per dispatch keeps the attenuation chain auditable one hop at a time.
+export const agentDelegationGrants = pgTable(
+  "agent_delegation_grants",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    collaborationId: uuid("collaboration_id").notNull(),
+    agentId: text("agent_id").notNull(),
+    capability: text("capability").notNull(),
+    canPropose: boolean("can_propose").notNull(),
+    expiresAt: timestamp("expires_at", {
+      mode: "date",
+      withTimezone: true,
+    }).notNull(),
+    createdAt: timestamp("created_at", { mode: "date", withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    unique("agent_delegation_grants_org_id_id_unique").on(
+      table.organizationId,
+      table.id,
+    ),
+    foreignKey({
+      name: "agent_delegation_grants_org_collaboration_fk",
+      columns: [table.organizationId, table.collaborationId],
+      foreignColumns: [
+        agentCollaborations.organizationId,
+        agentCollaborations.id,
+      ],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    index("agent_delegation_grants_org_collaboration_index").on(
+      table.organizationId,
+      table.collaborationId,
+    ),
+    // Backs listRecentAgentDelegationGrants's `order by created_at desc
+    // limit 25` — without this, the query must scan every grant for the
+    // tenant and sort in memory instead of walking an index in order.
+    index("agent_delegation_grants_org_created_at_index").on(
+      table.organizationId,
+      table.createdAt,
+    ),
+    check(
+      "agent_delegation_grants_agent_id_not_blank",
+      sql`length(btrim(${table.agentId})) > 0`,
+    ),
+    check(
+      "agent_delegation_grants_expiry_after_creation",
+      sql`${table.expiresAt} > ${table.createdAt}`,
     ),
   ],
 );
@@ -1114,6 +1956,13 @@ export const organizationSubscriptions = pgTable(
     index("organization_subscriptions_stripe_customer_id_index").on(
       table.stripeCustomerId,
     ),
+    // Cover organization_subscriptions_plan_id_fkey/_plan_price_id_fkey —
+    // flagged by Supabase's performance advisor as unindexed foreign
+    // keys (frontend/backend audit follow-up, 2026-08-21).
+    index("organization_subscriptions_plan_id_index").on(table.planId),
+    index("organization_subscriptions_plan_price_id_index").on(
+      table.planPriceId,
+    ),
     check(
       "organization_subscriptions_status_allowed",
       sql`${table.status} in ('trialing', 'active', 'past_due', 'canceled', 'incomplete', 'incomplete_expired', 'paused', 'unpaid')`,
@@ -1146,6 +1995,14 @@ export const organizationSubscriptionAddons = pgTable(
   (table) => [
     unique("organization_subscription_addons_unique").on(
       table.organizationSubscriptionId,
+      table.planAddonId,
+    ),
+    // Covers organization_subscription_addons_plan_addon_id_fkey —
+    // flagged by Supabase's performance advisor as an unindexed foreign
+    // key (frontend/backend audit follow-up, 2026-08-21). The addons'
+    // own subscription_id FK is already covered as a leftmost prefix of
+    // the composite unique constraint above.
+    index("organization_subscription_addons_plan_addon_id_index").on(
       table.planAddonId,
     ),
     check(
@@ -1187,6 +2044,151 @@ export const internalCostEvents = pgTable(
   ],
 );
 
+/**
+ * Real, shared, cross-instance rate-limit state — replaces the in-memory
+ * `Map` in `apps/web/app/_lib/rate-limit.ts`, which is documented there as
+ * single-process-only and silently stops protecting against abuse the
+ * moment this app runs as more than one server instance. Deliberately NOT
+ * a tenant table (no RLS, no `organizationId`): a rate-limit key is
+ * sometimes IP-based and pre-authentication (sign-in, sign-up, guest
+ * access — `apps/web/app/_actions/auth.ts`, before any tenant context can
+ * exist at all), sometimes organization-scoped by convention of the key
+ * string itself (e.g. `start-checkout:${organizationId}`) — RLS's
+ * per-tenant model doesn't apply to a key namespace that isn't itself
+ * tenant data. No business information is ever stored here, only a count
+ * and a window start per opaque string key.
+ */
+export const rateLimitBuckets = pgTable("rate_limit_buckets", {
+  key: text("key").primaryKey(),
+  count: integer("count").notNull().default(1),
+  windowStart: timestamp("window_start", { mode: "date", withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/**
+ * Real multi-member invites (Phase 3 of the implementation roadmap) — the
+ * prerequisite for the existing `owner|admin|member|viewer` RBAC enum on
+ * `memberships` to mean anything (every real org has exactly one member
+ * today). Keyed by email, not a `users.id` FK, since an invitee usually
+ * doesn't have an account yet — `token` is validated pre-auth by a
+ * SECURITY DEFINER function (mirroring `identity_provisioner`'s existing
+ * pre-tenant-context pattern, drizzle/0007), never by ordinary
+ * tenant-scoped RLS, since there is no tenant context to scope by until
+ * after acceptance creates the real membership. `role` excludes `owner`
+ * deliberately — an invite can never mint a second owner.
+ */
+export const organizationInvites = pgTable(
+  "organization_invites",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    invitedByMembershipId: uuid("invited_by_membership_id").notNull(),
+    email: text("email").notNull(),
+    role: text("role").notNull(),
+    token: text("token").notNull(),
+    status: text("status").notNull().default("pending"),
+    expiresAt: timestamp("expires_at", {
+      mode: "date",
+      withTimezone: true,
+    }).notNull(),
+    acceptedAt: timestamp("accepted_at", {
+      mode: "date",
+      withTimezone: true,
+    }),
+    ...timestamps,
+  },
+  (table) => [
+    unique("organization_invites_org_id_id_unique").on(
+      table.organizationId,
+      table.id,
+    ),
+    unique("organization_invites_token_unique").on(table.token),
+    foreignKey({
+      name: "organization_invites_org_invited_by_fk",
+      columns: [table.organizationId, table.invitedByMembershipId],
+      foreignColumns: [memberships.organizationId, memberships.id],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    index("organization_invites_org_status_index").on(
+      table.organizationId,
+      table.status,
+    ),
+    // Covers organization_invites_org_invited_by_fk — flagged by
+    // Supabase's performance advisor as an unindexed foreign key
+    // (frontend/backend audit follow-up, 2026-08-21).
+    index("organization_invites_org_invited_by_index").on(
+      table.organizationId,
+      table.invitedByMembershipId,
+    ),
+    check(
+      "organization_invites_role_allowed",
+      sql`${table.role} in ('admin', 'member', 'viewer')`,
+    ),
+    check(
+      "organization_invites_status_allowed",
+      sql`${table.status} in ('pending', 'accepted', 'revoked', 'expired')`,
+    ),
+    check(
+      "organization_invites_email_not_blank",
+      sql`length(btrim(${table.email})) > 0`,
+    ),
+    check(
+      "organization_invites_token_not_blank",
+      sql`length(btrim(${table.token})) > 0`,
+    ),
+    check(
+      "organization_invites_acceptance_state_consistent",
+      sql`(${table.status} = 'accepted' and ${table.acceptedAt} is not null) or (${table.status} != 'accepted' and ${table.acceptedAt} is null)`,
+    ),
+  ],
+);
+
+// A real, per-organization AI provider API key (Phase 4c, implementation
+// roadmap) — deliberately its own table, not shoehorned into
+// `integrations`: that table requires an `externalAccountId`/OAuth-shaped
+// row an arbitrary API key doesn't have, and reusing its token functions
+// would mean storing a bare key in a column literally named
+// `access_token`. `providerFor` (apps/web/app/_lib/agent-fabric.ts) reads
+// this to fund the Agent Fabric's already-existing, already-approval-
+// gated `interpret_findings` calls with the org's own key instead of the
+// platform-wide `ANTHROPIC_API_KEY` — this table grants zero new
+// action-execution capability; `canExecute` stays `z.literal(false)`
+// everywhere, untouched.
+export const aiProviderConnections = pgTable(
+  "ai_provider_connections",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    // Real, narrow, and honest: only "anthropic" is a real
+    // `AIProvider` implementation today (`createClaudeProvider`,
+    // @signaldesk/application) — this is not a fake enum pretending
+    // OpenAI/Gemini adapters exist yet.
+    provider: text("provider").notNull(),
+    // Mirrors `integrations.tokenVaultSecretId`'s exact pattern — the
+    // real API key lives only in Supabase Vault, never in this column or
+    // anywhere else in this database.
+    vaultSecretId: uuid("vault_secret_id"),
+    enabled: boolean("enabled").notNull().default(true),
+    ...timestamps,
+  },
+  (table) => [
+    unique("ai_provider_connections_org_provider_unique").on(
+      table.organizationId,
+      table.provider,
+    ),
+    check(
+      "ai_provider_connections_provider_allowed",
+      sql`${table.provider} in ('anthropic')`,
+    ),
+  ],
+);
+
 export type OrganizationRow = typeof organizations.$inferSelect;
 export type NewOrganizationRow = typeof organizations.$inferInsert;
 export type UserRow = typeof users.$inferSelect;
@@ -1201,8 +2203,13 @@ export type LeadRow = typeof leads.$inferSelect;
 export type NewLeadRow = typeof leads.$inferInsert;
 export type InvoiceRow = typeof invoices.$inferSelect;
 export type NewInvoiceRow = typeof invoices.$inferInsert;
+
+export type PaymentRow = typeof payments.$inferSelect;
+export type NewPaymentRow = typeof payments.$inferInsert;
 export type TaskRow = typeof tasks.$inferSelect;
 export type NewTaskRow = typeof tasks.$inferInsert;
+export type MessageRow = typeof messages.$inferSelect;
+export type NewMessageRow = typeof messages.$inferInsert;
 export type ArtifactRow = typeof artifacts.$inferSelect;
 export type NewArtifactRow = typeof artifacts.$inferInsert;
 export type SignalRow = typeof signals.$inferSelect;
@@ -1213,6 +2220,17 @@ export type AuditEventRow = typeof auditEvents.$inferSelect;
 export type NewAuditEventRow = typeof auditEvents.$inferInsert;
 export type InternalTaskRow = typeof internalTasks.$inferSelect;
 export type NewInternalTaskRow = typeof internalTasks.$inferInsert;
+export type GoalRow = typeof goals.$inferSelect;
+export type NewGoalRow = typeof goals.$inferInsert;
+export type AgentCollaborationRow = typeof agentCollaborations.$inferSelect;
+export type NewAgentCollaborationRow = typeof agentCollaborations.$inferInsert;
+export type AgentTaskResultRow = typeof agentTaskResults.$inferSelect;
+export type NewAgentTaskResultRow = typeof agentTaskResults.$inferInsert;
+export type AgentDelegationGrantRow = typeof agentDelegationGrants.$inferSelect;
+export type NewAgentDelegationGrantRow =
+  typeof agentDelegationGrants.$inferInsert;
+export type SyncJobRow = typeof syncJobs.$inferSelect;
+export type NewSyncJobRow = typeof syncJobs.$inferInsert;
 export type PlanRow = typeof plans.$inferSelect;
 export type NewPlanRow = typeof plans.$inferInsert;
 export type PlanPriceRow = typeof planPrices.$inferSelect;
@@ -1231,3 +2249,8 @@ export type NewOrganizationSubscriptionAddonRow =
   typeof organizationSubscriptionAddons.$inferInsert;
 export type InternalCostEventRow = typeof internalCostEvents.$inferSelect;
 export type NewInternalCostEventRow = typeof internalCostEvents.$inferInsert;
+export type OrganizationInviteRow = typeof organizationInvites.$inferSelect;
+export type NewOrganizationInviteRow = typeof organizationInvites.$inferInsert;
+export type AIProviderConnectionRow = typeof aiProviderConnections.$inferSelect;
+export type NewAIProviderConnectionRow =
+  typeof aiProviderConnections.$inferInsert;

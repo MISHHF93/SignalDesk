@@ -8,7 +8,7 @@ function finding(
 ): IntelligenceFinding {
   return {
     id: "finding-1",
-    type: "lead.untouched",
+    type: "lead.follow_up_risk",
     title: "Test finding",
     summary: "Test summary",
     severity: "medium",
@@ -47,6 +47,7 @@ describe("prioritizeFindings", () => {
         explanation: { trigger: "No contact in 31 hours.", confidence: "high" },
         financialContext: {
           label: "Pipeline value",
+          exposureType: "POTENTIAL_EXPOSURE",
           amountCents: 1_800_000,
           currency: "USD",
         },

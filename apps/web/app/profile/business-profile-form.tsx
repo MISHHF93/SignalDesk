@@ -33,17 +33,24 @@ function describeWorkingDays(workingDaysBitmask: number): string {
   return labels.length === 0 ? "No working days set" : labels.join(", ");
 }
 
+const INDUSTRY_LABELS: Record<string, string> = {
+  unspecified: "Not set",
+  professional_services: "Professional services / agency",
+};
+
 export function BusinessProfileForm({
   timezone,
   defaultExpectedResponseHours,
   highValueThresholdCents,
   workingDaysBitmask,
+  industry,
   canEdit,
 }: {
   timezone: string;
   defaultExpectedResponseHours: number;
   highValueThresholdCents: number;
   workingDaysBitmask: number;
+  industry: string;
   canEdit: boolean;
 }) {
   const [state, formAction, isPending] = useActionState(
@@ -69,6 +76,10 @@ export function BusinessProfileForm({
         <div>
           <dt>Working days</dt>
           <dd>{describeWorkingDays(workingDaysBitmask)}</dd>
+        </div>
+        <div>
+          <dt>Industry</dt>
+          <dd>{INDUSTRY_LABELS[industry] ?? industry}</dd>
         </div>
         <small>Only the workspace owner can change these settings.</small>
       </dl>
@@ -149,6 +160,20 @@ export function BusinessProfileForm({
           toward your response-time threshold until the next working day.
         </small>
       </fieldset>
+
+      <div className="authField">
+        <label htmlFor="industry">Industry</label>
+        <select id="industry" name="industry" defaultValue={industry}>
+          <option value="unspecified">Not set</option>
+          <option value="professional_services">
+            Professional services / agency
+          </option>
+        </select>
+        <small>
+          Used to recommend which connectors matter most for your business on
+          the Integrations page. Only one industry is fully supported today.
+        </small>
+      </div>
 
       {state.error ? (
         <p className="authError" role="alert">

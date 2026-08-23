@@ -4,7 +4,9 @@ import type { Artifact } from "@signaldesk/persistence";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 
+import type { EmailDailyBriefActionResult } from "../_actions/email-daily-brief";
 import type { GenerateDailyBriefActionResult } from "../_actions/generate-daily-brief";
+import type { GenerateSinceYouLeftBriefActionResult } from "../_actions/generate-since-you-left-brief";
 import { Button } from "./button";
 
 function formatGeneratedAt(generatedAt: Date): string {
@@ -17,18 +19,60 @@ function formatGeneratedAt(generatedAt: Date): string {
 
 export function DailyBriefPanel({
   generateAction,
+  generateSinceYouLeftAction,
+  emailAction,
+  canEmailBrief,
   initialArtifact,
 }: {
   readonly generateAction: () => Promise<GenerateDailyBriefActionResult>;
+  readonly generateSinceYouLeftAction: () => Promise<GenerateSinceYouLeftBriefActionResult>;
+  readonly emailAction: () => Promise<EmailDailyBriefActionResult>;
+  readonly canEmailBrief: boolean;
   readonly initialArtifact: Artifact | null;
 }) {
   const [artifact, setArtifact] = useState<Artifact | null>(initialArtifact);
   const [error, setError] = useState<string | null>(null);
+  const [emailStatus, setEmailStatus] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [pendingKind, setPendingKind] = useState<
+    "daily_brief" | "since_you_left" | "email" | null
+  >(null);
 
   function handleGenerate() {
+    setPendingKind("daily_brief");
+    setEmailStatus(null);
     startTransition(async () => {
       const outcome = await generateAction();
+
+      if (outcome.ok) {
+        setArtifact(outcome.artifact);
+        setError(null);
+      } else {
+        setError(outcome.error);
+      }
+    });
+  }
+
+  function handleEmail() {
+    setPendingKind("email");
+    setEmailStatus(null);
+    startTransition(async () => {
+      const outcome = await emailAction();
+
+      if (outcome.ok) {
+        setEmailStatus(`Sent to ${outcome.sentTo}.`);
+        setError(null);
+      } else {
+        setError(outcome.error);
+      }
+    });
+  }
+
+  function handleGenerateSinceYouLeft() {
+    setPendingKind("since_you_left");
+    setEmailStatus(null);
+    startTransition(async () => {
+      const outcome = await generateSinceYouLeftAction();
 
       if (outcome.ok) {
         setArtifact(outcome.artifact);
@@ -49,18 +93,42 @@ export function DailyBriefPanel({
           <p className="sectionKicker">Artifact</p>
           <h2 id="daily-brief-heading">Daily Brief</h2>
         </div>
-        <Button
-          variant="secondary"
-          type="button"
-          onClick={handleGenerate}
-          disabled={isPending}
-        >
-          {isPending
-            ? "Generating…"
-            : artifact
-              ? "Regenerate Daily Brief"
-              : "Generate Daily Brief"}
-        </Button>
+        <div className="dailyBriefActions">
+          <Button
+            variant="ghost"
+            type="button"
+            onClick={handleGenerateSinceYouLeft}
+            disabled={isPending}
+          >
+            {isPending && pendingKind === "since_you_left"
+              ? "Comparing…"
+              : "Since you left"}
+          </Button>
+          <Button
+            variant="secondary"
+            type="button"
+            onClick={handleGenerate}
+            disabled={isPending}
+          >
+            {isPending && pendingKind === "daily_brief"
+              ? "Generating…"
+              : artifact
+                ? "Regenerate Daily Brief"
+                : "Generate Daily Brief"}
+          </Button>
+          {canEmailBrief && artifact ? (
+            <Button
+              variant="ghost"
+              type="button"
+              onClick={handleEmail}
+              disabled={isPending}
+            >
+              {isPending && pendingKind === "email"
+                ? "Sending…"
+                : "Email me this brief"}
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       {error ? (
@@ -68,6 +136,8 @@ export function DailyBriefPanel({
           {error}
         </p>
       ) : null}
+
+      {emailStatus ? <p className="dailyBriefMeta">{emailStatus}</p> : null}
 
       {artifact ? (
         <article className="dailyBriefCard">

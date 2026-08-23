@@ -13,7 +13,10 @@ import {
 } from "@signaldesk/persistence";
 
 import { getLinearOAuthConfig } from "../../../_lib/linear-config";
-import { consumeOAuthState } from "../../../_lib/oauth-state";
+import {
+  consumeOAuthState,
+  consumePkceVerifier,
+} from "../../../_lib/oauth-state";
 import { checkRateLimit, getClientIp } from "../../../_lib/rate-limit";
 import { getCurrentOrganization } from "../../../_lib/session";
 
@@ -25,11 +28,13 @@ function getPool() {
 }
 
 /**
- * Completes the Linear OAuth flow: exchanges the code, then makes one
- * real extra call to resolve which Linear user connected (Linear's token
- * response carries no identifier at all — see `linear/client.ts`'s doc
- * comment on `fetchLinearViewer`), then stores tokens in Vault. No data
- * sync yet — mirrors the other callbacks' structure otherwise.
+ * Completes the Linear OAuth flow: exchanges the code (with a real PKCE
+ * `code_verifier` — see `linear/client.ts`'s doc comment on why), then
+ * makes one real extra call to resolve which Linear user connected
+ * (Linear's token response carries no identifier at all — see
+ * `linear/client.ts`'s doc comment on `fetchLinearViewer`), then stores
+ * tokens in Vault. No data sync yet — mirrors the other callbacks'
+ * structure otherwise.
  */
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
@@ -48,7 +53,8 @@ export async function GET(request: Request) {
     return redirectTo("error");
   }
 
-  const rateLimit = checkRateLimit(
+  const rateLimit = await checkRateLimit(
+    getPool(),
     `linear-callback:${await getClientIp()}`,
     20,
     60 * 60 * 1000,
@@ -68,8 +74,9 @@ export async function GET(request: Request) {
   // browser was issued when it started the flow (RFC 6749 §10.12) — never
   // trust a client-supplied value alone.
   const stateIsValid = await consumeOAuthState("linear", state);
+  const codeVerifier = await consumePkceVerifier("linear");
 
-  if (!stateIsValid) {
+  if (!stateIsValid || !codeVerifier) {
     return redirectTo("error");
   }
 
@@ -83,7 +90,11 @@ export async function GET(request: Request) {
 
   try {
     const config = getLinearOAuthConfig(origin);
-    const tokens = await exchangeLinearAuthorizationCode(config, code);
+    const tokens = await exchangeLinearAuthorizationCode(
+      config,
+      code,
+      codeVerifier,
+    );
     const viewer = await fetchLinearViewer(tokens.accessToken);
 
     const integration = await findOrCreateLinearIntegration(

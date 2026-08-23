@@ -5,7 +5,7 @@ import {
   type BusinessSnapshot,
 } from "@signaldesk/application";
 import {
-  computeBusinessCoverageByPurpose,
+  computeBusinessCoverageByCapability,
   listConnectors,
 } from "@signaldesk/integrations";
 import {
@@ -43,7 +43,7 @@ export async function getBusinessSnapshot(
     listRecentAuditEvents(db, session.organizationId),
   ]);
 
-  const domainHealth = computeBusinessCoverageByPurpose(
+  const domainHealth = computeBusinessCoverageByCapability(
     attention.connectedIntegrationSlugs,
   );
 
@@ -51,7 +51,7 @@ export async function getBusinessSnapshot(
   const connectorHealth = listConnectors().map((connector) => ({
     slug: connector.slug,
     name: connector.name,
-    purpose: connector.purpose,
+    capabilityClass: connector.capabilityClasses[0]!,
     status: connectedSlugSet.has(connector.slug)
       ? ("connected" as const)
       : ("not_connected" as const),
@@ -63,6 +63,7 @@ export async function getBusinessSnapshot(
     snapshotId: randomUUID(),
     now,
     findings: attention.findings,
+    cards: attention.cards,
     businessContext: attention.businessProfile,
     recentActions,
     domainHealth,

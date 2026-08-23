@@ -1,4 +1,5 @@
 import type { PrioritizedFinding } from "@signaldesk/intelligence";
+import type { IntelligenceCard } from "@signaldesk/schemas";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -13,8 +14,8 @@ function finding(
   overrides: Partial<PrioritizedFinding> = {},
 ): PrioritizedFinding {
   return {
-    id: "stuck:org-1:lead-1",
-    type: "lead.untouched",
+    id: "lead-risk:org-1:lead-1",
+    type: "lead.follow_up_risk",
     title: "Priya Nair at Acme Robotics",
     summary: "No recorded interaction for 31 hours.",
     severity: "high",
@@ -33,6 +34,25 @@ function finding(
   };
 }
 
+function card(overrides: Partial<IntelligenceCard> = {}): IntelligenceCard {
+  return {
+    id: "lead-risk:org-1:lead-1",
+    type: "lead_risk",
+    title: "Priya Nair at Acme Robotics",
+    summary: "No recorded interaction for 31 hours.",
+    priority: 79,
+    severity: "high",
+    explanation: {
+      trigger: "No interaction within 24 hours.",
+      confidence: "high",
+    },
+    sources: [],
+    recommendedActions: [],
+    freshness: { asOf: NOW, status: "fresh" },
+    ...overrides,
+  };
+}
+
 const BUSINESS_CONTEXT = {
   timezone: "America/Toronto",
   defaultExpectedResponseHours: 24,
@@ -44,7 +64,7 @@ function domainCoverage(
   overrides: Partial<DomainCoverage> = {},
 ): DomainCoverage {
   return {
-    purpose: "pipeline",
+    capabilityClass: "crm",
     status: "connected",
     connectedConnectorNames: ["HubSpot"],
     totalConnectorNames: ["HubSpot"],
@@ -60,6 +80,7 @@ function input(
     snapshotId: "snapshot-1",
     now: NOW,
     findings: [],
+    cards: [],
     businessContext: BUSINESS_CONTEXT,
     recentActions: [],
     domainHealth: [],
@@ -141,13 +162,20 @@ describe("assembleBusinessSnapshot", () => {
     });
   });
 
-  it("summarizes domain coverage from the real per-purpose breakdown", () => {
+  it("passes cards through unchanged — the same composed cards the initial server render uses", () => {
+    const cards = [card({ id: "a" }), card({ id: "b", type: "invoice_risk" })];
+    const snapshot = assembleBusinessSnapshot(input({ cards }));
+
+    expect(snapshot.cards).toBe(cards);
+  });
+
+  it("summarizes domain coverage from the real per-capability breakdown", () => {
     const snapshot = assembleBusinessSnapshot(
       input({
         domainHealth: [
-          domainCoverage({ purpose: "pipeline", status: "connected" }),
-          domainCoverage({ purpose: "finance", status: "partial" }),
-          domainCoverage({ purpose: "calendar", status: "none" }),
+          domainCoverage({ capabilityClass: "crm", status: "connected" }),
+          domainCoverage({ capabilityClass: "accounting", status: "partial" }),
+          domainCoverage({ capabilityClass: "calendar", status: "none" }),
         ],
       }),
     );
@@ -166,7 +194,7 @@ describe("assembleBusinessSnapshot", () => {
       {
         slug: "hubspot",
         name: "HubSpot",
-        purpose: "pipeline" as const,
+        capabilityClass: "crm" as const,
         status: "connected" as const,
         hasRealSync: true,
       },

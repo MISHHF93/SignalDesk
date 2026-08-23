@@ -16,13 +16,19 @@
     "./microsoft-outlook": "./src/microsoft-outlook/index.ts",
     "./microsoft-calendar": "./src/microsoft-calendar/index.ts",
     "./asana": "./src/asana/index.ts",
-    "./linear": "./src/linear/index.ts"
+    "./jira": "./src/jira/index.ts",
+    "./linear": "./src/linear/index.ts",
+    "./salesforce": "./src/salesforce/index.ts",
+    "./xero": "./src/xero/index.ts",
+    "./zendesk": "./src/zendesk/index.ts",
+    "./resend": "./src/resend/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --project tsconfig.json --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
+    "@signaldesk/domain": "workspace:*",
     "stripe": "22.5.0"
   },
   "devDependencies": {

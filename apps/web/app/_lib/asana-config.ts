@@ -11,7 +11,17 @@ export function isAsanaConfigured(): boolean {
   );
 }
 
-export function getAsanaOAuthConfig(origin: string): AsanaOAuthConfig {
+/**
+ * The subset of credentials the revoke and refresh calls need — unlike
+ * the authorize/token-exchange flow, neither has a redirect URI to bind,
+ * so callers like `disconnectAsanaAction` and
+ * `ensureFreshAsanaAccessToken` don't need a request `origin` on hand
+ * just to read these.
+ */
+export function getAsanaClientCredentials(): Pick<
+  AsanaOAuthConfig,
+  "clientId" | "clientSecret"
+> {
   const clientId = process.env.ASANA_CLIENT_ID;
   const clientSecret = process.env.ASANA_CLIENT_SECRET;
 
@@ -21,9 +31,12 @@ export function getAsanaOAuthConfig(origin: string): AsanaOAuthConfig {
     );
   }
 
+  return { clientId, clientSecret };
+}
+
+export function getAsanaOAuthConfig(origin: string): AsanaOAuthConfig {
   return {
-    clientId,
-    clientSecret,
+    ...getAsanaClientCredentials(),
     redirectUri: `${origin}/integrations/asana/callback`,
   };
 }

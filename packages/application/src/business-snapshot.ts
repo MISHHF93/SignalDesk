@@ -1,4 +1,5 @@
 import type { PrioritizedFinding } from "@signaldesk/intelligence";
+import type { IntelligenceCard } from "@signaldesk/schemas";
 
 import {
   countFindingsBySeverity,
@@ -6,27 +7,45 @@ import {
 } from "./severity-counts";
 
 /**
- * Mirrors `@signaldesk/integrations`' real `ConnectorPurpose`
- * union, declared locally rather than imported — `packages/application`
- * stays decoupled from the connector-catalog package, the same boundary
- * `IntelligenceContext` already draws (it takes `connectedIntegrationSlugs:
- * readonly string[]`, never a connector definition). The real value from
- * `computeBusinessCoverageByPurpose` is structurally compatible with
- * `DomainCoverage` below and can be passed straight through with no
- * mapping at the call site.
+ * Mirrors `@signaldesk/integrations`' real `ConnectorCapabilityClass`
+ * union (ADR 0021, superseding the earlier `ConnectorPurpose`), declared
+ * locally rather than imported — `packages/application` stays decoupled
+ * from the connector-catalog package, the same boundary `IntelligenceContext`
+ * already draws (it takes `connectedIntegrationSlugs: readonly string[]`,
+ * never a connector definition). The real value from
+ * `computeBusinessCoverageByCapability` is structurally compatible with
+ * `DomainCoverage` below (same field name, `capabilityClass`, not just the
+ * same value union) and can be passed straight through with no mapping at
+ * the call site.
  */
-export type BusinessDomainPurpose =
-  | "pipeline"
+export type BusinessDomainCapabilityClass =
+  | "identity"
+  | "crm"
   | "communication"
-  | "delivery"
   | "calendar"
-  | "finance"
-  | "payments";
+  | "projects"
+  | "tasks"
+  | "time"
+  | "accounting"
+  | "payments"
+  | "documents"
+  | "contracts"
+  | "support"
+  | "hr"
+  | "ats"
+  | "commerce"
+  | "inventory"
+  | "field-service"
+  | "psa"
+  | "rmm"
+  | "security"
+  | "product-analytics"
+  | "data-warehouse";
 
 export type DomainCoverageStatus = "none" | "partial" | "connected";
 
 export interface DomainCoverage {
-  readonly purpose: BusinessDomainPurpose;
+  readonly capabilityClass: BusinessDomainCapabilityClass;
   readonly status: DomainCoverageStatus;
   readonly connectedConnectorNames: readonly string[];
   readonly totalConnectorNames: readonly string[];
@@ -48,7 +67,7 @@ export interface SnapshotFreshness {
 export interface ConnectorHealthSummary {
   readonly slug: string;
   readonly name: string;
-  readonly purpose: BusinessDomainPurpose;
+  readonly capabilityClass: BusinessDomainCapabilityClass;
   readonly status: "connected" | "not_connected";
   /** A real one-time sync-on-connect exists (HubSpot, QuickBooks, Asana
    * today) — not the same as `status`, which only means "authorized." */
@@ -95,6 +114,16 @@ export type BusinessSnapshotPulse = SeverityCounts;
  * real-but-empty values, is the same choice the Artifact status lifecycle
  * and `Invoice.status`'s unused `paid`/`void` states already made: the
  * type is forward-compatible, the runtime value doesn't pretend.
+ *
+ * `recentActions` is rendered on the command center (`RecentActivityPanel`).
+ * `domainHealth`/`coverage`/`connectorHealth` are real and computed but
+ * currently rendered only on their own natural detail pages (`/integrations`
+ * and `/integrations/[slug]`, via a separate direct call to
+ * `computeBusinessCoverageByCapability`/`computeConnectorHealth`, not by
+ * reading this snapshot) — carried here mainly so a future command-center
+ * summary view doesn't need a second query. `pulse` (severity counts) has
+ * no renderer yet — found unwired in a dead-code/wiring audit this
+ * session and disclosed here rather than left undocumented.
  */
 export interface BusinessSnapshot {
   readonly organizationId: string;
@@ -104,6 +133,16 @@ export interface BusinessSnapshot {
   readonly coverage: BusinessCoverageSummary;
   readonly freshness: SnapshotFreshness;
   readonly attentionItems: readonly PrioritizedFinding[];
+  /**
+   * The same composed cards the command center's own initial server
+   * render uses (`composeCards`, via `BusinessAttention.cards`) — not a
+   * second, divergent computation. Added so a client-side poll of this
+   * same snapshot (`/api/business/snapshot`, `useBusinessSnapshot`) can
+   * refresh the command center's card list directly, instead of either
+   * re-deriving `composeCards` in the browser (duplicating server-only
+   * composition logic) or polling a second, parallel endpoint.
+   */
+  readonly cards: readonly IntelligenceCard[];
   readonly waitingOnMe: readonly PrioritizedFinding[];
   readonly meaningfulChanges: readonly MeaningfulChange[];
   readonly businessContext: BusinessContextProfile;
@@ -119,6 +158,7 @@ export interface AssembleBusinessSnapshotInput {
   readonly snapshotId: string;
   readonly now: Date;
   readonly findings: readonly PrioritizedFinding[];
+  readonly cards: readonly IntelligenceCard[];
   readonly businessContext: BusinessContextProfile;
   readonly recentActions: readonly RecentActionSummary[];
   readonly domainHealth: readonly DomainCoverage[];
@@ -208,6 +248,7 @@ export function assembleBusinessSnapshot(
     coverage: summarizeCoverage(input.domainHealth),
     freshness: { status: worstFreshness(input.findings) },
     attentionItems: input.findings,
+    cards: input.cards,
     waitingOnMe: [],
     meaningfulChanges: [],
     businessContext: input.businessContext,

@@ -30,14 +30,20 @@ const lead: Lead = {
 describe("integrationHealthIntelligence", () => {
   it("reports an unconnected foundation-preview connector honestly, with unknown freshness", async () => {
     const findings = await integrationHealthIntelligence.evaluate({
-      lead,
+      leads: [lead],
       now: NOW,
       overdueInvoices: [],
       connectedIntegrationSlugs: [],
       highValueThresholdCents: 1_000_000,
       overdueTasks: [],
+      recentPayments: [],
       workingDaysBitmask: 0b1111111,
       timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
     });
 
     expect(findings).toHaveLength(1);
@@ -48,14 +54,20 @@ describe("integrationHealthIntelligence", () => {
 
   it("skips a foundation-preview connector once it's actually connected", async () => {
     const findings = await integrationHealthIntelligence.evaluate({
-      lead,
+      leads: [lead],
       now: NOW,
       overdueInvoices: [],
       connectedIntegrationSlugs: ["slack"],
       highValueThresholdCents: 1_000_000,
       overdueTasks: [],
+      recentPayments: [],
       workingDaysBitmask: 0b1111111,
       timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
     });
 
     expect(findings).toHaveLength(1);
@@ -64,7 +76,7 @@ describe("integrationHealthIntelligence", () => {
 
   it("reports nothing once every foundation-preview connector is connected", async () => {
     const findings = await integrationHealthIntelligence.evaluate({
-      lead,
+      leads: [lead],
       now: NOW,
       overdueInvoices: [],
       connectedIntegrationSlugs: [
@@ -78,11 +90,21 @@ describe("integrationHealthIntelligence", () => {
         "microsoft-calendar",
         "asana",
         "linear",
+        "salesforce",
+        "xero",
+        "jira",
+        "zendesk",
       ],
       highValueThresholdCents: 1_000_000,
       overdueTasks: [],
+      recentPayments: [],
       workingDaysBitmask: 0b1111111,
       timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
     });
 
     expect(findings).toEqual([]);

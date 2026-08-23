@@ -1,15 +1,21 @@
 import {
   createDatabasePool,
+  getAIProviderConnectionStatus,
   getOrganizationBusinessProfile,
   getOrganizationPreferences,
+  listOrganizationInvites,
+  listOrganizationMembers,
 } from "@signaldesk/persistence";
 import type { Metadata } from "next";
 import Link from "next/link";
 
 import { ShieldIcon } from "../_components/icons";
 import { getCurrentOrganization } from "../_lib/session";
+import { AIProviderPanel } from "./ai-provider-panel";
 import { BusinessProfileForm } from "./business-profile-form";
+import { DeleteOrganizationForm } from "./delete-organization-form";
 import { PreferencesForm } from "./preferences-form";
+import { TeamPanel } from "./team-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -65,14 +71,22 @@ export default async function ProfilePage() {
     );
   }
 
-  const businessProfile = await getOrganizationBusinessProfile(
-    getPool(),
-    session.organizationId,
-  );
-  const preferences = await getOrganizationPreferences(
-    getPool(),
-    session.organizationId,
-  );
+  const canManageTeam = session.role === "owner" || session.role === "admin";
+
+  const [businessProfile, preferences, members, invites, aiProviderStatus] =
+    await Promise.all([
+      getOrganizationBusinessProfile(getPool(), session.organizationId),
+      getOrganizationPreferences(getPool(), session.organizationId),
+      listOrganizationMembers(getPool(), session.organizationId),
+      canManageTeam
+        ? listOrganizationInvites(getPool(), session.organizationId)
+        : Promise.resolve([]),
+      getAIProviderConnectionStatus(
+        getPool(),
+        session.organizationId,
+        "anthropic",
+      ),
+    ]);
 
   return (
     <main className="shell appPage" id="main-content">
@@ -114,6 +128,7 @@ export default async function ProfilePage() {
             }
             highValueThresholdCents={businessProfile.highValueThresholdCents}
             workingDaysBitmask={businessProfile.workingDaysBitmask}
+            industry={businessProfile.industry}
             canEdit={session.role === "owner"}
           />
         </section>
@@ -182,11 +197,36 @@ export default async function ProfilePage() {
               <dt>Provisioning</dt>
               <dd>One solo organization, created automatically at sign-up</dd>
             </div>
-            <div>
-              <dt>Team invites</dt>
-              <dd>Not built yet</dd>
-            </div>
           </dl>
+
+          <TeamPanel
+            members={members}
+            invites={invites}
+            canManage={canManageTeam}
+          />
+        </section>
+
+        <section className="settingsCard" aria-labelledby="ai-provider-heading">
+          <div className="settingsCardHeader">
+            <div>
+              <p className="sectionKicker">AI</p>
+              <h2 id="ai-provider-heading">AI providers</h2>
+            </div>
+            <span className="readOnlyBadge">Real, editable</span>
+          </div>
+
+          <p>
+            Bring your own AI provider key (Phase 4c, implementation roadmap).
+            When connected, this workspace&rsquo;s AI investigations run on your
+            own Anthropic account/budget instead of the platform default —
+            grants no new ability for AI to act on anything; every existing
+            approval gate stays exactly as strict.
+          </p>
+
+          <AIProviderPanel
+            status={aiProviderStatus}
+            canManage={canManageTeam}
+          />
         </section>
 
         <section
@@ -269,6 +309,35 @@ export default async function ProfilePage() {
             weeklyRecapEnabled={preferences.weeklyRecapEnabled}
             canEdit={session.role === "owner"}
           />
+        </section>
+
+        <section className="settingsCard" aria-labelledby="data-heading">
+          <div className="settingsCardHeader">
+            <div>
+              <p className="sectionKicker">Privacy</p>
+              <h2 id="data-heading">Your data</h2>
+            </div>
+            <span className="readOnlyBadge">Real</span>
+          </div>
+
+          <p>
+            Download everything this workspace has recorded — leads, invoices,
+            tasks, messages, support tickets, daily briefs, recent audit events,
+            and your subscription — as one JSON file.
+          </p>
+
+          <div className="checkoutForm">
+            <a className="btn btn-secondary" href="/profile/export">
+              Export your data
+            </a>
+          </div>
+
+          {session.role === "owner" ? (
+            <div className="dangerZone">
+              <h3>Danger zone</h3>
+              <DeleteOrganizationForm />
+            </div>
+          ) : null}
         </section>
       </div>
     </main>

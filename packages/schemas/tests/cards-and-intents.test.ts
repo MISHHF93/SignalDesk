@@ -19,8 +19,8 @@ const sourceReference = {
 };
 
 const validCard = {
-  id: "stuck:org-1:lead-1",
-  type: "stuck",
+  id: "lead-risk:org-1:lead-1",
+  type: "lead_risk",
   title: "Priya Nair at Acme Robotics",
   summary: "No recorded interaction for 31 hours.",
   priority: 90,
@@ -102,6 +102,33 @@ describe("dashboardIntentSchema", () => {
     });
 
     expect(result.success).toBe(true);
+  });
+
+  it("validates a text-search filter intent", () => {
+    const result = dashboardIntentSchema.safeParse({
+      type: "filter",
+      filters: [{ field: "text", operator: "contains", value: "acme" }],
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects a text field paired with a non-contains operator", () => {
+    const result = dashboardIntentSchema.safeParse({
+      type: "filter",
+      filters: [{ field: "text", operator: "eq", value: "acme" }],
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects a contains operator paired with a non-text field", () => {
+    const result = dashboardIntentSchema.safeParse({
+      type: "filter",
+      filters: [{ field: "severity", operator: "contains", value: "critical" }],
+    });
+
+    expect(result.success).toBe(false);
   });
 
   it("validates an investigate intent", () => {

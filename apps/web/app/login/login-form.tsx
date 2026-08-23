@@ -49,6 +49,10 @@ export function LoginForm({ next }: { next: string }) {
           />
         </div>
 
+        <p className="authSwitch">
+          <Link href="/login/reset">Forgot your password?</Link>
+        </p>
+
         {state.error ? (
           <p className="authError" role="alert">
             {state.error}

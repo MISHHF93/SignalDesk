@@ -10,12 +10,15 @@ export interface QuickBooksIntegrationRow {
    * carries no company name; that would require an extra CompanyInfo API
    * call this v1 doesn't make, matching HubSpot's own honest gap. */
   readonly externalAccountLabel: string | null;
+  /** The QuickBooks `realmId` the invoice sync/"Sync Now" queries by. */
+  readonly externalAccountId: string;
 }
 
 interface QuickBooksIntegrationDbRow {
   readonly id: string;
   readonly status: string;
   readonly external_account_label: string | null;
+  readonly external_account_id: string;
 }
 
 function toRow(row: QuickBooksIntegrationDbRow): QuickBooksIntegrationRow {
@@ -23,6 +26,7 @@ function toRow(row: QuickBooksIntegrationDbRow): QuickBooksIntegrationRow {
     id: row.id,
     status: row.status,
     externalAccountLabel: row.external_account_label,
+    externalAccountId: row.external_account_id,
   };
 }
 
@@ -37,7 +41,7 @@ export async function getQuickBooksIntegrationStatus(
 ): Promise<QuickBooksIntegrationRow | null> {
   return withTenantContext(pool, organizationId, async (client) => {
     const result = await client.query<QuickBooksIntegrationDbRow>(
-      `select id, status, external_account_label from integrations
+      `select id, status, external_account_label, external_account_id from integrations
        where organization_id = $1 and source_system = 'quickbooks'
        order by (status = 'active') desc, created_at desc
        limit 1`,
@@ -66,7 +70,7 @@ export async function findOrCreateQuickBooksIntegration(
        values ($1, $2, 'quickbooks', $3, 'active')
        on conflict (organization_id, source_system, external_account_id)
        do update set status = 'active'
-       returning id, status, external_account_label`,
+       returning id, status, external_account_label, external_account_id`,
       [randomUUID(), organizationId, realmId],
     );
 
@@ -78,6 +82,43 @@ export async function findOrCreateQuickBooksIntegration(
 
     return toRow(row);
   });
+}
+
+export interface QuickBooksRealmLookup {
+  readonly organizationId: string;
+  readonly integrationId: string;
+}
+
+/**
+ * Resolves which organization/integration owns a QuickBooks `realmId` —
+ * needed by the unauthenticated webhook handler, which has no session and
+ * therefore no tenant context to set before it even knows which tenant
+ * this notification belongs to. `integrations` has FORCE ROW LEVEL
+ * SECURITY, so a plain query here would return zero rows regardless of
+ * the real answer; goes through the same SECURITY DEFINER bootstrapping
+ * pattern `findOrganizationIdByStripeSubscriptionId` uses for the Stripe
+ * webhook (0025), not a raw table read. Every subsequent read/write for
+ * this request goes back through `withTenantContext` using the
+ * organization id this resolves.
+ */
+export async function findOrganizationAndIntegrationIdByQuickBooksRealmId(
+  pool: DatabasePool,
+  realmId: string,
+): Promise<QuickBooksRealmLookup | null> {
+  const result = await pool.query<{
+    organization_id: string;
+    integration_id: string;
+  }>(
+    `select organization_id, integration_id
+     from public.resolve_organization_and_integration_for_quickbooks_realm($1)`,
+    [realmId],
+  );
+
+  const row = result.rows[0];
+
+  return row
+    ? { organizationId: row.organization_id, integrationId: row.integration_id }
+    : null;
 }
 
 /**

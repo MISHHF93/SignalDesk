@@ -46,6 +46,25 @@ export function register(): void {
     );
   }
 
+  // Real, deployable enforcement of PRODUCTION-ACTIVATION-CHECKLIST.md
+  // Stage 7 — not a documentation-only reminder. `/legal/terms`,
+  // `/legal/privacy`, and `/support` are honest, clearly-labeled
+  // placeholders (not real legal text) until an owner/counsel review
+  // replaces them. Setting `SIGNALDESK_PUBLIC_LAUNCH_MODE=true` is the
+  // owner's own explicit signal that real customers can sign up now —
+  // this refuses to start in that mode unless
+  // `SIGNALDESK_LEGAL_CONTENT_REVIEWED=true` is also set, so placeholder
+  // legal content can never silently go live just because the rest of the
+  // launch checklist is done.
+  if (
+    process.env.SIGNALDESK_PUBLIC_LAUNCH_MODE === "true" &&
+    process.env.SIGNALDESK_LEGAL_CONTENT_REVIEWED !== "true"
+  ) {
+    throw new Error(
+      "SIGNALDESK_PUBLIC_LAUNCH_MODE is true but SIGNALDESK_LEGAL_CONTENT_REVIEWED is not — refusing to start with placeholder Terms of Service/Privacy Policy/Support content in public-launch mode. Set SIGNALDESK_LEGAL_CONTENT_REVIEWED=true only after an owner/counsel review has actually replaced /legal/terms, /legal/privacy, and /support's placeholder content.",
+    );
+  }
+
   const oauthConnectorEnvPairs = [
     ["HubSpot", "HUBSPOT_CLIENT_ID", "HUBSPOT_CLIENT_SECRET"],
     ["Slack", "SLACK_CLIENT_ID", "SLACK_CLIENT_SECRET"],
@@ -62,6 +81,10 @@ export function register(): void {
     ["Microsoft", "MICROSOFT_CLIENT_ID", "MICROSOFT_CLIENT_SECRET"],
     ["Asana", "ASANA_CLIENT_ID", "ASANA_CLIENT_SECRET"],
     ["Linear", "LINEAR_CLIENT_ID", "LINEAR_CLIENT_SECRET"],
+    ["Salesforce", "SALESFORCE_CLIENT_ID", "SALESFORCE_CLIENT_SECRET"],
+    ["Xero", "XERO_CLIENT_ID", "XERO_CLIENT_SECRET"],
+    ["Jira", "JIRA_CLIENT_ID", "JIRA_CLIENT_SECRET"],
+    ["Zendesk", "ZENDESK_CLIENT_ID", "ZENDESK_CLIENT_SECRET"],
   ] as const;
 
   for (const [providerLabel, idVar, secretVar] of oauthConnectorEnvPairs) {

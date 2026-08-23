@@ -47,7 +47,8 @@ export async function resumeSubscriptionAction(
     return { error: "Sign in to manage your subscription." };
   }
 
-  const rateLimit = checkRateLimit(
+  const rateLimit = await checkRateLimit(
+    getPool(),
     `resume-subscription:${session.organizationId}`,
     10,
     60 * 60 * 1000,

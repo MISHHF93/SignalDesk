@@ -1,9 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { UpstreamProviderError } from "../shared/upstream-error";
 import {
   buildQuickBooksAuthorizationUrl,
   exchangeQuickBooksAuthorizationCode,
+  fetchQuickBooksClosedInvoices,
   fetchQuickBooksInvoices,
+  fetchQuickBooksPayments,
   QUICKBOOKS_SCOPES,
   revokeQuickBooksToken,
   type QuickBooksOAuthConfig,
@@ -85,14 +88,31 @@ describe("exchangeQuickBooksAuthorizationCode", () => {
     );
   });
 
-  it("throws on a non-2xx response", async () => {
+  it("throws a safe UpstreamProviderError on a non-2xx response, never leaking the raw response body into the client-visible message", async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse(400, { error: "invalid_grant" }),
     );
 
-    await expect(
-      exchangeQuickBooksAuthorizationCode(CONFIG, "bad-code"),
-    ).rejects.toThrow(/400/);
+    let thrown: unknown;
+
+    try {
+      await exchangeQuickBooksAuthorizationCode(CONFIG, "bad-code");
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(UpstreamProviderError);
+    const error = thrown as UpstreamProviderError;
+    // The user-visible message never contains the raw status/body — that
+    // was the real bug (found by a deep audit, 2026-08-22): the message
+    // used to be shown verbatim in Server Action error UI.
+    expect(error.message).not.toContain("400");
+    expect(error.message).not.toContain("invalid_grant");
+    expect(error.message).toContain("QuickBooks token request failed");
+    // The real diagnostic detail is still captured, just not in the
+    // client-visible field.
+    expect(error.rawDetail).toContain("400");
+    expect(error.rawDetail).toContain("invalid_grant");
   });
 
   it("retries on a 5xx before succeeding, reusing the shared retry policy", async () => {
@@ -261,5 +281,169 @@ describe("fetchQuickBooksInvoices", () => {
     );
     await vi.runAllTimersAsync();
     await assertion;
+  });
+
+  it("appends a MetaData.LastUpdatedTime filter when a cursor is passed", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { QueryResponse: {} }));
+
+    await fetchQuickBooksInvoices(
+      "access-token-1",
+      "realm-1",
+      0,
+      "2026-08-01T00:00:00.000Z",
+    );
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const query = new URL(url).searchParams.get("query")!;
+
+    expect(query).toContain(
+      "and MetaData.LastUpdatedTime > '2026-08-01T00:00:00.000Z'",
+    );
+  });
+
+  it("omits the cursor filter when no cursor is passed", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { QueryResponse: {} }));
+
+    await fetchQuickBooksInvoices("access-token-1", "realm-1", 0, null);
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const query = new URL(url).searchParams.get("query")!;
+
+    expect(query).not.toContain("MetaData.LastUpdatedTime >");
+  });
+});
+
+describe("fetchQuickBooksClosedInvoices", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("queries invoices with a zero balance modified since the cursor", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        QueryResponse: {
+          Invoice: [
+            {
+              Id: "148",
+              SyncToken: "4",
+              TotalAmt: 2500,
+              Balance: 0,
+              DueDate: "2026-08-01",
+              CustomerRef: { value: "62" },
+              MetaData: { LastUpdatedTime: "2026-08-19T00:00:00.000Z" },
+            },
+          ],
+        },
+      }),
+    );
+
+    const page = await fetchQuickBooksClosedInvoices(
+      "access-token-1",
+      "realm-1",
+      0,
+      "2026-08-01T00:00:00.000Z",
+    );
+
+    expect(page.results).toHaveLength(1);
+    expect(page.results[0]?.Id).toBe("148");
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const query = new URL(url).searchParams.get("query")!;
+
+    expect(query).toContain("from Invoice where Balance = '0'");
+    expect(query).toContain(
+      "and MetaData.LastUpdatedTime > '2026-08-01T00:00:00.000Z'",
+    );
+  });
+});
+
+describe("fetchQuickBooksPayments", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("queries payments for the given company with a bearer token", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        QueryResponse: {
+          Payment: [
+            {
+              Id: "88",
+              SyncToken: "0",
+              TotalAmt: 1500,
+              TxnDate: "2026-08-18",
+              CustomerRef: { value: "62", name: "Acme Robotics" },
+              MetaData: { LastUpdatedTime: "2026-08-18T00:00:00.000Z" },
+              Line: [
+                {
+                  LinkedTxn: [{ TxnId: "148", TxnType: "Invoice" }],
+                },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+
+    const page = await fetchQuickBooksPayments(
+      "access-token-1",
+      "realm-999",
+      0,
+    );
+
+    expect(page.results).toHaveLength(1);
+    expect(page.results[0]?.Id).toBe("88");
+    expect(page.hasMore).toBe(false);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const requestUrl = new URL(url);
+    expect(requestUrl.origin + requestUrl.pathname).toBe(
+      "https://quickbooks.api.intuit.com/v3/company/realm-999/query",
+    );
+    expect(requestUrl.searchParams.get("query")).toContain("from Payment");
+    expect((init.headers as Record<string, string>).Authorization).toBe(
+      "Bearer access-token-1",
+    );
+  });
+
+  it("appends a MetaData.LastUpdatedTime filter when a cursor is passed", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { QueryResponse: {} }));
+
+    await fetchQuickBooksPayments(
+      "access-token-1",
+      "realm-1",
+      0,
+      "2026-08-01T00:00:00.000Z",
+    );
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const query = new URL(url).searchParams.get("query")!;
+
+    expect(query).toContain(
+      "where MetaData.LastUpdatedTime > '2026-08-01T00:00:00.000Z'",
+    );
+  });
+
+  it("returns an empty page when QuickBooks reports no payments", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { QueryResponse: {} }));
+
+    const page = await fetchQuickBooksPayments("access-token-1", "realm-1", 0);
+
+    expect(page.results).toEqual([]);
+    expect(page.hasMore).toBe(false);
   });
 });

@@ -10,6 +10,7 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     organizationId: "org-001",
     name: "Ship Q3 report",
     assigneeName: "Jordan Lee",
+    owner: null,
     dueAt,
     completed: false,
     source: {

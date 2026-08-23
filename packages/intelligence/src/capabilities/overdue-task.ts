@@ -45,13 +45,18 @@ export const overdueTaskIntelligence: IntelligenceCapability = {
         summary: signal.explanation,
         severity: signal.severity,
         confidence: CONFIDENCE_DETERMINISTIC_RULE,
-        // The assignee's Asana gid isn't persisted (only their display
-        // name — see the `tasks` table/mapper) — a known simplification,
-        // so the name doubles as the owner id here rather than leaving
-        // this card the only one with no owner reference at all.
-        ...(task.assigneeName
-          ? { owner: { id: task.assigneeName, name: task.assigneeName } }
-          : {}),
+        // `task.owner` is the real, resolved membership (Prompt 29,
+        // docs/product-vision-backlog.md, ADR 0039) when `assigneeName`
+        // matched a real member's display name at ingest time — preferred
+        // whenever present. Otherwise, the assignee's Asana gid isn't
+        // persisted (only their display name — see the `tasks` table/
+        // mapper), so the name doubles as the owner id here rather than
+        // leaving this card the only one with no owner reference at all.
+        ...(task.owner
+          ? { owner: task.owner }
+          : task.assigneeName
+            ? { owner: { id: task.assigneeName, name: task.assigneeName } }
+            : {}),
         evidence: signal.evidence.map((reference) => ({ ...reference })),
         freshness: {
           asOf: task.source.lastSyncedAt,

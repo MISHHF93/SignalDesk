@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fetchHubSpotOwners, revokeHubSpotRefreshToken } from "./client";
+import {
+  fetchHubSpotDealsModifiedSince,
+  fetchHubSpotOwners,
+  revokeHubSpotRefreshToken,
+} from "./client";
 
 function jsonResponse(
   status: number,
@@ -78,7 +82,7 @@ describe("HubSpot client retry/backoff", () => {
     );
 
     await expect(fetchHubSpotOwners("token")).rejects.toThrow(
-      /HubSpot owners fetch failed: 401/,
+      /HubSpot owners fetch failed/,
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -108,7 +112,7 @@ describe("HubSpot client retry/backoff", () => {
 
     const resultPromise = fetchHubSpotOwners("token");
     const assertion = expect(resultPromise).rejects.toThrow(
-      /HubSpot owners fetch failed: 500/,
+      /HubSpot owners fetch failed/,
     );
 
     await vi.runAllTimersAsync();
@@ -116,6 +120,99 @@ describe("HubSpot client retry/backoff", () => {
 
     // 1 initial attempt + 3 retries = 4 total calls.
     expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe("fetchHubSpotDealsModifiedSince", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("posts a Search API filter converting the ISO cursor to unix millis", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { results: [] }));
+
+    await fetchHubSpotDealsModifiedSince("token", "2026-08-01T00:00:00.000Z");
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.hubapi.com/crm/v3/objects/deals/search");
+    expect(init.method).toBe("POST");
+
+    const body = JSON.parse(init.body as string) as {
+      filterGroups: Array<{
+        filters: Array<{
+          propertyName: string;
+          operator: string;
+          value: string;
+        }>;
+      }>;
+    };
+
+    expect(body.filterGroups[0]?.filters[0]).toEqual({
+      propertyName: "hs_lastmodifieddate",
+      operator: "GT",
+      value: String(new Date("2026-08-01T00:00:00.000Z").getTime()),
+    });
+  });
+
+  it("passes the after cursor through for pagination", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        results: [],
+        paging: { next: { after: "20" } },
+      }),
+    );
+
+    const page = await fetchHubSpotDealsModifiedSince(
+      "token",
+      "2026-08-01T00:00:00.000Z",
+      "10",
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { after?: string };
+
+    expect(body.after).toBe("10");
+    expect(page.nextAfter).toBe("20");
+  });
+
+  it("returns results and null nextAfter when there's no more paging", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        results: [
+          {
+            id: "1",
+            properties: { dealname: "Acme deal" },
+            createdAt: "2026-08-01T00:00:00.000Z",
+            updatedAt: "2026-08-02T00:00:00.000Z",
+          },
+        ],
+      }),
+    );
+
+    const page = await fetchHubSpotDealsModifiedSince(
+      "token",
+      "2026-08-01T00:00:00.000Z",
+    );
+
+    expect(page.results).toHaveLength(1);
+    expect(page.nextAfter).toBeNull();
+  });
+
+  it("throws on a non-ok response", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(400, { message: "invalid filter" }),
+    );
+
+    await expect(
+      fetchHubSpotDealsModifiedSince("token", "2026-08-01T00:00:00.000Z"),
+    ).rejects.toThrow(/HubSpot deals search failed/);
   });
 });
 

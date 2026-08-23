@@ -32,10 +32,12 @@
  *    Actions' doc comments.
  */
 
-import { randomBytes, createHash } from "node:crypto";
-
 import { fetchWithRetry } from "./fetch-with-retry";
+import { throwUpstreamError } from "./upstream-error";
 import { decodeJwtPayload } from "./jwt";
+import { generatePkcePair, type PkcePair } from "./pkce";
+
+export { generatePkcePair, type PkcePair };
 
 // "common" allows both work/school (Entra ID) and personal Microsoft
 // accounts to sign in — the standard tenant value for a general-purpose
@@ -56,19 +58,6 @@ export interface MicrosoftOAuthConfig {
   readonly clientId: string;
   readonly clientSecret: string;
   readonly redirectUri: string;
-}
-
-export interface PkcePair {
-  readonly verifier: string;
-  readonly challenge: string;
-}
-
-/** RFC 7636 code_verifier: 43-128 chars from the unreserved URL charset —
- * base64url of 32 random bytes lands at 43 chars, satisfying that. */
-export function generatePkcePair(): PkcePair {
-  const verifier = randomBytes(32).toString("base64url");
-  const challenge = createHash("sha256").update(verifier).digest("base64url");
-  return { verifier, challenge };
 }
 
 export function buildMicrosoftAuthorizationUrl(
@@ -141,9 +130,7 @@ export async function exchangeMicrosoftAuthorizationCode(
   });
 
   if (!response.ok) {
-    throw new Error(
-      `Microsoft token request failed: ${response.status} ${await response.text()}`,
-    );
+    await throwUpstreamError("Microsoft token request", response);
   }
 
   const payload = (await response.json()) as RawMicrosoftTokenResponse;

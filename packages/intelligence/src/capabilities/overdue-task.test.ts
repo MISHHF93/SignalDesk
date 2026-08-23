@@ -11,6 +11,7 @@ function task(overrides: Partial<Task> = {}): Task {
     organizationId: "org_001",
     name: "Ship Q3 report",
     assigneeName: "Sarah Chen",
+    owner: null,
     dueAt: new Date("2026-08-01T00:00:00.000Z"),
     completed: false,
     source: {
@@ -28,14 +29,20 @@ function task(overrides: Partial<Task> = {}): Task {
 describe("overdueTaskIntelligence", () => {
   it("fires a task.overdue finding with the task's owner", async () => {
     const findings = await overdueTaskIntelligence.evaluate({
-      lead: null,
+      leads: [],
       overdueInvoices: [],
       overdueTasks: [task()],
       now: NOW,
       connectedIntegrationSlugs: [],
       highValueThresholdCents: 1_000_000,
+      recentPayments: [],
       workingDaysBitmask: 0b1111111,
       timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
     });
 
     expect(findings).toHaveLength(1);
@@ -49,7 +56,7 @@ describe("overdueTaskIntelligence", () => {
 
   it("produces one finding per overdue task", async () => {
     const findings = await overdueTaskIntelligence.evaluate({
-      lead: null,
+      leads: [],
       overdueInvoices: [],
       overdueTasks: [
         task({ id: "task_001" }),
@@ -58,8 +65,14 @@ describe("overdueTaskIntelligence", () => {
       now: NOW,
       connectedIntegrationSlugs: [],
       highValueThresholdCents: 1_000_000,
+      recentPayments: [],
       workingDaysBitmask: 0b1111111,
       timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
     });
 
     expect(findings).toHaveLength(2);
@@ -69,16 +82,51 @@ describe("overdueTaskIntelligence", () => {
     ]);
   });
 
+  it("prefers the real resolved owner over the raw assignee name", async () => {
+    const findings = await overdueTaskIntelligence.evaluate({
+      leads: [],
+      overdueInvoices: [],
+      overdueTasks: [
+        task({
+          assigneeName: "Sarah Chen",
+          owner: { id: "membership-real-id", name: "Sarah Chen" },
+        }),
+      ],
+      now: NOW,
+      connectedIntegrationSlugs: [],
+      highValueThresholdCents: 1_000_000,
+      recentPayments: [],
+      workingDaysBitmask: 0b1111111,
+      timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
+    });
+
+    expect(findings[0]?.owner).toEqual({
+      id: "membership-real-id",
+      name: "Sarah Chen",
+    });
+  });
+
   it("omits the owner reference when the task has no assignee", async () => {
     const findings = await overdueTaskIntelligence.evaluate({
-      lead: null,
+      leads: [],
       overdueInvoices: [],
       overdueTasks: [task({ assigneeName: null })],
       now: NOW,
       connectedIntegrationSlugs: [],
       highValueThresholdCents: 1_000_000,
+      recentPayments: [],
       workingDaysBitmask: 0b1111111,
       timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
     });
 
     expect(findings[0]?.owner).toBeUndefined();
@@ -86,14 +134,20 @@ describe("overdueTaskIntelligence", () => {
 
   it("produces no finding when there are no overdue tasks", async () => {
     const findings = await overdueTaskIntelligence.evaluate({
-      lead: null,
+      leads: [],
       overdueInvoices: [],
       overdueTasks: [],
       now: NOW,
       connectedIntegrationSlugs: [],
       highValueThresholdCents: 1_000_000,
+      recentPayments: [],
       workingDaysBitmask: 0b1111111,
       timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
     });
 
     expect(findings).toHaveLength(0);
@@ -101,14 +155,20 @@ describe("overdueTaskIntelligence", () => {
 
   it("produces no finding for a completed task", async () => {
     const findings = await overdueTaskIntelligence.evaluate({
-      lead: null,
+      leads: [],
       overdueInvoices: [],
       overdueTasks: [task({ completed: true })],
       now: NOW,
       connectedIntegrationSlugs: [],
       highValueThresholdCents: 1_000_000,
+      recentPayments: [],
       workingDaysBitmask: 0b1111111,
       timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
     });
 
     expect(findings).toHaveLength(0);

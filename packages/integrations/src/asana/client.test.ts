@@ -24,8 +24,10 @@ const CONFIG: AsanaOAuthConfig = {
 };
 
 describe("buildAsanaAuthorizationUrl", () => {
-  it("builds a real authorize URL with client id, response_type, scope, redirect uri, and state", () => {
-    const url = new URL(buildAsanaAuthorizationUrl(CONFIG, "nonce-123"));
+  it("builds a real authorize URL with client id, response_type, scope, redirect uri, state, and a real PKCE code_challenge", () => {
+    const url = new URL(
+      buildAsanaAuthorizationUrl(CONFIG, "nonce-123", "challenge-abc"),
+    );
 
     expect(url.origin + url.pathname).toBe(
       "https://app.asana.com/-/oauth_authorize",
@@ -35,6 +37,8 @@ describe("buildAsanaAuthorizationUrl", () => {
     expect(url.searchParams.get("redirect_uri")).toBe(CONFIG.redirectUri);
     expect(url.searchParams.get("scope")).toBe(ASANA_SCOPES.join(" "));
     expect(url.searchParams.get("state")).toBe("nonce-123");
+    expect(url.searchParams.get("code_challenge")).toBe("challenge-abc");
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
   });
 });
 
@@ -52,7 +56,7 @@ describe("exchangeAsanaAuthorizationCode", () => {
     vi.useRealTimers();
   });
 
-  it("maps a successful response, reading the user directly from data.gid/email", async () => {
+  it("maps a successful response, reading the user directly from data.gid/email, and sends the real PKCE code_verifier", async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse(200, {
         access_token: "at-1",
@@ -63,7 +67,11 @@ describe("exchangeAsanaAuthorizationCode", () => {
       }),
     );
 
-    const result = await exchangeAsanaAuthorizationCode(CONFIG, "auth-code");
+    const result = await exchangeAsanaAuthorizationCode(
+      CONFIG,
+      "auth-code",
+      "verifier-abc",
+    );
 
     expect(result).toEqual({
       accessToken: "at-1",
@@ -72,6 +80,9 @@ describe("exchangeAsanaAuthorizationCode", () => {
       asanaUserId: "12345",
       email: "alex@example.test",
     });
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = init.body as URLSearchParams;
+    expect(body.get("code_verifier")).toBe("verifier-abc");
   });
 
   it("throws when Asana omits data.gid", async () => {
@@ -84,7 +95,7 @@ describe("exchangeAsanaAuthorizationCode", () => {
     );
 
     await expect(
-      exchangeAsanaAuthorizationCode(CONFIG, "auth-code"),
+      exchangeAsanaAuthorizationCode(CONFIG, "auth-code", "verifier-abc"),
     ).rejects.toThrow(/data\.gid/);
   });
 
@@ -94,8 +105,8 @@ describe("exchangeAsanaAuthorizationCode", () => {
     );
 
     await expect(
-      exchangeAsanaAuthorizationCode(CONFIG, "bad-code"),
-    ).rejects.toThrow(/400/);
+      exchangeAsanaAuthorizationCode(CONFIG, "bad-code", "verifier-abc"),
+    ).rejects.toThrow(/Asana token request failed/);
   });
 
   it("retries on a 5xx before succeeding, reusing the shared retry policy", async () => {
@@ -110,7 +121,11 @@ describe("exchangeAsanaAuthorizationCode", () => {
         }),
       );
 
-    const resultPromise = exchangeAsanaAuthorizationCode(CONFIG, "auth-code");
+    const resultPromise = exchangeAsanaAuthorizationCode(
+      CONFIG,
+      "auth-code",
+      "verifier-abc",
+    );
     await vi.runAllTimersAsync();
     const result = await resultPromise;
 
@@ -290,6 +305,32 @@ describe("fetchAsanaTasks", () => {
 
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(new URL(url).searchParams.get("offset")).toBe("cursor-abc");
+  });
+
+  it("sends modified_since alongside completed_since when provided, for incremental runs", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: [] }));
+
+    await fetchAsanaTasks(
+      "access-token-1",
+      "assignee-62",
+      "workspace-1",
+      undefined,
+      "2026-08-19T00:00:00.000Z",
+    );
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const params = new URL(url).searchParams;
+    expect(params.get("modified_since")).toBe("2026-08-19T00:00:00.000Z");
+    expect(params.get("completed_since")).toBe("now");
+  });
+
+  it("omits modified_since when not provided, matching a plain initial sync", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: [] }));
+
+    await fetchAsanaTasks("access-token-1", "assignee-62", "workspace-1");
+
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new URL(url).searchParams.has("modified_since")).toBe(false);
   });
 
   it("throws on a non-ok response after retries are exhausted", async () => {

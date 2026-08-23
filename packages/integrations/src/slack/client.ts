@@ -6,9 +6,43 @@
  * "minimum necessary" scoping HubSpot's connector (ADR 0008) established —
  * `channels:read` only, nothing broader requested before a real feature
  * needs it.
+ *
+ * No PKCE here, unlike `shared/microsoft-oauth.ts` and the Salesforce
+ * connector — checked specifically this session against Slack's current
+ * docs, not assumed. Slack does have a real, generally-available PKCE
+ * feature (docs.slack.dev/changelog/2026/03/30/pkce/, "PKCE is now
+ * generally available!"; mechanics at
+ * docs.slack.dev/authentication/using-pkce/), so this is a different kind
+ * of gap than HubSpot's total absence of PKCE. But Slack's PKCE is
+ * architected as a *replacement* for `client_secret`, not an addition to
+ * it, and is scoped to public clients only: enabling it requires flipping
+ * an app-wide "public client" toggle in the Slack app's OAuth & Permissions
+ * settings that is explicitly a one-way operation ("cannot be disabled
+ * without contacting Slack support"), the token exchange for a
+ * PKCE-enabled app must stop sending `client_secret` entirely ("the client
+ * should call oauth.v2.access... without including client_secret, instead
+ * providing... code_verifier"), and it changes real behavior this
+ * connector currently depends on — refresh tokens for a PKCE-enabled app
+ * expire in 30 days instead of the persistent bot token this connector
+ * gets today (see `SlackTokenResponse`'s own doc comment above). None of
+ * that is a defense-in-depth addition achievable from this file alone the
+ * way Microsoft's or Salesforce's PKCE is — it is a one-way conversion of
+ * the whole Slack app to a different client type, outside this codebase's
+ * control, with a real behavior change this task's "preserve every
+ * existing behavior unchanged" constraint rules out. Sending
+ * `code_challenge` without that dashboard conversion would be silently
+ * ignored by Slack's authorize endpoint — inert at best, and dishonest
+ * either way, since it would imply a protection this flow doesn't actually
+ * have. The real defense here remains the single-use `state` CSRF nonce
+ * (`oauth-state.ts`) plus the confidential client's `client_secret`, same
+ * as HubSpot's connector.
  */
 
 import { fetchWithRetry } from "../shared/fetch-with-retry";
+import {
+  throwUpstreamError,
+  UpstreamProviderError,
+} from "../shared/upstream-error";
 
 const AUTHORIZE_URL = "https://slack.com/oauth/v2/authorize";
 const TOKEN_URL = "https://slack.com/api/oauth.v2.access";
@@ -72,9 +106,7 @@ export async function exchangeSlackAuthorizationCode(
   });
 
   if (!response.ok) {
-    throw new Error(
-      `Slack token request failed: ${response.status} ${await response.text()}`,
-    );
+    await throwUpstreamError("Slack token request", response);
   }
 
   const payload = (await response.json()) as RawSlackTokenResponse;
@@ -82,8 +114,9 @@ export async function exchangeSlackAuthorizationCode(
   // Slack's Web API always returns HTTP 200, even on failure — `ok: false`
   // plus an `error` code is the real failure signal, never the HTTP status.
   if (!payload.ok || !payload.access_token || !payload.team) {
-    throw new Error(
-      `Slack token exchange failed: ${payload.error ?? "unknown error"}`,
+    throw new UpstreamProviderError(
+      "Slack token exchange failed. Please try again, or reconnect this integration if the problem continues.",
+      payload.error ?? "unknown error",
     );
   }
 

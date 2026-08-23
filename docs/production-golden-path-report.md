@@ -1,0 +1,23 @@
+# Production Golden Path report
+
+- Generated: 2026-08-22T01:40:02.044Z
+- Target: http://localhost:3000
+- Console/page errors observed: none
+
+| Stage                                                                                                           | Status    | Detail                                                                                                                                                                                                                                  |
+| --------------------------------------------------------------------------------------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Create organization (guest sign-in)                                                                             | succeeded | Real organization auto-provisioned.                                                                                                                                                                                                     |
+| Select industry                                                                                                 | succeeded | Real business_profile.industry updated.                                                                                                                                                                                                 |
+| Connect gmail                                                                                                   | blocked   | No real OAuth developer app registered for this connector in this environment (OWNER-ACTIONS.md #3).                                                                                                                                    |
+| Connect hubspot                                                                                                 | blocked   | No real OAuth developer app registered for this connector in this environment (OWNER-ACTIONS.md #3).                                                                                                                                    |
+| Connect asana                                                                                                   | blocked   | No real OAuth developer app registered for this connector in this environment (OWNER-ACTIONS.md #3).                                                                                                                                    |
+| Connect quickbooks                                                                                              | blocked   | No real OAuth developer app registered for this connector in this environment (OWNER-ACTIONS.md #3).                                                                                                                                    |
+| Connect google-calendar                                                                                         | blocked   | No real OAuth developer app registered for this connector in this environment (OWNER-ACTIONS.md #3).                                                                                                                                    |
+| Connect slack                                                                                                   | blocked   | No real OAuth developer app registered for this connector in this environment (OWNER-ACTIONS.md #3).                                                                                                                                    |
+| Business Coverage view                                                                                          | succeeded | Real coverage-by-capability rendered (all 'none' — no real connections yet, honestly).                                                                                                                                                  |
+| Canonical entity resolution / Business Graph / real cross-connector Signal / AI investigation / governed action | blocked   | Depends entirely on at least one real connector connection above — none completed in this environment, so nothing downstream of it can be exercised for real (not attempted with synthetic substitutes for a real credential boundary). |
+
+Rerun this script (`pnpm launch:canary`) after each real credential
+in `OWNER-ACTIONS.md` lands — every `blocked` row above should turn
+into `succeeded` or a real, specific `failed` to investigate, never
+silently stay `blocked` once its credential exists.

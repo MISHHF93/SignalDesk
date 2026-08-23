@@ -6,30 +6,44 @@ import {
   getGmailIntegrationStatus,
   getGoogleCalendarIntegrationStatus,
   getHubSpotIntegrationStatus,
+  getJiraIntegrationStatus,
   getLinearIntegrationStatus,
   getMicrosoftCalendarIntegrationStatus,
   getMicrosoftOutlookIntegrationStatus,
   getQuickBooksIntegrationStatus,
+  getSalesforceIntegrationStatus,
   getSlackIntegrationStatus,
   getStripeIntegrationStatus,
+  getXeroIntegrationStatus,
+  getZendeskIntegrationStatus,
 } from "@signaldesk/persistence";
 
 import { isAsanaConfigured } from "../../_lib/asana-config";
 import { isGoogleConfigured } from "../../_lib/google-config";
 import { isHubSpotConfigured } from "../../_lib/hubspot-config";
+import { isJiraConfigured } from "../../_lib/jira-config";
 import { isLinearConfigured } from "../../_lib/linear-config";
 import { isMicrosoftConfigured } from "../../_lib/microsoft-config";
 import { isQuickBooksConfigured } from "../../_lib/quickbooks-config";
+import { isSalesforceConfigured } from "../../_lib/salesforce-config";
 import { isSlackConfigured } from "../../_lib/slack-config";
 import { isStripeConfigured } from "../../_lib/stripe-config";
+import { isXeroConfigured } from "../../_lib/xero-config";
+import { isZendeskConfigured } from "../../_lib/zendesk-config";
 import { AsanaConnectButton } from "./asana-connect-button";
 import { AsanaDisconnectButton } from "./asana-disconnect-button";
+import { AsanaSyncButton } from "./asana-sync-button";
 import { GmailConnectButton } from "./gmail-connect-button";
 import { GmailDisconnectButton } from "./gmail-disconnect-button";
+import { GmailSyncButton } from "./gmail-sync-button";
 import { GoogleCalendarConnectButton } from "./google-calendar-connect-button";
 import { GoogleCalendarDisconnectButton } from "./google-calendar-disconnect-button";
 import { HubSpotConnectButton } from "./hubspot-connect-button";
 import { HubSpotDisconnectButton } from "./hubspot-disconnect-button";
+import { HubSpotSyncButton } from "./hubspot-sync-button";
+import { JiraConnectButton } from "./jira-connect-button";
+import { JiraDisconnectButton } from "./jira-disconnect-button";
+import { JiraSyncButton } from "./jira-sync-button";
 import { LinearConnectButton } from "./linear-connect-button";
 import { LinearDisconnectButton } from "./linear-disconnect-button";
 import { MicrosoftCalendarConnectButton } from "./microsoft-calendar-connect-button";
@@ -38,10 +52,20 @@ import { MicrosoftOutlookConnectButton } from "./microsoft-outlook-connect-butto
 import { MicrosoftOutlookDisconnectButton } from "./microsoft-outlook-disconnect-button";
 import { QuickBooksConnectButton } from "./quickbooks-connect-button";
 import { QuickBooksDisconnectButton } from "./quickbooks-disconnect-button";
+import { QuickBooksSyncButton } from "./quickbooks-sync-button";
+import { SalesforceConnectButton } from "./salesforce-connect-button";
+import { SalesforceDisconnectButton } from "./salesforce-disconnect-button";
+import { SalesforceSyncButton } from "./salesforce-sync-button";
 import { SlackConnectButton } from "./slack-connect-button";
 import { SlackDisconnectButton } from "./slack-disconnect-button";
 import { StripeConnectButton } from "./stripe-connect-button";
 import { StripeDisconnectButton } from "./stripe-disconnect-button";
+import { XeroConnectButton } from "./xero-connect-button";
+import { XeroDisconnectButton } from "./xero-disconnect-button";
+import { XeroSyncButton } from "./xero-sync-button";
+import { ZendeskConnectButton } from "./zendesk-connect-button";
+import { ZendeskDisconnectButton } from "./zendesk-disconnect-button";
+import { ZendeskSyncButton } from "./zendesk-sync-button";
 
 let pool: ReturnType<typeof createDatabasePool> | undefined;
 
@@ -71,6 +95,10 @@ export interface OAuthConnectorAdapter {
   getStatus(organizationId: string): Promise<IntegrationStatus | null>;
   readonly ConnectButton: ComponentType;
   readonly DisconnectButton: ComponentType;
+  /** Only set for connectors with a real initial sync (HubSpot,
+   * QuickBooks, Asana) — renders a real "Sync now" control that re-runs
+   * the same sync a fresh connect performs, on demand. */
+  readonly SyncButton?: ComponentType;
   readonly callbackPath: string;
   /** The `?<slug>=connected` etc. query param this connector's callback
    * route redirects back with — read directly off `searchParams` by the
@@ -91,6 +119,7 @@ export const oauthConnectorAdapters: Record<string, OAuthConnectorAdapter> = {
       getHubSpotIntegrationStatus(getPool(), organizationId),
     ConnectButton: HubSpotConnectButton,
     DisconnectButton: HubSpotDisconnectButton,
+    SyncButton: HubSpotSyncButton,
     callbackPath: "/integrations/hubspot/callback",
     statusQueryParam: "hubspot",
     setupSteps: (redirectUri) => (
@@ -121,7 +150,8 @@ export const oauthConnectorAdapters: Record<string, OAuthConnectorAdapter> = {
     connectedDescription: () => (
       <>
         Your workspace has a real, authorized connection to HubSpot. Deals sync
-        once on connect; recurring sync isn&rsquo;t built yet.
+        on connect, and you can sync again any time — recurring/ background sync
+        isn&rsquo;t built yet.
       </>
     ),
     readyToConnectDescription: () => (
@@ -135,6 +165,61 @@ export const oauthConnectorAdapters: Record<string, OAuthConnectorAdapter> = {
       <>
         This is a real OAuth flow (ADR 0008). Tokens are encrypted at rest via
         Supabase Vault, scoped to read-only access to Deals and Owners, and
+        never handed to any code outside the functions that store and retrieve
+        them. No write, webhook, or scheduled sync exists yet.
+      </>
+    ),
+  },
+  salesforce: {
+    providerLabel: "Salesforce",
+    isConfigured: isSalesforceConfigured,
+    getStatus: (organizationId) =>
+      getSalesforceIntegrationStatus(getPool(), organizationId),
+    ConnectButton: SalesforceConnectButton,
+    DisconnectButton: SalesforceDisconnectButton,
+    SyncButton: SalesforceSyncButton,
+    callbackPath: "/integrations/salesforce/callback",
+    statusQueryParam: "salesforce",
+    setupSteps: (redirectUri) => (
+      <>
+        <li>
+          Create a Connected App in Salesforce Setup (Setup → App Manager → New
+          Connected App), with OAuth enabled.
+        </li>
+        <li>
+          Under API (Enable OAuth Settings), add this exact callback URL:
+          <code className="setupRedirectUri">{redirectUri}</code>
+        </li>
+        <li>
+          Selected OAuth scopes must include <code>api</code> and{" "}
+          <code>refresh_token</code>.
+        </li>
+        <li>
+          Copy the Connected App&rsquo;s Consumer Key and Consumer Secret into{" "}
+          <code>apps/web/.env.local</code> as <code>SALESFORCE_CLIENT_ID</code>{" "}
+          and <code>SALESFORCE_CLIENT_SECRET</code>.
+        </li>
+        <li>Restart the dev server.</li>
+      </>
+    ),
+    connectedDescription: () => (
+      <>
+        Your workspace has a real, authorized connection to Salesforce.
+        Opportunities sync on connect, and you can sync again any time —
+        recurring/background sync isn&rsquo;t built yet.
+      </>
+    ),
+    readyToConnectDescription: () => (
+      <>
+        Authorizes read access to Opportunities. No writes are made to your
+        Salesforce org.
+      </>
+    ),
+    securityNoteHeading: "Real, but scoped and read-only.",
+    securityNoteBody: (
+      <>
+        This is a real OAuth 2.0 web server flow. Tokens are encrypted at rest
+        via Supabase Vault, scoped to read-only access to Opportunities, and
         never handed to any code outside the functions that store and retrieve
         them. No write, webhook, or scheduled sync exists yet.
       </>
@@ -264,6 +349,7 @@ export const oauthConnectorAdapters: Record<string, OAuthConnectorAdapter> = {
       getQuickBooksIntegrationStatus(getPool(), organizationId),
     ConnectButton: QuickBooksConnectButton,
     DisconnectButton: QuickBooksDisconnectButton,
+    SyncButton: QuickBooksSyncButton,
     callbackPath: "/integrations/quickbooks/callback",
     statusQueryParam: "quickbooks",
     setupSteps: (redirectUri) => (
@@ -294,7 +380,8 @@ export const oauthConnectorAdapters: Record<string, OAuthConnectorAdapter> = {
     connectedDescription: () => (
       <>
         This workspace has a real, authorized connection to a QuickBooks Online
-        company. Read-only for now — no accounting data is fetched yet.
+        company. Overdue invoices sync on connect, and you can sync again any
+        time — read-only, and recurring/background sync isn&rsquo;t built yet.
       </>
     ),
     readyToConnectDescription: () => (
@@ -317,6 +404,71 @@ export const oauthConnectorAdapters: Record<string, OAuthConnectorAdapter> = {
       </>
     ),
   },
+  xero: {
+    providerLabel: "Xero",
+    isConfigured: isXeroConfigured,
+    getStatus: (organizationId) =>
+      getXeroIntegrationStatus(getPool(), organizationId),
+    ConnectButton: XeroConnectButton,
+    DisconnectButton: XeroDisconnectButton,
+    SyncButton: XeroSyncButton,
+    callbackPath: "/integrations/xero/callback",
+    statusQueryParam: "xero",
+    setupSteps: (redirectUri) => (
+      <>
+        <li>
+          Create a free app at{" "}
+          <a
+            href="https://developer.xero.com/app/manage"
+            target="_blank"
+            rel="noreferrer"
+          >
+            developer.xero.com
+          </a>
+          .
+        </li>
+        <li>
+          Under Configuration, add this exact redirect URL:
+          <code className="setupRedirectUri">{redirectUri}</code>
+        </li>
+        <li>
+          Copy the app&rsquo;s Client ID and Client Secret into{" "}
+          <code>apps/web/.env.local</code> as <code>XERO_CLIENT_ID</code> and{" "}
+          <code>XERO_CLIENT_SECRET</code>.
+        </li>
+        <li>Restart the dev server.</li>
+      </>
+    ),
+    connectedDescription: (accountLabel) => (
+      <>
+        This workspace has a real, authorized connection to{" "}
+        {accountLabel ? (
+          <strong>{accountLabel}</strong>
+        ) : (
+          "your Xero organisation"
+        )}
+        . Open invoices sync on connect, and you can sync again any time —
+        read-only, and recurring/background sync isn&rsquo;t built yet.
+      </>
+    ),
+    readyToConnectDescription: () => (
+      <>
+        Authorizes read access to Invoices. No writes are made to your Xero
+        organisation.
+      </>
+    ),
+    securityNoteHeading: "Real, but scoped and read-only.",
+    securityNoteBody: (
+      <>
+        This is a real OAuth 2.0 flow, requested at the{" "}
+        <code>accounting.transactions.read</code> scope. Tokens are encrypted at
+        rest via Supabase Vault and never handed to any code outside the
+        functions that store and retrieve them. No write, webhook, or scheduled
+        sync exists yet — connecting only proves the authorization mechanism and
+        marks this connector genuinely connected in Business Coverage.
+      </>
+    ),
+  },
   gmail: {
     providerLabel: "Gmail",
     isConfigured: isGoogleConfigured,
@@ -324,6 +476,7 @@ export const oauthConnectorAdapters: Record<string, OAuthConnectorAdapter> = {
       getGmailIntegrationStatus(getPool(), organizationId),
     ConnectButton: GmailConnectButton,
     DisconnectButton: GmailDisconnectButton,
+    SyncButton: GmailSyncButton,
     callbackPath: "/integrations/gmail/callback",
     statusQueryParam: "gmail",
     setupSteps: (redirectUri) => (
@@ -356,7 +509,9 @@ export const oauthConnectorAdapters: Record<string, OAuthConnectorAdapter> = {
       <>
         This workspace has a real, authorized connection to{" "}
         {accountLabel ? <strong>{accountLabel}</strong> : "a Google account"}.
-        Read-only for now — no email data is fetched yet.
+        Recent external messages (last 30 days, purely internal correspondence
+        excluded) sync on connect, and you can sync again any time — read-only,
+        and recurring/background sync isn&rsquo;t built yet.
       </>
     ),
     readyToConnectDescription: () => (
@@ -365,16 +520,22 @@ export const oauthConnectorAdapters: Record<string, OAuthConnectorAdapter> = {
         is deleted or modified.
       </>
     ),
-    securityNoteHeading: "Real, but read-only.",
+    securityNoteHeading: "Real, but bounded and read-only.",
     securityNoteBody: (
       <>
         This is a real OAuth 2.0 flow, requested at the read-only Gmail scope
         only (plus the minimal identity scope needed to know which Google
         account connected). Tokens are encrypted at rest via Supabase Vault and
         never handed to any code outside the functions that store and retrieve
-        them. No message reading, sending, or scheduled sync exists yet —
-        connecting only proves the authorization mechanism and marks this
-        connector genuinely connected in Business Coverage.
+        them. Sync is deliberately bounded — only recent (last 30 days),
+        genuinely external messages are ingested, each message body is
+        hard-truncated to 5,000 characters, and only a short preview (never the
+        full body) ever appears on a card or reaches an AI interpretation call.
+        No field-level encryption beyond this workspace&rsquo;s ordinary tenant
+        isolation protects stored message content — see
+        docs/adr/0050-gmail-message-ingestion.md for the full, honest accounting
+        of what is and isn&rsquo;t protected. No message sending or scheduled
+        background sync exists yet.
       </>
     ),
   },
@@ -583,6 +744,7 @@ export const oauthConnectorAdapters: Record<string, OAuthConnectorAdapter> = {
       getAsanaIntegrationStatus(getPool(), organizationId),
     ConnectButton: AsanaConnectButton,
     DisconnectButton: AsanaDisconnectButton,
+    SyncButton: AsanaSyncButton,
     callbackPath: "/integrations/asana/callback",
     statusQueryParam: "asana",
     setupSteps: (redirectUri) => (
@@ -614,7 +776,8 @@ export const oauthConnectorAdapters: Record<string, OAuthConnectorAdapter> = {
       <>
         This workspace has a real, authorized connection to{" "}
         {accountLabel ? <strong>{accountLabel}</strong> : "an Asana account"}.
-        Read-only for now — no project or task data is fetched yet.
+        Overdue tasks sync on connect, and you can sync again any time —
+        read-only, and recurring/background sync isn&rsquo;t built yet.
       </>
     ),
     readyToConnectDescription: () => (
@@ -632,6 +795,139 @@ export const oauthConnectorAdapters: Record<string, OAuthConnectorAdapter> = {
         retrieve them. No task reading, writing, or scheduled sync exists yet —
         connecting only proves the authorization mechanism and marks this
         connector genuinely connected in Business Coverage.
+      </>
+    ),
+  },
+  jira: {
+    providerLabel: "Jira",
+    isConfigured: isJiraConfigured,
+    getStatus: (organizationId) =>
+      getJiraIntegrationStatus(getPool(), organizationId),
+    ConnectButton: JiraConnectButton,
+    DisconnectButton: JiraDisconnectButton,
+    SyncButton: JiraSyncButton,
+    callbackPath: "/integrations/jira/callback",
+    statusQueryParam: "jira",
+    setupSteps: (redirectUri) => (
+      <>
+        <li>
+          Create an OAuth 2.0 (3LO) app at{" "}
+          <a
+            href="https://developer.atlassian.com/console/myapps/"
+            target="_blank"
+            rel="noreferrer"
+          >
+            Atlassian&rsquo;s developer console
+          </a>
+          .
+        </li>
+        <li>
+          Under Authorization, add this exact callback URL:
+          <code className="setupRedirectUri">{redirectUri}</code>
+        </li>
+        <li>
+          Selected scopes must include <code>read:jira-work</code> and{" "}
+          <code>offline_access</code>.
+        </li>
+        <li>
+          Copy the app&rsquo;s Client ID and Client Secret into{" "}
+          <code>apps/web/.env.local</code> as <code>JIRA_CLIENT_ID</code> and{" "}
+          <code>JIRA_CLIENT_SECRET</code>.
+        </li>
+        <li>Restart the dev server.</li>
+      </>
+    ),
+    connectedDescription: (accountLabel) => (
+      <>
+        This workspace has a real, authorized connection to{" "}
+        {accountLabel ? <strong>{accountLabel}</strong> : "your Jira site"}.
+        Open issues sync on connect, and you can sync again any time —
+        read-only, and recurring/background sync isn&rsquo;t built yet.
+      </>
+    ),
+    readyToConnectDescription: () => (
+      <>
+        Authorizes read access to issues. No writes are made to your Jira site.
+      </>
+    ),
+    securityNoteHeading: "Real, but scoped and read-only.",
+    securityNoteBody: (
+      <>
+        This is a real OAuth 2.0 (3LO) flow, requested at the{" "}
+        <code>read:jira-work</code> scope. Tokens are encrypted at rest via
+        Supabase Vault and never handed to any code outside the functions that
+        store and retrieve them. Atlassian has no programmatic revoke endpoint
+        for this grant type — disconnecting here deletes the stored tokens, but
+        fully revoking access requires the user&rsquo;s own Atlassian account
+        settings. No write, webhook, or scheduled sync exists yet — connecting
+        only proves the authorization mechanism and marks this connector
+        genuinely connected in Business Coverage.
+      </>
+    ),
+  },
+  zendesk: {
+    providerLabel: "Zendesk",
+    isConfigured: isZendeskConfigured,
+    getStatus: (organizationId) =>
+      getZendeskIntegrationStatus(getPool(), organizationId),
+    ConnectButton: ZendeskConnectButton,
+    DisconnectButton: ZendeskDisconnectButton,
+    SyncButton: ZendeskSyncButton,
+    callbackPath: "/integrations/zendesk/callback",
+    statusQueryParam: "zendesk",
+    setupSteps: (redirectUri) => (
+      <>
+        <li>
+          In your Zendesk account, go to Admin Center → Apps and integrations →
+          APIs → Zendesk API, and add a real OAuth client.
+        </li>
+        <li>
+          Under Redirect URLs, add this exact callback URL:
+          <code className="setupRedirectUri">{redirectUri}</code>
+        </li>
+        <li>
+          Selected scope must include <code>read</code>.
+        </li>
+        <li>
+          Copy the client&rsquo;s Unique Identifier and Secret into{" "}
+          <code>apps/web/.env.local</code> as <code>ZENDESK_CLIENT_ID</code> and{" "}
+          <code>ZENDESK_CLIENT_SECRET</code>.
+        </li>
+        <li>Restart the dev server.</li>
+      </>
+    ),
+    connectedDescription: (accountLabel) => (
+      <>
+        This workspace has a real, authorized connection to{" "}
+        {accountLabel ? (
+          <strong>{accountLabel}</strong>
+        ) : (
+          "your Zendesk account"
+        )}
+        . Open tickets sync on connect, and you can sync again any time —
+        read-only, and recurring/background sync isn&rsquo;t built yet.
+      </>
+    ),
+    readyToConnectDescription: () => (
+      <>
+        Authorizes read access to tickets. No writes are made to your Zendesk
+        account. Unlike every other connector here, you&rsquo;ll need to enter
+        your Zendesk subdomain before continuing — every Zendesk account lives
+        at its own <code>{"{subdomain}"}.zendesk.com</code> address, and the
+        authorization flow needs it from the start.
+      </>
+    ),
+    securityNoteHeading: "Real, but scoped and read-only.",
+    securityNoteBody: (
+      <>
+        This is a real OAuth 2.0 flow, requested at the <code>read</code> scope.
+        Tokens are encrypted at rest via Supabase Vault and never handed to any
+        code outside the functions that store and retrieve them. Unlike Jira,
+        Zendesk has a genuine, working revoke endpoint — disconnecting here both
+        deletes the stored tokens and revokes the grant on Zendesk&rsquo;s side.
+        No write, webhook, or scheduled sync exists yet — connecting only proves
+        the authorization mechanism and marks this connector genuinely connected
+        in Business Coverage.
       </>
     ),
   },

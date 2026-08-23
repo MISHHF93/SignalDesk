@@ -36,6 +36,18 @@ const navigationItems = [
     requiresAuth: true,
     matches: (pathname: string) => pathname.startsWith("/billing"),
   },
+  // "/agents" (the Agent Fabric trust/audit page) is deliberately not a
+  // primary-nav destination — it's an internal-engine surface, not a daily
+  // business decision surface (see README's own route-audit table), and
+  // per CLAUDE.md/the product constitution, internal architecture should
+  // stay reachable without occupying permanent one-page navigation. It
+  // remains reachable via a real link from /trust.
+  {
+    href: "/trust",
+    label: "Trust",
+    requiresAuth: true,
+    matches: (pathname: string) => pathname.startsWith("/trust"),
+  },
 ] as const;
 
 export function SiteNavigation({ isSignedIn }: { isSignedIn: boolean }) {

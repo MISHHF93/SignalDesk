@@ -7,7 +7,10 @@ import { describe, expect, it } from "vitest";
 import { parseSourceTaskRecord } from "@signaldesk/schemas";
 import { randomUUID } from "node:crypto";
 
-import { mapAsanaTaskToSourceTaskRecord } from "./mapper";
+import {
+  detectAsanaTaskDefaultedFields,
+  mapAsanaTaskToSourceTaskRecord,
+} from "./mapper";
 import type { AsanaTask } from "./client";
 
 const NOW = new Date("2026-08-18T14:00:00.000Z");
@@ -35,7 +38,7 @@ describe("mapAsanaTaskToSourceTaskRecord", () => {
     expect(record).toMatchObject({
       name: "Ship Q3 report",
       assigneeName: "Jordan Lee",
-      dueAt: "2026-08-01T00:00:00.000Z",
+      dueAt: "2026-08-01T23:59:59.999Z",
       completed: false,
       source: {
         system: "asana",
@@ -112,5 +115,24 @@ describe("mapAsanaTaskToSourceTaskRecord", () => {
     const digestA = (a.source as Record<string, unknown>).recordDigestSha256;
     const digestB = (b.source as Record<string, unknown>).recordDigestSha256;
     expect(digestA).not.toBe(digestB);
+  });
+
+  it("detectAsanaTaskDefaultedFields reports nothing for a real, complete task", () => {
+    expect(detectAsanaTaskDefaultedFields(task())).toEqual([]);
+  });
+
+  it("detectAsanaTaskDefaultedFields flags a blank name as defaulted", () => {
+    expect(detectAsanaTaskDefaultedFields(task({ name: "" }))).toEqual([
+      "name",
+    ]);
+    expect(detectAsanaTaskDefaultedFields(task({ name: "   " }))).toEqual([
+      "name",
+    ]);
+  });
+
+  it("detectAsanaTaskDefaultedFields does NOT flag a missing assignee — a normal, honest state for an unassigned task, not schema drift", () => {
+    expect(detectAsanaTaskDefaultedFields(task({ assignee: null }))).toEqual(
+      [],
+    );
   });
 });

@@ -23,11 +23,12 @@ function getPool() {
 
 /**
  * Updates the organization's Business Profile (timezone, expected
- * response hours, high-value threshold) — real per-org settings that used
- * to be hardcoded platform-wide constants. Only an owner/admin should be
- * able to change organization-wide policy; today's model has exactly one
- * role (`owner`) per solo-provisioned organization, so this checks that
- * explicitly rather than assuming any signed-in member may.
+ * response hours, high-value threshold, working days, industry) — real
+ * per-org settings that used to be hardcoded platform-wide constants. Only
+ * an owner/admin should be able to change organization-wide policy;
+ * today's model has exactly one role (`owner`) per solo-provisioned
+ * organization, so this checks that explicitly rather than assuming any
+ * signed-in member may.
  */
 export async function updateBusinessProfileAction(
   _prevState: UpdateBusinessProfileState,
@@ -48,6 +49,7 @@ export async function updateBusinessProfileAction(
 
   const rawResponseHours = formData.get("defaultExpectedResponseHours");
   const rawThresholdDollars = formData.get("highValueThresholdDollars");
+  const rawIndustry = formData.get("industry");
   // Every checked "workingDays" box in the range 0-6 sets that bit — unlike
   // the other fields, this is never conditionally included: the checkbox
   // fieldset is always rendered in full, so "nothing checked" is a real,
@@ -72,6 +74,7 @@ export async function updateBusinessProfileAction(
             ),
           }
         : {}),
+      ...(rawIndustry ? { industry: String(rawIndustry) } : {}),
     });
 
     await updateOrganizationBusinessProfile(

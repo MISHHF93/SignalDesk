@@ -22,3 +22,14 @@ Per-connector live/not-live badges on the top-level catalog cards themselves (`I
 ## Consequences
 
 The Business Data Map is now the accurate single source of "what's really connected" on the Integration Hub, and the catalog-wide notice can no longer go stale the way it just did — its truth value is now computed, not hand-maintained prose. The same trap (a hand-written honesty notice that used to be true) is worth checking for elsewhere in the app the next time a connector's real status changes.
+
+## Update (ADR 0021)
+
+`ConnectorPurpose` (the six values above) was retired and replaced by the
+broader `ConnectorCapabilityClass` taxonomy (22 values), and
+`computeBusinessCoverageByPurpose` was renamed
+`computeBusinessCoverageByCapability`. The Business Data Map's underlying
+mechanism — group the catalog, compute connected/partial/none from real
+tenant connection state, never from catalog size — is unchanged; only the
+classification it groups by widened. See ADR 0021 for the full taxonomy
+and the connector-platform decision it's part of.

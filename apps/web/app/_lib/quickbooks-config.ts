@@ -11,7 +11,14 @@ export function isQuickBooksConfigured(): boolean {
   );
 }
 
-function getQuickBooksClientCredentials(): Pick<
+/**
+ * The subset of credentials the revoke and refresh calls need — unlike
+ * the authorize/token-exchange flow, neither has a redirect URI to bind,
+ * so callers like `disconnectQuickBooksAction` and
+ * `ensureFreshQuickBooksAccessToken` don't need a request `origin` on
+ * hand just to read these.
+ */
+export function getQuickBooksClientCredentials(): Pick<
   QuickBooksOAuthConfig,
   "clientId" | "clientSecret"
 > {
@@ -37,14 +44,25 @@ export function getQuickBooksOAuthConfig(
 }
 
 /**
- * The subset of credentials the revoke call needs — unlike the
- * authorize/token-exchange flow, revocation has no redirect URI to bind,
- * so callers like `disconnectQuickBooksAction` don't need a request
- * `origin` on hand just to read these.
+ * QuickBooks webhooks are configured once per Intuit app (not
+ * per-connection) in the Intuit developer dashboard, which issues one
+ * verifier token used to sign every notification regardless of which
+ * connected company it's for. Mirrors `stripe-billing-config.ts`'s
+ * `isWebhookConfigured`/`getStripeWebhookSecret` — unset ⇒ inert, same
+ * convention as every credential in this app.
  */
-export function getQuickBooksClientCredentialsForRevoke(): Pick<
-  QuickBooksOAuthConfig,
-  "clientId" | "clientSecret"
-> {
-  return getQuickBooksClientCredentials();
+export function isQuickBooksWebhookConfigured(): boolean {
+  return Boolean(process.env.QUICKBOOKS_WEBHOOK_VERIFIER_TOKEN);
+}
+
+export function getQuickBooksWebhookVerifierToken(): string {
+  const token = process.env.QUICKBOOKS_WEBHOOK_VERIFIER_TOKEN;
+
+  if (!token) {
+    throw new Error(
+      "QuickBooks webhook verification is not configured. Set QUICKBOOKS_WEBHOOK_VERIFIER_TOKEN.",
+    );
+  }
+
+  return token;
 }

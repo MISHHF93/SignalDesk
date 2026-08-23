@@ -5,9 +5,15 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { DatabasePool } from "../src/client";
 import { ingestAsanaTask, listOverdueTasks } from "../src/tasks";
 import { withTenantContext } from "../src/tenant-context";
-import { getTestPool, seedIntegration, seedOrganization } from "./support";
+import {
+  getTestPool,
+  seedIntegration,
+  seedOrganization,
+  seedSyncJob,
+} from "./support";
 
 function fixtureInput(
+  syncJobId: string,
   overrides: Partial<Parameters<typeof ingestAsanaTask>[3]> = {},
 ) {
   return {
@@ -20,6 +26,7 @@ function fixtureInput(
     assigneeName: "Jordan Lee",
     dueAt: new Date("2026-08-01T00:00:00.000Z"),
     completed: false,
+    syncJobId,
     ...overrides,
   };
 }
@@ -54,12 +61,19 @@ describe.skipIf(!process.env.DATABASE_URL)(
         sourceSystem: "asana",
       });
       const farFuture = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000);
+      const job = await seedSyncJob(
+        pool,
+        org.id,
+        integration.id,
+        "asana",
+        "task",
+      );
 
       await ingestAsanaTask(
         pool,
         org.id,
         integration.id,
-        fixtureInput({ dueAt: farFuture }),
+        fixtureInput(job.id, { dueAt: farFuture }),
       );
 
       const tasks = await listOverdueTasks(pool, org.id);
@@ -73,11 +87,18 @@ describe.skipIf(!process.env.DATABASE_URL)(
         sourceSystem: "asana",
       });
 
+      const job = await seedSyncJob(
+        pool,
+        org.id,
+        integration.id,
+        "asana",
+        "task",
+      );
       await ingestAsanaTask(
         pool,
         org.id,
         integration.id,
-        fixtureInput({
+        fixtureInput(job.id, {
           dueAt: new Date(Date.now() - 1000),
           completed: true,
         }),
@@ -94,7 +115,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
         sourceSystem: "asana",
       });
       const pastDue = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
-      const input = fixtureInput({ dueAt: pastDue });
+      const job = await seedSyncJob(
+        pool,
+        org.id,
+        integration.id,
+        "asana",
+        "task",
+      );
+      const input = fixtureInput(job.id, { dueAt: pastDue });
 
       const ingestResult = await ingestAsanaTask(
         pool,
@@ -122,11 +150,18 @@ describe.skipIf(!process.env.DATABASE_URL)(
         sourceSystem: "asana",
       });
 
+      const job = await seedSyncJob(
+        pool,
+        org.id,
+        integration.id,
+        "asana",
+        "task",
+      );
       const recentlyOverdue = await ingestAsanaTask(
         pool,
         org.id,
         integration.id,
-        fixtureInput({
+        fixtureInput(job.id, {
           dueAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
         }),
       );
@@ -134,7 +169,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
         pool,
         org.id,
         integration.id,
-        fixtureInput({
+        fixtureInput(job.id, {
           dueAt: new Date(Date.now() - 40 * 24 * 60 * 60 * 1000),
         }),
       );
@@ -153,12 +188,19 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const integrationB = await seedIntegration(pool, orgB.id, {
         sourceSystem: "asana",
       });
+      const job = await seedSyncJob(
+        pool,
+        orgB.id,
+        integrationB.id,
+        "asana",
+        "task",
+      );
 
       await ingestAsanaTask(
         pool,
         orgB.id,
         integrationB.id,
-        fixtureInput({ dueAt: new Date(Date.now() - 1000) }),
+        fixtureInput(job.id, { dueAt: new Date(Date.now() - 1000) }),
       );
 
       const tasks = await listOverdueTasks(pool, orgA.id);
@@ -171,11 +213,18 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const integration = await seedIntegration(pool, org.id, {
         sourceSystem: "asana",
       });
+      const job = await seedSyncJob(
+        pool,
+        org.id,
+        integration.id,
+        "asana",
+        "task",
+      );
       await ingestAsanaTask(
         pool,
         org.id,
         integration.id,
-        fixtureInput({ dueAt: new Date(Date.now() - 1000) }),
+        fixtureInput(job.id, { dueAt: new Date(Date.now() - 1000) }),
       );
 
       expect(await listOverdueTasks(pool, org.id)).toHaveLength(1);
@@ -190,6 +239,37 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const tasks = await listOverdueTasks(pool, org.id);
 
       expect(tasks).toEqual([]);
+    });
+
+    it("still surfaces a task when its source integration is degraded, not disconnected", async () => {
+      const org = await seedOrganization(pool);
+      const integration = await seedIntegration(pool, org.id, {
+        sourceSystem: "asana",
+      });
+      const job = await seedSyncJob(
+        pool,
+        org.id,
+        integration.id,
+        "asana",
+        "task",
+      );
+      await ingestAsanaTask(
+        pool,
+        org.id,
+        integration.id,
+        fixtureInput(job.id, { dueAt: new Date(Date.now() - 1000) }),
+      );
+
+      await withTenantContext(pool, org.id, async (client) => {
+        await client.query(
+          "update integrations set status = 'degraded' where id = $1",
+          [integration.id],
+        );
+      });
+
+      const tasks = await listOverdueTasks(pool, org.id);
+
+      expect(tasks).toHaveLength(1);
     });
   },
 );

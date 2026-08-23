@@ -42,12 +42,46 @@ function parseAmountToCents(amount: string | null | undefined): number {
   return Math.round(parsed * 100);
 }
 
+/**
+ * True when the deal has no usable `dealname` at all — every real HubSpot
+ * deal has one, so its absence is a genuine anomaly (a permissions/scope
+ * issue, or HubSpot renaming the field) worth surfacing, unlike a missing
+ * `amount` (a completely normal, honest state for an early-pipeline deal
+ * with no negotiated price yet — flagging that as "drift" would misreport
+ * ordinary business data as a data-quality problem). Shared by the mapper
+ * itself and `detectHubSpotDealDefaultedFields` below so the two can never
+ * silently disagree about what counts as missing.
+ */
+function isDealNameMissing(props: HubSpotDeal["properties"]): boolean {
+  return !props.dealname?.trim();
+}
+
+/**
+ * Reports which critical fields this deal would need a fallback for,
+ * without performing the mapping itself — the real extension point for
+ * schema-drift visibility (issue 5, `docs/25-issue-audit.md`: "Integration
+ * Schema Drift"): a provider renaming `dealname` would otherwise silently
+ * produce a plausible-looking `"Untitled HubSpot deal"` lead with no
+ * operator-visible signal, since Zod validation only rejects a shape it
+ * can't parse at all, never a value that defaulted to something
+ * technically valid. Deliberately additive — a caller decides what to do
+ * with a non-empty result (e.g. a real audit event); this never changes
+ * mapping behavior itself.
+ */
+export function detectHubSpotDealDefaultedFields(
+  deal: HubSpotDeal,
+): readonly string[] {
+  return isDealNameMissing(deal.properties) ? ["dealname"] : [];
+}
+
 export function mapHubSpotDealToSourceLeadRecord(
   deal: HubSpotDeal,
   options: MapHubSpotDealOptions,
 ): unknown {
   const props = deal.properties;
-  const dealName = props.dealname?.trim() || FALLBACK_DEAL_NAME;
+  const dealName = isDealNameMissing(props)
+    ? FALLBACK_DEAL_NAME
+    : props.dealname!.trim();
   const ownerId = props.hubspot_owner_id?.trim() || null;
   const ownerName = ownerId ? options.ownerNamesById.get(ownerId) : undefined;
 

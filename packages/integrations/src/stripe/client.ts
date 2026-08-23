@@ -1,4 +1,32 @@
+/**
+ * A real Stripe Connect OAuth client for reading a *customer's own* Stripe
+ * revenue data (not to be confused with `stripe-billing/`, this app's
+ * unrelated, non-OAuth module for billing its own customers).
+ *
+ * No PKCE here, unlike `shared/microsoft-oauth.ts` and the Salesforce
+ * connector — checked specifically this session against Stripe's own
+ * current, complete Connect OAuth reference
+ * (docs.stripe.com/connect/oauth-reference, fetched live this session):
+ * every parameter the `GET /oauth/authorize` and `POST /oauth/token`
+ * endpoints accept is documented there, and neither `code_challenge`,
+ * `code_challenge_method`, nor `code_verifier` appears anywhere on that
+ * page. Stripe does document a real PKCE flow elsewhere
+ * (docs.stripe.com/stripe-apps/pkce-oauth-flow), but that's for "Stripe
+ * Apps" UI extensions authenticating to a *third-party* provider from
+ * inside the Stripe Dashboard — a completely different OAuth surface this
+ * connector doesn't use, the same category of distinction HubSpot's own
+ * doc comment draws for its unrelated MCP server. Sending `code_challenge`
+ * to `connect.stripe.com/oauth/authorize` would be inert at best — Stripe's
+ * authorization server has no documented handling for it on this endpoint
+ * — and dishonestly implies a protection this flow doesn't actually have.
+ * The real defense here remains the single-use `state` CSRF nonce
+ * (`oauth-state.ts`) plus this platform's own secret key, which
+ * authenticates the token exchange and deauthorize calls directly (see
+ * `StripeOAuthConfig.secretKey`'s own doc comment below).
+ */
+
 import { fetchWithRetry } from "../shared/fetch-with-retry";
+import { UpstreamProviderError } from "../shared/upstream-error";
 
 const AUTHORIZE_URL = "https://connect.stripe.com/oauth/authorize";
 const TOKEN_URL = "https://connect.stripe.com/oauth/token";
@@ -80,8 +108,12 @@ export async function exchangeStripeAuthorizationCode(
   const payload = (await response.json()) as StripeTokenResponsePayload;
 
   if (!response.ok || payload.error || !payload.stripe_user_id) {
-    throw new Error(
-      `Stripe token exchange failed: ${payload.error ?? response.status} ${payload.error_description ?? ""}`.trim(),
+    // The body is already consumed via response.json() above, so this
+    // can't use throwUpstreamError (which reads response.text() itself)
+    // — constructs the same safe/raw pair directly instead.
+    throw new UpstreamProviderError(
+      "Stripe token exchange failed. Please try again, or reconnect this integration if the problem continues.",
+      `${payload.error ?? response.status} ${payload.error_description ?? ""}`.trim(),
     );
   }
 

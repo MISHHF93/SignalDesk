@@ -9,7 +9,17 @@ import { OAuthButtons } from "../_components/oauth-buttons";
 
 const INITIAL_STATE: AuthActionState = { error: null };
 
-export function SignupForm({ next }: { next: string }) {
+export function SignupForm({
+  next,
+  inviteToken,
+  prefillEmail,
+}: {
+  next: string;
+  /** Present only for a real, currently-valid invite (Phase 3,
+   * implementation roadmap) — see `signup/page.tsx`'s own validation. */
+  inviteToken?: string;
+  prefillEmail?: string;
+}) {
   const [state, formAction, isPending] = useActionState(
     signUpAction,
     INITIAL_STATE,
@@ -19,6 +29,9 @@ export function SignupForm({ next }: { next: string }) {
     <>
       <form className="authForm" action={formAction}>
         <input type="hidden" name="next" value={next} />
+        {inviteToken ? (
+          <input type="hidden" name="inviteToken" value={inviteToken} />
+        ) : null}
 
         <div className="authField">
           <label htmlFor="email">Email</label>
@@ -27,8 +40,15 @@ export function SignupForm({ next }: { next: string }) {
             name="email"
             type="email"
             autoComplete="email"
+            defaultValue={prefillEmail}
+            readOnly={Boolean(prefillEmail)}
             required
           />
+          {prefillEmail ? (
+            <p className="authHint">
+              This invite is for {prefillEmail} specifically.
+            </p>
+          ) : null}
         </div>
 
         <div className="authField">

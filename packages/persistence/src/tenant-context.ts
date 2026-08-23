@@ -1,6 +1,7 @@
 import type { PoolClient } from "pg";
 
 import type { DatabasePool } from "./client";
+import { wrapDatabaseError } from "./query-error";
 
 const ORGANIZATION_ID_FORMAT =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -11,6 +12,13 @@ const ORGANIZATION_ID_FORMAT =
  * only (reset on COMMIT/ROLLBACK). This is the sole sanctioned way to touch
  * tenant-owned tables: RLS policies key off this setting, and it must never
  * be set outside a transaction or shared across pooled connections.
+ *
+ * A caught `pg` `DatabaseError` is wrapped into `QueryFailedError`
+ * (`query-error.ts`) before rethrowing — the raw driver error can carry the
+ * literal conflicting value in its own message on a constraint violation,
+ * and every Server Action's catch block already returns a plain
+ * `Error.message` verbatim to the client. A hand-thrown `Error` from
+ * application code inside `fn` passes through unchanged.
  */
 export async function withTenantContext<T>(
   pool: DatabasePool,
@@ -39,7 +47,7 @@ export async function withTenantContext<T>(
     return result;
   } catch (error) {
     await client.query("rollback");
-    throw error;
+    throw wrapDatabaseError(error);
   } finally {
     client.release();
   }

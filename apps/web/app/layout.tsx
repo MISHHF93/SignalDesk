@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
@@ -10,6 +11,25 @@ import "./globals.css";
 
 const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "SignalDesk";
 
+// A precise, technical pairing over the previous system-serif display face
+// (no asset backed it — "Iowan Old Style" only exists on macOS, everyone
+// else silently fell back to Georgia) — IBM Plex Mono doubles as the
+// numeric/data face (org IDs, evidence digests, amounts) elsewhere in
+// globals.css, so both weights load from the same family pairing.
+const plexSans = IBM_Plex_Sans({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-sans",
+  display: "swap",
+});
+
+const plexMono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  weight: ["500", "600"],
+  variable: "--font-mono",
+  display: "swap",
+});
+
 export const metadata: Metadata = {
   title: {
     default: `Today | ${APP_NAME}`,
@@ -19,21 +39,22 @@ export const metadata: Metadata = {
     "One page for everything that needs your attention, drawn from the tools you already use.",
 };
 
+// Unconditionally dark — the cyber theme (globals.css `:root`) no longer
+// varies with OS light/dark preference, so there's only one real
+// `colorScheme`/`themeColor` to declare now, not a light/dark pair.
 export const viewport: Viewport = {
-  colorScheme: "light dark",
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f4f2eb" },
-    { media: "(prefers-color-scheme: dark)", color: "#151815" },
-  ],
+  colorScheme: "dark",
+  themeColor: "#05070a",
 };
 
 export default async function RootLayout({
   children,
-}: Readonly<{ children: ReactNode }>) {
+  modal,
+}: Readonly<{ children: ReactNode; modal: ReactNode }>) {
   const session = await getCurrentOrganization();
 
   return (
-    <html lang="en">
+    <html lang="en" className={`${plexSans.variable} ${plexMono.variable}`}>
       <body>
         <a className="skipLink" href="#main-content">
           Skip to main content
@@ -60,6 +81,7 @@ export default async function RootLayout({
         </header>
 
         {children}
+        {modal}
 
         <footer className="siteFooter">
           <div className="shell footerInner">
@@ -68,6 +90,11 @@ export default async function RootLayout({
               See Integrations for which connectors are real today and which are
               still planned
             </p>
+            <nav className="footerLegalNav" aria-label="Legal and support">
+              <Link href="/legal/terms">Terms of Service</Link>
+              <Link href="/legal/privacy">Privacy Policy</Link>
+              <Link href="/support">Support</Link>
+            </nav>
           </div>
         </footer>
       </body>

@@ -35,12 +35,15 @@ describe("intelligenceCapabilities", () => {
   it("registers every real capability", () => {
     expect(intelligenceCapabilities.map((capability) => capability.id)).toEqual(
       [
-        "stuck",
         "lead-risk",
         "integration-health",
         "ownership",
         "overdue-invoice",
         "overdue-task",
+        "payment-received",
+        "goal-variance",
+        "message-follow-up",
+        "ticket-risk",
       ],
     );
   });
@@ -49,18 +52,23 @@ describe("intelligenceCapabilities", () => {
 describe("runIntelligenceCapabilities", () => {
   it("flattens findings from every registered capability", async () => {
     const findings = await runIntelligenceCapabilities({
-      lead,
+      leads: [lead],
       now: NOW,
       overdueInvoices: [],
       connectedIntegrationSlugs: [],
       highValueThresholdCents: 1_000_000,
       overdueTasks: [],
+      recentPayments: [],
       workingDaysBitmask: 0b1111111,
       timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
     });
     const types = findings.map((finding) => finding.type);
 
-    expect(types).toContain("lead.untouched");
     expect(types).toContain("lead.follow_up_risk");
     expect(types).toContain("integration.unconnected");
     expect(types).not.toContain("lead.ownership_gap");
@@ -68,14 +76,20 @@ describe("runIntelligenceCapabilities", () => {
 
   it("still reports connector facts for a real organization with no lead yet", async () => {
     const findings = await runIntelligenceCapabilities({
-      lead: null,
+      leads: [],
       now: NOW,
       overdueInvoices: [],
       connectedIntegrationSlugs: [],
       highValueThresholdCents: 1_000_000,
       overdueTasks: [],
+      recentPayments: [],
       workingDaysBitmask: 0b1111111,
       timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
     });
     const types = findings.map((finding) => finding.type);
 
@@ -84,7 +98,7 @@ describe("runIntelligenceCapabilities", () => {
 
   it("still returns findings from the other capabilities when one throws", async () => {
     const brokenCapability = intelligenceCapabilities.find(
-      (capability) => capability.id === "stuck",
+      (capability) => capability.id === "integration-health",
     ) as IntelligenceCapability;
     const evaluateSpy = vi
       .spyOn(brokenCapability, "evaluate")
@@ -94,20 +108,25 @@ describe("runIntelligenceCapabilities", () => {
       .mockImplementation(() => undefined);
 
     const findings = await runIntelligenceCapabilities({
-      lead,
+      leads: [lead],
       now: NOW,
       overdueInvoices: [],
       connectedIntegrationSlugs: [],
       highValueThresholdCents: 1_000_000,
       overdueTasks: [],
+      recentPayments: [],
       workingDaysBitmask: 0b1111111,
       timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
     });
     const types = findings.map((finding) => finding.type);
 
-    expect(types).not.toContain("lead.untouched");
     expect(types).toContain("lead.follow_up_risk");
-    expect(types).toContain("integration.unconnected");
+    expect(types).not.toContain("integration.unconnected");
     expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
 
     evaluateSpy.mockRestore();

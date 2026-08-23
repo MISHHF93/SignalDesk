@@ -109,6 +109,10 @@ describe("parseSourceTaskRecord", () => {
     expect(task).toEqual({
       ...validSourceTaskRecord,
       organizationId: trustedContext.organizationId,
+      // Resolved later, at real ingest time, from a real membership
+      // lookup — this parse step has no database access, so it's honestly
+      // unset here (see `mapSourceTaskRecord`'s own doc comment).
+      owner: null,
       dueAt: new Date("2026-08-01T00:00:00.000Z"),
       source: {
         ...validSourceTaskRecord.source,

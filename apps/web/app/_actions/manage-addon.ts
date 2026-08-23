@@ -53,7 +53,8 @@ export async function addAddonAction(
     return { error: "Sign in to do this." };
   }
 
-  const rateLimit = checkRateLimit(
+  const rateLimit = await checkRateLimit(
+    getPool(),
     `manage-addon:${session.organizationId}`,
     10,
     60 * 60 * 1000,
@@ -64,9 +65,10 @@ export async function addAddonAction(
   }
 
   const db = getPool();
-  const [subscription, addons] = await Promise.all([
+  const [subscription, addons, purchased] = await Promise.all([
     getOrganizationSubscription(db, session.organizationId),
     getEnabledPlanAddons(db),
+    listSubscriptionAddons(db, session.organizationId),
   ]);
 
   if (!subscription || !subscription.stripeSubscriptionId) {
@@ -77,6 +79,10 @@ export async function addAddonAction(
 
   if (!addon) {
     return { error: "That add-on isn't currently available." };
+  }
+
+  if (purchased.some((entry) => entry.addonKey === addonKey)) {
+    return { error: "That add-on is already active." };
   }
 
   const stripePriceId = resolveStripePriceId(addon);
@@ -137,7 +143,8 @@ export async function removeAddonAction(
     return { error: "Sign in to do this." };
   }
 
-  const rateLimit = checkRateLimit(
+  const rateLimit = await checkRateLimit(
+    getPool(),
     `manage-addon:${session.organizationId}`,
     10,
     60 * 60 * 1000,

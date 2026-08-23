@@ -7,11 +7,22 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
+import { BusinessMetricsPanel } from "./_components/business-metrics-panel";
 import { CommandCenterBoard } from "./_components/command-center-board";
 import { DailyBriefPanel } from "./_components/daily-brief-panel";
+import { GoalsPanel } from "./_components/goals-panel";
+import { approveAgentActionProposalAction } from "./_actions/approve-agent-action-proposal";
+import { createGoalAction } from "./_actions/create-goal";
 import { createInternalTaskAction } from "./_actions/create-internal-task";
+import { dismissAgentActionProposalAction } from "./_actions/dismiss-agent-action-proposal";
+import { emailDailyBriefAction } from "./_actions/email-daily-brief";
 import { generateDailyBriefAction } from "./_actions/generate-daily-brief";
+import { generateSinceYouLeftBriefAction } from "./_actions/generate-since-you-left-brief";
 import { parseCommandAction } from "./_actions/parse-command";
+import { recordCardFeedbackAction } from "./_actions/record-card-feedback";
+import { runAgentInvestigationAction } from "./_actions/run-agent-investigation";
+import { simulateInvoicePaymentAction } from "./_actions/simulate-invoice-payment";
+import { isAgentFabricEnabled } from "./_lib/agent-config";
 import { getCurrentOrganization } from "./_lib/session";
 import { getTodaysAttention } from "./_lib/todays-attention";
 
@@ -54,11 +65,20 @@ export default async function CommandCenterPage() {
   }
 
   const now = new Date();
-  const [{ cards, connectedIntegrationSlugs, businessProfile }, latestBrief] =
-    await Promise.all([
-      getTodaysAttention(session, now),
-      getLatestArtifact(getPool(), session.organizationId, "daily_brief"),
-    ]);
+  const [
+    {
+      cards,
+      deferredCount,
+      connectedIntegrationSlugs,
+      businessProfile,
+      metrics,
+      goals,
+    },
+    latestBrief,
+  ] = await Promise.all([
+    getTodaysAttention(session, now),
+    getLatestArtifact(getPool(), session.organizationId, "daily_brief"),
+  ]);
 
   return (
     <main className="shell dashboard" id="main-content">
@@ -96,6 +116,14 @@ export default async function CommandCenterPage() {
         </p>
       </section>
 
+      <BusinessMetricsPanel metrics={metrics} />
+
+      <GoalsPanel
+        goals={goals}
+        metrics={metrics}
+        createGoalAction={createGoalAction}
+      />
+
       <section className="attentionSection" aria-labelledby="attention-heading">
         <div className="sectionHeading">
           <div>
@@ -106,6 +134,15 @@ export default async function CommandCenterPage() {
             {cards.length === 0
               ? "No dynamic cards"
               : `${cards.length} dynamic card${cards.length === 1 ? "" : "s"}`}
+            {deferredCount > 0 ? (
+              <>
+                {" · "}
+                <span className="deferredCount">
+                  {deferredCount} more lower-priority item
+                  {deferredCount === 1 ? "" : "s"} not shown
+                </span>
+              </>
+            ) : null}
           </p>
         </div>
 
@@ -113,11 +150,20 @@ export default async function CommandCenterPage() {
           initialCards={cards}
           createTaskAction={createInternalTaskAction}
           parseCommandAction={parseCommandAction}
+          runAgentInvestigationAction={runAgentInvestigationAction}
+          aiInvestigationAvailable={isAgentFabricEnabled()}
+          approveAgentActionProposalAction={approveAgentActionProposalAction}
+          dismissAgentActionProposalAction={dismissAgentActionProposalAction}
+          simulateInvoicePaymentAction={simulateInvoicePaymentAction}
+          recordCardFeedbackAction={recordCardFeedbackAction}
         />
       </section>
 
       <DailyBriefPanel
         generateAction={generateDailyBriefAction}
+        generateSinceYouLeftAction={generateSinceYouLeftBriefAction}
+        emailAction={emailDailyBriefAction}
+        canEmailBrief={!session.isAnonymous && Boolean(session.email)}
         initialArtifact={latestBrief}
       />
     </main>

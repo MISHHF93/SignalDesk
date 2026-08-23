@@ -54,27 +54,50 @@ function toLead(row: LeadWithSourceRow): Lead {
   };
 }
 
+const MAX_LEADS_FOR_ATTENTION = 10;
+
 /**
- * Reads back the single lead most worth an organization's attention today:
- * the oldest untouched lead if one exists (the case every lead-dependent
- * capability cares about), otherwise the most recently synced lead. This
- * is a deliberate stopgap matching `IntelligenceContext`'s current
- * single-lead shape (see `packages/intelligence/src/capability.ts`) — it
- * should be replaced by a real multi-lead read once capabilities are
- * widened to evaluate more than one lead at a time, not extended in place.
+ * Every lead worth the Intelligence Core's attention today, not just one —
+ * untouched leads first (oldest first, matching "who's been waiting
+ * longest"), then the most recently synced. This replaces the previous
+ * `getPriorityLead` single-record stopgap: its own doc comment already
+ * called out that it existed only because `IntelligenceContext` couldn't
+ * yet evaluate more than one lead, and should be replaced once it could
+ * (see `packages/intelligence/src/capability.ts`'s `leads` field). Two
+ * capabilities read this same set for different reasons — `lead-risk`
+ * evaluates each lead's own follow-up threshold, `ownership` checks each
+ * for a missing owner — so this stays a single unfiltered-by-risk
+ * candidate list (matching `listOverdueInvoices`/`listOverdueTasks`'s own
+ * "SQL fetches candidates, the capability decides relevance" split),
+ * capped at `MAX_LEADS_FOR_ATTENTION` per the "don't overwhelm the
+ * one-page" principle those two functions already follow.
  *
- * Only considers leads whose source integration is still `active` —
- * `source_records`/`leads` are deliberately append-only (no delete path,
- * for audit/provenance integrity), so disconnecting a connector can't
- * erase what it already ingested. Filtering here instead is what makes
- * "Disconnect" actually mean "stop using my data," not just "stop the
- * token from working" — without it, a disconnected integration's leads
- * would keep silently driving the dashboard forever.
+ * Only considers leads whose source integration is `active` or
+ * `degraded` — `source_records`/`leads` are deliberately append-only (no
+ * delete path, for audit/provenance integrity), so disconnecting a
+ * connector can't erase what it already ingested. Filtering here instead
+ * is what makes "Disconnect" actually mean "stop using my data," not
+ * just "stop the token from working." `degraded` (ADR 0043: a recent
+ * sync couldn't parse some records) is deliberately still included — the
+ * leads that *did* validate and get ingested are exactly as real as any
+ * `active` connector's data.
+ *
+ * Known, disclosed gap this doesn't fix: `evaluateUntouchedLead`
+ * (`@signaldesk/domain`) has no closed-stage exclusion, and
+ * `mapHubSpotDealToSourceLeadRecord` always sets `lastInteractionAt: null`
+ * (the HubSpot Deals API has no last-contact field — see that mapper's own
+ * comment), so a closed-won/closed-lost HubSpot deal can still surface as
+ * "stuck." `Lead.stage` is a raw, pipeline-specific provider string with
+ * no canonical "is this closed" concept in this codebase yet, so this
+ * function deliberately does not attempt to string-match a stage as
+ * "closed" — that would be exactly the kind of vendor-name-shaped logic
+ * the Connector Framework's capability-class design exists to avoid.
+ * Tracked as a real, disclosed risk rather than a guessed fix.
  */
-export async function getPriorityLead(
+export async function listLeadsForAttention(
   pool: DatabasePool,
   organizationId: string,
-): Promise<Lead | null> {
+): Promise<readonly Lead[]> {
   return withTenantContext(pool, organizationId, async (client) => {
     const result = await client.query<LeadWithSourceRow>(
       `select
@@ -105,14 +128,64 @@ export async function getPriorityLead(
          on m.organization_id = l.organization_id and m.id = l.owner_membership_id
        left join users u on u.id = m.user_id
        where l.organization_id = $1
-         and i.status = 'active'
+         and i.status in ('active', 'degraded')
        order by (l.last_interaction_at is null) desc, l.source_created_at asc
-       limit 1`,
+       limit ${MAX_LEADS_FOR_ATTENTION}`,
       [organizationId],
     );
 
-    const row = result.rows[0];
+    return result.rows.map(toLead);
+  });
+}
 
-    return row ? toLead(row) : null;
+const MAX_EXPORTED_LEADS = 1000;
+
+/**
+ * Every lead for a real data-export request -- unlike
+ * `listLeadsForAttention`, not filtered to active-integration leads only,
+ * since a customer
+ * exporting their own data should get everything on record, including
+ * leads from a since-disconnected connector. Capped at
+ * `MAX_EXPORTED_LEADS`, newest first; the cap is disclosed on
+ * `OrganizationDataExport` rather than silently truncating.
+ */
+export async function listAllLeads(
+  pool: DatabasePool,
+  organizationId: string,
+): Promise<readonly Lead[]> {
+  return withTenantContext(pool, organizationId, async (client) => {
+    const result = await client.query<LeadWithSourceRow>(
+      `select
+         l.id as id,
+         l.organization_id as organization_id,
+         l.contact_name as contact_name,
+         l.company_name as company_name,
+         l.value_cents as value_cents,
+         l.currency as currency,
+         l.stage as stage,
+         l.source_created_at as source_created_at,
+         l.last_interaction_at as last_interaction_at,
+         l.expected_response_hours as expected_response_hours,
+         l.owner_membership_id as owner_membership_id,
+         u.display_name as owner_display_name,
+         sr.integration_id as integration_id,
+         sr.source_system as source_system,
+         sr.external_record_id as external_record_id,
+         sr.source_version as source_version,
+         sr.raw_payload_sha256 as record_digest_sha256,
+         sr.ingested_at as last_synced_at
+       from leads l
+       join source_records sr
+         on sr.organization_id = l.organization_id and sr.id = l.source_record_id
+       left join memberships m
+         on m.organization_id = l.organization_id and m.id = l.owner_membership_id
+       left join users u on u.id = m.user_id
+       where l.organization_id = $1
+       order by l.source_created_at desc
+       limit ${MAX_EXPORTED_LEADS}`,
+      [organizationId],
+    );
+
+    return result.rows.map(toLead);
   });
 }

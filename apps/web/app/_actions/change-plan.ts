@@ -171,7 +171,8 @@ export async function changePlanAction(
     return { error: "Sign in to do this." };
   }
 
-  const rateLimit = checkRateLimit(
+  const rateLimit = await checkRateLimit(
+    getPool(),
     `change-plan:${callerSession.organizationId}`,
     10,
     60 * 60 * 1000,

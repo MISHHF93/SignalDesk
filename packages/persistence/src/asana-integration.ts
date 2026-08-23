@@ -7,12 +7,15 @@ export interface AsanaIntegrationRow {
   readonly id: string;
   readonly status: string;
   readonly externalAccountLabel: string | null;
+  /** The Asana user gid the task sync/"Sync Now" queries by. */
+  readonly externalAccountId: string;
 }
 
 interface AsanaIntegrationDbRow {
   readonly id: string;
   readonly status: string;
   readonly external_account_label: string | null;
+  readonly external_account_id: string;
 }
 
 function toRow(row: AsanaIntegrationDbRow): AsanaIntegrationRow {
@@ -20,6 +23,7 @@ function toRow(row: AsanaIntegrationDbRow): AsanaIntegrationRow {
     id: row.id,
     status: row.status,
     externalAccountLabel: row.external_account_label,
+    externalAccountId: row.external_account_id,
   };
 }
 
@@ -34,7 +38,7 @@ export async function getAsanaIntegrationStatus(
 ): Promise<AsanaIntegrationRow | null> {
   return withTenantContext(pool, organizationId, async (client) => {
     const result = await client.query<AsanaIntegrationDbRow>(
-      `select id, status, external_account_label from integrations
+      `select id, status, external_account_label, external_account_id from integrations
        where organization_id = $1 and source_system = 'asana'
        order by (status = 'active') desc, created_at desc
        limit 1`,
@@ -64,7 +68,7 @@ export async function findOrCreateAsanaIntegration(
        values ($1, $2, 'asana', $3, $4, 'active')
        on conflict (organization_id, source_system, external_account_id)
        do update set status = 'active', external_account_label = excluded.external_account_label
-       returning id, status, external_account_label`,
+       returning id, status, external_account_label, external_account_id`,
       [randomUUID(), organizationId, asanaUserId, email],
     );
 

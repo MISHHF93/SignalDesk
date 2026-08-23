@@ -3,10 +3,13 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { buildAsanaAuthorizationUrl } from "@signaldesk/integrations/asana";
+import {
+  buildAsanaAuthorizationUrl,
+  generatePkcePair,
+} from "@signaldesk/integrations/asana";
 
 import { getAsanaOAuthConfig, isAsanaConfigured } from "../_lib/asana-config";
-import { issueOAuthState } from "../_lib/oauth-state";
+import { issueOAuthState, issuePkceVerifier } from "../_lib/oauth-state";
 import { getCurrentOrganization } from "../_lib/session";
 
 export interface ConnectAsanaState {
@@ -14,8 +17,11 @@ export interface ConnectAsanaState {
 }
 
 /**
- * Starts the real Asana OAuth flow. Mirrors `connectHubSpotAction`
- * exactly.
+ * Starts the real Asana OAuth flow, including a real PKCE pair (see
+ * `@signaldesk/integrations/asana`'s client.ts doc comment on why —
+ * Asana's own docs document real PKCE support on this confidential
+ * client's exact authorize/token pair). Mirrors
+ * `connectMicrosoftOutlookAction`'s structure otherwise.
  */
 export async function connectAsanaAction(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- useActionState's action signature requires this parameter
@@ -34,7 +40,9 @@ export async function connectAsanaAction(
   const origin = (await headers()).get("origin") ?? "";
   const config = getAsanaOAuthConfig(origin);
   const state = await issueOAuthState("asana");
-  const authorizationUrl = buildAsanaAuthorizationUrl(config, state);
+  const { verifier, challenge } = generatePkcePair();
+  await issuePkceVerifier("asana", verifier);
+  const authorizationUrl = buildAsanaAuthorizationUrl(config, state, challenge);
 
   redirect(authorizationUrl);
 }

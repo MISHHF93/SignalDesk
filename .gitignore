@@ -23,6 +23,12 @@ coverage/
 .turbo/
 .vercel/
 
+# Playwright E2E output
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
 # Editors and operating systems
 .idea/
 .vscode/

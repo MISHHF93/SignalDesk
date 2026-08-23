@@ -1,4 +1,5 @@
-import type { IntelligenceCard } from "@signaldesk/schemas";
+import type { IntelligenceFinding } from "@signaldesk/intelligence";
+import type { AgentCapability, IntelligenceCard } from "@signaldesk/schemas";
 
 /**
  * Bounded structured-generation tasks the orchestration layer asks a
@@ -6,7 +7,8 @@ import type { IntelligenceCard } from "@signaldesk/schemas";
  * `AIProvider` implementation, not widening what an implementation may do
  * with free-form input.
  */
-export type StructuredGenerationTask = "parse_dashboard_command";
+export type StructuredGenerationTask =
+  "parse_dashboard_command" | "interpret_findings";
 
 /**
  * Minimal context an AIProvider may use to resolve a task — for example
@@ -18,12 +20,33 @@ export interface DashboardCommandContext {
   readonly visibleCards: readonly IntelligenceCard[];
 }
 
+/**
+ * Context for `"interpret_findings"`: a specialist agent's bounded task —
+ * interpret exactly these already-computed, already-evidenced findings for
+ * one capability, never fetch or invent its own data (Agent Fabric's
+ * "mustNotInventFacts" constraint, enforced by prompt here and by
+ * agent-result-reconciler.ts's evidence-subset check downstream).
+ */
+export interface AgentInterpretationContext {
+  readonly capability: AgentCapability;
+  readonly findings: readonly IntelligenceFinding[];
+}
+
 export interface GenerateStructuredInput<T> {
   readonly task: StructuredGenerationTask;
   readonly prompt: string;
-  readonly context?: DashboardCommandContext;
+  readonly context?: DashboardCommandContext | AgentInterpretationContext;
   /** Validates and shapes the provider's raw output; throws on invalid output. */
   readonly parse: (raw: unknown) => T;
+  /**
+   * The calling `AgentCard`'s declared `timeBudgetMs` (`@signaldesk/schemas`),
+   * passed through so a provider that makes a real network call can enforce
+   * it as an actual request timeout — previously validated and displayed as
+   * metadata but never wired into a real cutoff, so a hung call had no
+   * enforced bound. Providers that make no network call (the deterministic
+   * provider) simply ignore it.
+   */
+  readonly timeoutMs?: number;
 }
 
 /**

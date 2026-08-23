@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { DatabasePool } from "./client";
+import { resolveMembershipIdByDisplayName } from "./membership";
 import { withTenantContext } from "./tenant-context";
 
 /**
@@ -28,6 +29,22 @@ export interface IngestSourceLeadInput {
   readonly expectedResponseHours: number;
   readonly sourceCreatedAt: Date;
   readonly lastInteractionAt: Date | null;
+  /** See `IngestSourceInvoiceInput.syncJobId`'s doc comment (invoices.ts,
+   * ADR 0029) — the same real trace identity, required for every real
+   * caller. */
+  readonly syncJobId: string;
+  /**
+   * The HubSpot deal owner's real display name (already resolved from
+   * `hubspot_owner_id` via the Owners API in the mapper — see
+   * `mapHubSpotDealToSourceLeadRecord`'s `owner.name`), or `null` when the
+   * deal is unassigned. Resolved against a real membership the same way
+   * `ingestAsanaTask` already resolves `assigneeName` (ADR 0039) — exact,
+   * case-insensitive match only, no fuzzy matching. This closes a real gap:
+   * the owner name was already being fetched and resolved by the mapper but
+   * silently discarded here, hardcoded to `null` (issue 16, `docs/25-issue-
+   * audit.md`: "Ownership Resolution").
+   */
+  readonly ownerName: string | null;
 }
 
 export interface IngestSourceLeadResult {
@@ -50,8 +67,9 @@ export async function ingestHubSpotDeal(
       `insert into source_records (
          id, organization_id, integration_id, source_system, source_object_type,
          external_record_id, source_version, source_schema_version,
-         idempotency_key, observed_at, raw_payload_sha256, raw_payload_byte_length
-       ) values ($1, $2, $3, 'hubspot', 'deal', $4, $5, 1, $6, $7, $8, $9)
+         idempotency_key, observed_at, raw_payload_sha256, raw_payload_byte_length,
+         sync_job_id
+       ) values ($1, $2, $3, 'hubspot', 'deal', $4, $5, 1, $6, $7, $8, $9, $10)
        on conflict (organization_id, idempotency_key) do nothing
        returning id`,
       [
@@ -64,6 +82,7 @@ export async function ingestHubSpotDeal(
         input.observedAt,
         input.rawPayloadSha256,
         input.rawPayloadByteLength,
+        input.syncJobId,
       ],
     );
 
@@ -75,6 +94,11 @@ export async function ingestHubSpotDeal(
     }
 
     const leadId = randomUUID();
+    const ownerMembershipId = await resolveMembershipIdByDisplayName(
+      client,
+      organizationId,
+      input.ownerName,
+    );
 
     await client.query(
       `insert into leads (
@@ -83,15 +107,16 @@ export async function ingestHubSpotDeal(
          expected_response_hours, source_created_at, last_interaction_at,
          canonical_schema_version, normalization_version
        ) values (
-         $1, $2, $3, null,
-         $4, $5, $6, $7, $8,
-         $9, $10, $11,
+         $1, $2, $3, $4,
+         $5, $6, $7, $8, $9,
+         $10, $11, $12,
          1, 'hubspot-deal-v1'
        )`,
       [
         leadId,
         organizationId,
         insertedSourceRecord.id,
+        ownerMembershipId,
         input.contactName,
         input.companyName,
         input.stage,

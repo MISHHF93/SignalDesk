@@ -14,8 +14,10 @@ export function IntegrationHealthCard({ card }: { card: IntelligenceCard }) {
   return (
     <article
       className="attentionCard dynamicCard integrationHealthCard"
+      data-severity={card.severity}
       aria-label={card.title}
     >
+      <div className="priorityRail" aria-hidden="true" />
       <div className="attentionMain">
         <CardBadges card={card} />
         <div className="integrationHealthHeader">

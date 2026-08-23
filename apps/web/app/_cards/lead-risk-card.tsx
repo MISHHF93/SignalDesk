@@ -1,11 +1,20 @@
 import { CardActions } from "./card-actions";
+import { CardFeedbackButtons } from "./card-feedback-buttons";
 import { CardBadges, WhyDisclosure } from "./card-shell";
 import type { CardComponentProps } from "./card-types";
 import { formatCardCurrency } from "./format";
 
-export function LeadRiskCard({ card, createTaskAction }: CardComponentProps) {
+export function LeadRiskCard({
+  card,
+  createTaskAction,
+  recordCardFeedbackAction,
+}: CardComponentProps) {
   return (
-    <article className="attentionCard dynamicCard" aria-label={card.title}>
+    <article
+      className="attentionCard dynamicCard"
+      data-severity={card.severity}
+      aria-label={card.title}
+    >
       <div className="priorityRail" aria-hidden="true" />
       <div className="attentionMain">
         <div className="attentionHeader">
@@ -33,6 +42,12 @@ export function LeadRiskCard({ card, createTaskAction }: CardComponentProps) {
           <WhyDisclosure card={card} />
           <CardActions card={card} createTaskAction={createTaskAction} />
         </div>
+        {recordCardFeedbackAction ? (
+          <CardFeedbackButtons
+            card={card}
+            recordCardFeedbackAction={recordCardFeedbackAction}
+          />
+        ) : null}
       </div>
     </article>
   );

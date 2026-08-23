@@ -10,16 +10,53 @@ import { withTenantContext } from "./tenant-context";
  * those internally so a real cost-per-plan picture can validate whether
  * launch pricing is actually sustainable, instead of guessing.
  *
- * Nothing in this codebase calls `recordInternalCostEvent` yet — there is
- * no real AI-orchestration or connector-sync pipeline today that
- * generates a cost to record. This function is real and tested plumbing,
- * not a placeholder, but it's honestly unwired until one of those
- * pipelines exists.
+ * `recordInternalCostEvent` is called for real now, from
+ * `AgentGatewayService` (`apps/web/app/_lib/agent-gateway.ts`, Prompt 36,
+ * docs/product-vision-backlog.md, ADR 0045) whenever a specialist backed
+ * by the real Claude provider (`agent.provider === "anthropic"`) is
+ * dispatched — the one real model-calling path this codebase has.
  */
+export interface InternalCostEvent {
+  readonly id: string;
+  readonly organizationId: string;
+  readonly eventType: string;
+  readonly quantity: number;
+  readonly estimatedCostCents: number | null;
+  readonly metadata: Record<string, unknown>;
+  readonly occurredAt: Date;
+}
+
+interface InternalCostEventRow {
+  readonly id: string;
+  readonly organization_id: string;
+  readonly event_type: string;
+  readonly quantity: string;
+  readonly estimated_cost_cents: number | null;
+  readonly metadata: Record<string, unknown>;
+  readonly occurred_at: Date;
+}
+
+function toInternalCostEvent(row: InternalCostEventRow): InternalCostEvent {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    eventType: row.event_type,
+    quantity: Number(row.quantity),
+    estimatedCostCents: row.estimated_cost_cents,
+    metadata: row.metadata,
+    occurredAt: row.occurred_at,
+  };
+}
+
 export interface RecordInternalCostEventInput {
   readonly eventType: string;
   readonly quantity?: number;
-  readonly estimatedCostCents?: number;
+  /** `null` when no verified per-unit pricing exists yet for this event
+   * type — an honest gap, never a fabricated dollar figure. No per-token
+   * pricing table exists in this codebase today, so real Claude
+   * invocations are recorded with `estimatedCostCents: null` until one
+   * does. */
+  readonly estimatedCostCents?: number | null;
   readonly metadata?: Record<string, unknown>;
 }
 
@@ -27,21 +64,30 @@ export async function recordInternalCostEvent(
   pool: DatabasePool,
   organizationId: string,
   input: RecordInternalCostEventInput,
-): Promise<void> {
-  await withTenantContext(pool, organizationId, async (client) => {
-    await client.query(
+): Promise<InternalCostEvent> {
+  return withTenantContext(pool, organizationId, async (client) => {
+    const result = await client.query<InternalCostEventRow>(
       `insert into public.internal_cost_events
          (id, organization_id, event_type, quantity, estimated_cost_cents, metadata)
-       values ($1, $2, $3, $4, $5, $6)`,
+       values ($1, $2, $3, $4, $5, $6)
+       returning id, organization_id, event_type, quantity, estimated_cost_cents, metadata, occurred_at`,
       [
         randomUUID(),
         organizationId,
         input.eventType,
         input.quantity ?? 1,
         input.estimatedCostCents ?? null,
-        input.metadata ?? {},
+        JSON.stringify(input.metadata ?? {}),
       ],
     );
+
+    const row = result.rows[0];
+
+    if (!row) {
+      throw new Error("internal_cost_events insert returned no row");
+    }
+
+    return toInternalCostEvent(row);
   });
 }
 
@@ -55,8 +101,10 @@ export interface InternalCostSummary {
 /**
  * Aggregate cost by event type for one organization over a real date
  * range — the query real internal tooling would use to answer "what does
- * a Business-plan customer actually cost us." Nothing calls this yet
- * either, for the same reason: no real cost events exist to summarize.
+ * a Business-plan customer actually cost us." Still nothing renders this
+ * anywhere (Prompt 36's reality check scoped this slice to instrumenting
+ * the one real write, not building a dashboard on top of it) — kept as
+ * real, tested plumbing ahead of that need, same as before this ADR.
  */
 export async function getInternalCostSummary(
   pool: DatabasePool,
