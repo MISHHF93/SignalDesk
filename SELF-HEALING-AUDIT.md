@@ -5207,6 +5207,68 @@ across three previously-unreviewed surfaces — worth recording as real
 evidence of where this codebase's own prior discipline already held,
 not padding for its own sake.
 
+## Iteration 70 — 2026-08-23: a real ticket-detail bug found after this session's first commit/push — a support ticket's due date was rendered through a formatter built only for past events
+
+User: "OK now keep improving the front end and the back end as discussed
+already," continuing the same evaluation this session has run all along,
+right after the first commit/push of this whole session's work
+(`74c4c8e`).
+
+**Swept all 14 `connect-*.ts` OAuth-initiation actions for consistency**
+— the PKCE/non-PKCE split (Gmail, Google Calendar, Linear, Microsoft
+Calendar, Microsoft Outlook, Salesforce, Zendesk, Asana = 8; HubSpot,
+Jira, QuickBooks, Slack, Stripe, Xero = 6) matches the already-audited
+RFC 9700 finding from earlier this session exactly — no drift. Read
+`connect-zendesk.ts` and its callback (`zendesk/callback/route.ts`) in
+full, the one connector with a genuinely different shape (subdomain-
+first, no shared entry point). Both clean: `isValidZendeskSubdomain`'s
+regex is a correct, properly-bounded DNS-label pattern with no injection
+surface into the templated `https://${subdomain}.zendesk.com` URL; the
+callback does real CSRF-state verification and checks the plan's
+active-connection entitlement _before_ burning the single-use
+authorization code, with a distinct audit outcome for "connected but
+initial sync failed" versus a clean success.
+
+**Then read `ticket-detail-content.tsx` (support tickets, the newest
+Business Graph entity, ADR 0054) for the first time this session — a
+real, live bug.** Its "Due" field passed `ticket.dueAt` through
+`formatRelativeTime`, a function built exclusively for past events: it
+clamps `elapsedMinutes` to a minimum of 0 and every branch reads "...
+ago." Confirmed `dueAt` is a genuine forward-looking value, not a
+naming artifact — traced it to Zendesk's own real `due_at` API field
+(`zendesk/mapper.ts`), which is a real deadline for task-type tickets,
+not a completed-in-the-past timestamp. Any ticket due in the future
+would render as "just now" instead of a meaningful countdown — a
+directly user-visible, factually wrong label on a real data field, not
+an edge case requiring unusual input.
+
+**The fix**: added `formatDueDate` (`_cards/format.ts`), a new function
+handling both directions — `in Xm/h/d` while time remains, `Xm/h/d
+overdue` once the deadline has passed, `due now` within a minute either
+side — deliberately not reusing "ago" for the overdue case, since
+"overdue" names the real risk state and matches this app's own
+attention/severity vocabulary. Left `formatRelativeTime` itself
+untouched (every other call site — `lastActivityAt`, `source.lastSyncedAt`
+— is genuinely past-only and correctly uses it), and switched only
+`ticket-detail-content.tsx`'s "Due" field to the new function. Added
+`format.test.ts` (this file had no test coverage before), 3 cases
+covering the due-now boundary, the future countdown, and the overdue
+label. `pnpm --filter @signaldesk/web typecheck` and monorepo-wide
+`pnpm lint` clean; formatted, `pnpm format:check` clean; full
+`apps/web` suite — 22 passing (was 19), zero regressions. Not
+live-rendered against a real ticket: no Zendesk credentials exist in
+this environment to populate a real due date, the same disclosed
+limitation `IMPLEMENTATION-READINESS.md` already names for this
+entity's populated-state render paths.
+
+**Verified himself, not just implemented.** Found by reading a
+component's source for the first time rather than trusting a prior
+screenshot — this exact page was never actually visually exercised
+this session (no support-ticket connector reachable in this
+environment), so the bug had no chance of surfacing through the visual
+sweeps that caught the CSS and accessibility issues; only a direct code
+read could have caught it.
+
 ## Next up (priority order for future iterations)
 
 1. **The Customer POV sweep (this window, Iteration 35 the latest

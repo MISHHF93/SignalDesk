@@ -47,3 +47,35 @@ export function formatRelativeTime(date: Date, now: Date): string {
   const elapsedDays = Math.round(elapsedHours / 24);
   return `${elapsedDays}d ago`;
 }
+
+/**
+ * For a forward-looking deadline (a ticket's `dueAt`), not a past event —
+ * `formatRelativeTime` above is "ago"-only and clamps a future date to
+ * "just now", which would silently misrepresent every not-yet-due ticket
+ * as already due. Handles both directions: "in Xm/h/d" while there's
+ * still time, "Xm/h/d overdue" once the deadline has passed — overdue
+ * rather than "ago" specifically because it names the real risk state,
+ * matching this app's own attention/severity vocabulary.
+ */
+export function formatDueDate(date: Date, now: Date): string {
+  const elapsedMinutes = Math.round(
+    (now.getTime() - date.getTime()) / (60 * 1_000),
+  );
+
+  if (Math.abs(elapsedMinutes) < 1) return "due now";
+
+  if (elapsedMinutes < 0) {
+    const remainingMinutes = -elapsedMinutes;
+    if (remainingMinutes < 60) return `in ${remainingMinutes}m`;
+    const remainingHours = Math.round(remainingMinutes / 60);
+    if (remainingHours < 24) return `in ${remainingHours}h`;
+    const remainingDays = Math.round(remainingHours / 24);
+    return `in ${remainingDays}d`;
+  }
+
+  if (elapsedMinutes < 60) return `${elapsedMinutes}m overdue`;
+  const elapsedHours = Math.round(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours}h overdue`;
+  const elapsedDays = Math.round(elapsedHours / 24);
+  return `${elapsedDays}d overdue`;
+}

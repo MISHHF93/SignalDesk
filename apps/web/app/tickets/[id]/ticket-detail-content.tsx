@@ -6,7 +6,7 @@ import {
 } from "@signaldesk/persistence";
 import { notFound } from "next/navigation";
 
-import { formatRelativeTime } from "../../_cards/format";
+import { formatDueDate, formatRelativeTime } from "../../_cards/format";
 import { getCurrentOrganization } from "../../_lib/session";
 
 let pool: DatabasePool | undefined;
@@ -89,7 +89,7 @@ export async function TicketDetailContent({ ticketId }: { ticketId: string }) {
         {ticket.dueAt ? (
           <div>
             <dt>Due</dt>
-            <dd>{formatRelativeTime(ticket.dueAt, now)}</dd>
+            <dd>{formatDueDate(ticket.dueAt, now)}</dd>
           </div>
         ) : null}
         <div>
