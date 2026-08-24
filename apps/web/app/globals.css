@@ -3004,6 +3004,16 @@ input {
   margin: -0.4rem 0 0.9rem;
 }
 
+.liveStatusNotice {
+  margin: -0.4rem 0 0.9rem;
+  color: var(--faint);
+  font-size: 0.7rem;
+}
+
+.liveStatusNotice-paused {
+  color: var(--severity-low-ink);
+}
+
 .activeViewChips {
   display: flex;
   flex-wrap: wrap;

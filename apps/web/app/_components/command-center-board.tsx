@@ -18,6 +18,7 @@ import {
   useBusinessSnapshot,
   type SnapshotCard,
 } from "../_lib/use-business-snapshot";
+import { formatRelativeTime } from "../_cards/format";
 import { renderCard } from "../_cards/registry";
 import { Button } from "./button";
 import { CommandBar } from "./command-bar";
@@ -215,7 +216,7 @@ export function CommandCenterBoard({
   // `getTodaysAttention` recomputes — so it's never a candidate for
   // replacement here.
   const [agentCards, setAgentCards] = useState<readonly IntelligenceCard[]>([]);
-  const { snapshot: polledSnapshot } = useBusinessSnapshot({
+  const { snapshot: polledSnapshot, error: pollError } = useBusinessSnapshot({
     pollIntervalMs: POLL_INTERVAL_MS,
   });
 
@@ -359,6 +360,21 @@ export function CommandCenterBoard({
         onSubmitCommand={handleSubmitCommand}
         aiInvestigationAvailable={aiInvestigationAvailable}
       />
+
+      {pollError ? (
+        <p className="liveStatusNotice liveStatusNotice-paused" role="status">
+          Live updates paused
+          {polledSnapshot
+            ? ` — showing cards as of ${formatRelativeTime(new Date(polledSnapshot.generatedAt), new Date())}.`
+            : " — showing the data from when this page loaded."}
+        </p>
+      ) : polledSnapshot ? (
+        <p className="liveStatusNotice" role="status">
+          Cards updated{" "}
+          {formatRelativeTime(new Date(polledSnapshot.generatedAt), new Date())}
+          .
+        </p>
+      ) : null}
 
       {focusedCardId || activeFilters.length > 0 ? (
         <div className="activeViewBar" role="status">

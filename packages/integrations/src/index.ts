@@ -120,10 +120,13 @@ export interface ConnectorReadiness {
    * that knowledge as a hardcoded list. */
   readonly initialSyncImplemented: boolean;
   /** A real, cursor-filtered fetch that only pulls records changed since
-   * the last successful sync (ADR 0021) — false for every connector even
-   * after `sync_jobs` tracking exists. The three real syncs compute and
-   * store a real cursor value per run, but none yet filters its fetch
-   * query by it; that's the next real step, not this one. */
+   * the last successful sync (ADR 0021) — true for 8 connectors as of
+   * 2026-08-24 (hubspot, gmail, quickbooks, asana, salesforce, jira,
+   * xero, zendesk), each storing a real cursor per run and demonstrably
+   * consuming it on the next (a query filter, an `If-Modified-Since`
+   * header, or — Zendesk — the same cursor endpoint reused for both
+   * initial and delta runs). `false` for every other connector, most of
+   * which have no sync at all yet. */
   readonly incrementalSyncImplemented: boolean;
   readonly actionsImplemented: boolean;
   /** Never auto-derived — requires an explicit, separate sign-off. */
@@ -845,16 +848,24 @@ export const connectorCatalog = [
     },
     trustClassification: "first_party",
   }),
-  // --- ADR 0021: 15 metadata-only entries below ---------------------------
+  // --- ADR 0021: metadata-only entries, interleaved with real ones below ---
   //
-  // Every entry omits `authStrategy`/`readiness`, so `defineConnector()`
-  // applies `plannedOAuth2`/`notImplementedReadiness` — zero real code,
-  // every readiness flag honestly `false`. `availability: "planned"`
-  // (never "foundation-preview", which is reserved for the 10 connectors
-  // above that have real OAuth). This deliberately overrides this
-  // catalog's own prior "no roadmap connector marked as implemented"
-  // discipline — see ADR 0021 for why, and the explicit honesty condition
-  // it was overridden under.
+  // Originally 15 metadata-only entries below this comment; four
+  // (salesforce, jira, xero, zendesk) were later promoted to real OAuth
+  // connectors in place, not moved above this comment, so this section is
+  // now a mix — 11 still metadata-only, 4 real — in the order each was
+  // added, not grouped by status. Each metadata-only entry omits
+  // `authStrategy`/`readiness`, so `defineConnector()` applies
+  // `plannedOAuth2`/`notImplementedReadiness` — zero real code, every
+  // readiness flag honestly `false`, `availability: "planned"`. A real
+  // entry here carries its own explicit `authStrategy`/`readiness` and
+  // `availability: "foundation-preview"`, identical in shape to the 10
+  // connectors above this comment that have always been real — the
+  // position below this line no longer implies planned-only; the
+  // presence of `readiness`/`authStrategy` on the entry itself does.
+  // This section deliberately overrides this catalog's own prior "no
+  // roadmap connector marked as implemented" discipline — see ADR 0021
+  // for why, and the explicit honesty condition it was overridden under.
   defineConnector({
     slug: "salesforce",
     name: "Salesforce",
