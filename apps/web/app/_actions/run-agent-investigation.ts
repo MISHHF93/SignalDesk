@@ -105,6 +105,9 @@ export async function runAgentInvestigationAction(): Promise<RunAgentInvestigati
     const deliveryFindings = attention.findings.filter(
       (finding) => finding.type === "task.overdue",
     );
+    const ticketFindings = attention.findings.filter(
+      (finding) => finding.type === "ticket.stuck",
+    );
 
     // A real, deterministic evidence-sufficiency check *before* the model
     // ever sees anything — SignalDesk decides whether there's enough real
@@ -114,6 +117,7 @@ export async function runAgentInvestigationAction(): Promise<RunAgentInvestigati
     const evidenceSufficiency = classifyEvidenceSufficiency([
       ...financeFindings,
       ...deliveryFindings,
+      ...ticketFindings,
     ]);
 
     if (evidenceSufficiency === "missing") {
@@ -158,7 +162,8 @@ export async function runAgentInvestigationAction(): Promise<RunAgentInvestigati
           {
             userId: session.userId,
             pattern: "parallel_specialists",
-            objective: "Investigate current finance and delivery risk.",
+            objective:
+              "Investigate current finance, delivery, and ticket risk.",
             correlationId: randomUUID(),
             idempotencyKey: randomUUID(),
           },
@@ -175,6 +180,7 @@ export async function runAgentInvestigationAction(): Promise<RunAgentInvestigati
         const results = await runParallelSpecialists(
           { findings: financeFindings },
           { findings: deliveryFindings },
+          { findings: ticketFindings },
           availabilityFor(),
           gateway.dispatch,
         );
@@ -183,6 +189,7 @@ export async function runAgentInvestigationAction(): Promise<RunAgentInvestigati
           reconcileSpecialistResults(results, [
             ...financeFindings,
             ...deliveryFindings,
+            ...ticketFindings,
           ]);
 
         await completeAgentCollaboration(

@@ -81,16 +81,22 @@ async function dispatchOrFail(
 
 /**
  * The Agent Fabric's one real collaboration pattern (`PARALLEL_SPECIALISTS`):
- * fans out to a finance specialist over real overdue-invoice findings and a
- * delivery specialist over real overdue-task findings, excluding whichever
- * agent finance picked so the two domains genuinely run on different
- * backends whenever more than one specialist is eligible. A domain with no
- * findings, or with no eligible agent, contributes nothing — never a
- * fabricated result — which is why the return array can be shorter than 2.
+ * fans out to a finance specialist over real overdue-invoice findings, a
+ * delivery specialist over real overdue-task findings, and a ticket
+ * specialist over real stuck-support-ticket findings — each domain
+ * excluding whichever agent(s) an earlier domain already picked, so they
+ * genuinely run on different backends whenever more than one specialist is
+ * eligible. With exactly two real registry entries (`AGENT_REGISTRY`), the
+ * best case across three domains is two distinct backends, never three —
+ * an honest consequence of the existing best-effort doctrine, not a new
+ * gap. A domain with no findings, or with no eligible agent, contributes
+ * nothing — never a fabricated result — which is why the return array can
+ * be shorter than 3.
  */
 export async function runParallelSpecialists(
   financeInput: SpecialistInput,
   deliveryInput: SpecialistInput,
+  ticketInput: SpecialistInput,
   availability: AgentAvailability,
   dispatch: SpecialistDispatch,
 ): Promise<readonly AgentTaskResult[]> {
@@ -128,6 +134,33 @@ export async function runParallelSpecialists(
     }
   }
 
+  let ticketAgent: AgentCard | null = null;
+
+  if (ticketInput.findings.length > 0) {
+    // Same best-effort-exclusion doctrine as delivery above, extended to a
+    // third domain: prefer a backend distinct from *both* finance and
+    // delivery, but with only two real registry entries that preference
+    // can never actually be satisfied once both are already assigned — the
+    // fallback below still guarantees ticket runs for real rather than
+    // being starved to zero candidates.
+    const exclude = [financeAgent?.id, deliveryAgent?.id].filter(
+      (id): id is string => id !== undefined,
+    );
+
+    try {
+      ticketAgent =
+        exclude.length > 0
+          ? selectAgent("interpret_ticket_risk", availability, { exclude })
+          : selectAgent("interpret_ticket_risk", availability);
+    } catch {
+      try {
+        ticketAgent = selectAgent("interpret_ticket_risk", availability);
+      } catch {
+        ticketAgent = null;
+      }
+    }
+  }
+
   const dispatches: Promise<AgentTaskResult>[] = [];
 
   if (financeAgent) {
@@ -155,6 +188,21 @@ export async function runParallelSpecialists(
         ),
         deliveryAgent,
         deliveryInput.findings,
+        dispatch,
+      ),
+    );
+  }
+
+  if (ticketAgent) {
+    dispatches.push(
+      dispatchOrFail(
+        buildTask(
+          "interpret_ticket_risk",
+          "Interpret current ticket risk from real stuck support-ticket findings.",
+          ticketInput.findings,
+        ),
+        ticketAgent,
+        ticketInput.findings,
         dispatch,
       ),
     );

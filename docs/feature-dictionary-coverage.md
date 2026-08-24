@@ -445,18 +445,29 @@ metrics/Signals/artifacts/playbooks, any `SignalDeskPack` interface.
 
 ## 31–35. Agent Fabric, Multi-Agent Patterns, A2A, MCP, AI Provider Layer — **PARTIAL**
 
-Real (ADR 0020, extended this session): `AgentGatewayService` as a real
-trust boundary minting time-bounded capability grants and writing
-agent-attributed audit events; exactly one collaboration pattern,
-`PARALLEL_SPECIALISTS`; 2 real agents (a Claude-backed specialist and a
-free deterministic one); `canExecute: false` hard-enforced
+Real (ADR 0020, extended this session — now 3 real capabilities, not 2):
+`AgentGatewayService` as a real trust boundary minting time-bounded
+capability grants and writing agent-attributed audit events; exactly one
+collaboration pattern, `PARALLEL_SPECIALISTS`; 2 real agents (a
+Claude-backed specialist and a free deterministic one), each now
+declaring `interpret_financial_risk`/`interpret_delivery_risk`/
+`interpret_ticket_risk` — the third, `interpret_ticket_risk` (added
+2026-08-24), covers real stuck-support-ticket findings via the exact
+same dispatch/reconcile/approve pipeline, zero new abstractions, per
+ADR 0020's own named next step ("a second real specialist capability...
+not a bigger type system"); `canExecute: false` hard-enforced
 (schema-level, not just convention); real result reconciliation
 (`reconcileSpecialistResults`, this session fixed a real freshness bug in
-it); real containment (kill switch, rate limit, `MAX_FINDINGS_PER_TASK`,
+it, and now titles all seven finance/delivery/ticket combinations); real
+containment (kill switch, rate limit, `MAX_FINDINGS_PER_TASK`,
 `MAX_OUTPUT_TOKENS`, 5-minute grant TTL, and — this session — a real
 enforced per-call timeout matching each agent's declared `timeBudgetMs`,
 previously declared but never wired to an actual cutoff). Exactly one
-real AI provider, Claude — no OpenAI/Gemini/internal-model adapters.
+real AI provider, Claude — no OpenAI/Gemini/internal-model adapters. With
+only 2 real registry entries and 3 capabilities, the third domain in any
+investigation can never get a backend distinct from both others — an
+honest, documented consequence of the existing best-effort exclusion
+doctrine, not a new gap.
 **Not built**: `SEQUENTIAL_HANDOFF`/`PRIMARY_PLUS_CRITIC`/
 `COORDINATOR_SPECIALISTS` patterns, an Agent Directory/Router beyond
 static capability matching, literal A2A or MCP wire-protocol compliance

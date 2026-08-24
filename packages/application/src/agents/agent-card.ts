@@ -10,6 +10,10 @@ import { agentCardSchema, type AgentCard } from "@signaldesk/schemas";
  * `ANTHROPIC_API_KEY` is configured — see `apps/web/app/_lib/agent-fabric.ts`)
  * and an always-available deterministic one, so `runParallelSpecialists`
  * has something real to dispatch to even with zero external credentials.
+ * Both declare all three real capabilities (financial/delivery/ticket risk,
+ * ADR 0020's own named next step — "a second real specialist capability...
+ * not a bigger type system") — the specialist *count* stays at two; only
+ * the capability *count* per specialist grows when a new one is added.
  */
 const RAW_AGENT_REGISTRY: readonly AgentCard[] = [
   {
@@ -17,9 +21,13 @@ const RAW_AGENT_REGISTRY: readonly AgentCard[] = [
     provider: "anthropic",
     displayName: "Claude specialist",
     description:
-      "Interprets real financial and delivery findings using a Claude-backed model. Available only when ANTHROPIC_API_KEY is configured.",
-    capabilities: ["interpret_financial_risk", "interpret_delivery_risk"],
-    dataAccess: ["invoice_findings", "task_findings"],
+      "Interprets real financial, delivery, and ticket findings using a Claude-backed model. Available only when ANTHROPIC_API_KEY is configured.",
+    capabilities: [
+      "interpret_financial_risk",
+      "interpret_delivery_risk",
+      "interpret_ticket_risk",
+    ],
+    dataAccess: ["invoice_findings", "task_findings", "ticket_findings"],
     riskLevel: "moderate",
     canRead: true,
     canPropose: true,
@@ -33,9 +41,13 @@ const RAW_AGENT_REGISTRY: readonly AgentCard[] = [
     provider: "deterministic",
     displayName: "Deterministic specialist",
     description:
-      "Templates claims directly from real findings with no model call — always available, zero cost.",
-    capabilities: ["interpret_financial_risk", "interpret_delivery_risk"],
-    dataAccess: ["invoice_findings", "task_findings"],
+      "Templates claims directly from real financial, delivery, and ticket findings with no model call — always available, zero cost.",
+    capabilities: [
+      "interpret_financial_risk",
+      "interpret_delivery_risk",
+      "interpret_ticket_risk",
+    ],
+    dataAccess: ["invoice_findings", "task_findings", "ticket_findings"],
     riskLevel: "low",
     canRead: true,
     canPropose: true,

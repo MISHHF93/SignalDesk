@@ -678,13 +678,16 @@ export type IntelligenceCard = z.infer<typeof intelligenceCardSchema>;
 // inventing a parallel evidence shape — an agent's "evidence" is the same
 // SourceReference an IntelligenceFinding already carries.
 //
-// Only two capabilities exist because only two real specialists exist today
-// (see AGENT_REGISTRY, @signaldesk/application) — widen this enum only when
-// a third real specialist is added, not speculatively.
+// Three capabilities exist because three real specialist capabilities exist
+// today (see AGENT_REGISTRY, @signaldesk/application, still exactly two
+// specialist cards — claude/deterministic — each declaring all three) —
+// widen this enum only when a new real capability is added, not
+// speculatively.
 
 export const agentCapabilitySchema = z.enum([
   "interpret_financial_risk",
   "interpret_delivery_risk",
+  "interpret_ticket_risk",
 ]);
 
 export type AgentCapability = z.infer<typeof agentCapabilitySchema>;
@@ -695,7 +698,9 @@ export const agentCardSchema = z.strictObject({
   displayName: z.string().trim().min(1).max(100),
   description: z.string().trim().min(1).max(500),
   capabilities: z.array(agentCapabilitySchema).min(1),
-  dataAccess: z.array(z.enum(["invoice_findings", "task_findings"])).min(1),
+  dataAccess: z
+    .array(z.enum(["invoice_findings", "task_findings", "ticket_findings"]))
+    .min(1),
   riskLevel: z.enum(["low", "moderate"]),
   canRead: z.literal(true),
   canPropose: z.boolean(),

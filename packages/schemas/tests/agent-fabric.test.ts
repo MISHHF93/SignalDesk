@@ -66,6 +66,16 @@ describe("agentCardSchema", () => {
 
     expect(result.success).toBe(false);
   });
+
+  it("validates a card declaring the ticket-risk capability and data access", () => {
+    const result = agentCardSchema.safeParse({
+      ...validAgentCard,
+      capabilities: ["interpret_ticket_risk"],
+      dataAccess: ["ticket_findings"],
+    });
+
+    expect(result.success).toBe(true);
+  });
 });
 
 describe("agentTaskSchema", () => {

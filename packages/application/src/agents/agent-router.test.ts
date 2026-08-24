@@ -16,6 +16,12 @@ describe("selectAgent", () => {
     expect(agent.capabilities).toContain("interpret_financial_risk");
   });
 
+  it("selects an eligible agent for the ticket-risk capability", () => {
+    const agent = selectAgent("interpret_ticket_risk", ALL_AVAILABLE);
+
+    expect(agent.capabilities).toContain("interpret_ticket_risk");
+  });
+
   it("falls back to the deterministic specialist when the model-backed one is unavailable", () => {
     const agent = selectAgent("interpret_financial_risk", ONLY_DETERMINISTIC);
 

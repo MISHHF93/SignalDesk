@@ -58,6 +58,33 @@ function taskFinding(
   };
 }
 
+function ticketFinding(
+  overrides: Partial<IntelligenceFinding> = {},
+): IntelligenceFinding {
+  return {
+    id: "stuck-ticket:org-1:ticket-1",
+    type: "ticket.stuck",
+    title: "Support ticket stuck",
+    summary: "Ticket remained open 3 days past its response threshold.",
+    severity: "medium",
+    confidence: 0.9,
+    evidence: [
+      {
+        integrationId: "33333333-3333-4333-8333-333333333333",
+        system: "zendesk",
+        externalRecordId: "ext-3",
+        sourceVersion: "v1",
+        recordDigestSha256: "c".repeat(64),
+        lastSyncedAt: new Date(),
+      },
+    ],
+    freshness: { asOf: new Date(), status: "fresh" },
+    explanation: { trigger: "no reply past threshold", confidence: "high" },
+    detectedAt: new Date(),
+    ...overrides,
+  };
+}
+
 function result(overrides: Partial<AgentTaskResult> = {}): AgentTaskResult {
   return {
     taskId: "task-1",
@@ -133,6 +160,72 @@ describe("reconcileSpecialistResults", () => {
 
     expect(outcome.finding?.title).toBe(
       "Finance and delivery risk investigation",
+    );
+  });
+
+  it("titles a ticket-only investigation", () => {
+    const outcome = reconcileSpecialistResults(
+      [result({ evidenceIds: ["stuck-ticket:org-1:ticket-1"] })],
+      [ticketFinding()],
+    );
+
+    expect(outcome.finding?.title).toBe("Ticket risk investigation");
+  });
+
+  it("titles a cross-domain investigation covering finance and ticket", () => {
+    const outcome = reconcileSpecialistResults(
+      [
+        result({ evidenceIds: ["overdue-invoice:org-1:invoice-1"] }),
+        result({
+          agentId: "deterministic-specialist",
+          evidenceIds: ["stuck-ticket:org-1:ticket-1"],
+        }),
+      ],
+      [invoiceFinding(), ticketFinding()],
+    );
+
+    expect(outcome.finding?.title).toBe(
+      "Finance and ticket risk investigation",
+    );
+  });
+
+  it("titles a cross-domain investigation covering delivery and ticket", () => {
+    const outcome = reconcileSpecialistResults(
+      [
+        result({
+          evidenceIds: ["overdue-task:org-1:task-1"],
+        }),
+        result({
+          agentId: "deterministic-specialist",
+          evidenceIds: ["stuck-ticket:org-1:ticket-1"],
+        }),
+      ],
+      [taskFinding(), ticketFinding()],
+    );
+
+    expect(outcome.finding?.title).toBe(
+      "Delivery and ticket risk investigation",
+    );
+  });
+
+  it("titles a cross-domain investigation covering all three domains", () => {
+    const outcome = reconcileSpecialistResults(
+      [
+        result({ evidenceIds: ["overdue-invoice:org-1:invoice-1"] }),
+        result({
+          agentId: "deterministic-specialist",
+          evidenceIds: ["overdue-task:org-1:task-1"],
+        }),
+        result({
+          agentId: "claude-specialist",
+          evidenceIds: ["stuck-ticket:org-1:ticket-1"],
+        }),
+      ],
+      [invoiceFinding(), taskFinding(), ticketFinding()],
+    );
+
+    expect(outcome.finding?.title).toBe(
+      "Finance, delivery, and ticket risk investigation",
     );
   });
 

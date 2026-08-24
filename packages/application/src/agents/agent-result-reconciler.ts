@@ -27,15 +27,28 @@ function maxSeverity(findings: readonly IntelligenceFinding[]): CardSeverity {
 function buildTitle(citedFindings: readonly IntelligenceFinding[]): string {
   const hasFinance = citedFindings.some((f) => f.type === "invoice.overdue");
   const hasDelivery = citedFindings.some((f) => f.type === "task.overdue");
+  const hasTicket = citedFindings.some((f) => f.type === "ticket.stuck");
 
+  if (hasFinance && hasDelivery && hasTicket) {
+    return "Finance, delivery, and ticket risk investigation";
+  }
   if (hasFinance && hasDelivery) {
     return "Finance and delivery risk investigation";
+  }
+  if (hasFinance && hasTicket) {
+    return "Finance and ticket risk investigation";
+  }
+  if (hasDelivery && hasTicket) {
+    return "Delivery and ticket risk investigation";
   }
   if (hasFinance) {
     return "Financial risk investigation";
   }
   if (hasDelivery) {
     return "Delivery risk investigation";
+  }
+  if (hasTicket) {
+    return "Ticket risk investigation";
   }
 
   return "Agent investigation";

@@ -5620,6 +5620,112 @@ would have made were already made in Iterations 20-35, and today's
 value was independent re-verification plus a wider terminology check
 that came back clean, not a re-fix of the same ground.
 
+## Iteration 76 — 2026-08-24: a large "AI command plane" architecture proposal, scoped down to the one real next step its own source-of-truth already named — `interpret_ticket_risk`, the Agent Fabric's third real specialist capability
+
+User proposed a large, 35-section "next architectural level" for
+SignalDesk: evolve it into an AI command plane (observe → understand →
+decide → command → verify) sitting above conventional business systems,
+explicitly requiring existing architecture be extended, not replaced,
+and nothing fabricated. Entered plan mode rather than executing
+directly, given the scale (touches the Agent Fabric's core trust
+boundary) and this repo's own discipline against half-finished,
+unscoped work.
+
+**Investigation found the premise already substantially real.** Two
+parallel Explore passes traced the Agent Fabric (ADR 0020) end to end:
+`AgentGatewayService.dispatch` is a real policy-evaluated trust
+boundary (`evaluatePolicy`, ADR 0028) minting time-bounded capability
+grants before any provider call; `reconcileSpecialistResults` merges
+specialist outputs into one card or honestly abstains (`finding: null`)
+rather than fabricating a recommendation; every real write is
+human-approval-gated (`canExecute: z.literal(false)`, schema-enforced,
+not convention) with a full audit trail. This is already a narrow,
+working version of the proposed loop — not "AI assistance bolted onto
+software," a real governed command layer with a genuinely narrow scope
+(2 specialist capabilities, 2 real Safe Actions as of yesterday's work).
+
+**ADR 0020 itself already named its own next step**, in its own words:
+"a second real specialist capability... or a real second model
+vendor — not a bigger type system." A tool registry, MCP integration,
+A2A protocol, typed Command schema, and multi-agent role hierarchy —
+large parts of the 35-section proposal — were all already considered
+and explicitly deferred by this codebase's own prior decision record,
+not gaps nobody had noticed. Building them now, before real capability
+existed to justify them, would have meant contradicting a deliberate
+architectural decision and violating this repo's own honesty discipline
+(a bigger type system with no real capability behind it). Presented
+this finding to the user directly rather than either silently
+complying with "execute now" or silently ignoring the proposal; user
+agreed to scope down to ADR 0020's own named next step.
+
+**Picked the specific capability via a real options menu, not a
+unilateral choice**: three candidates surfaced (a third specialist
+capability for ticket risk; widening the Safe Action a proposal can
+target to include `complete_internal_task`; a minimal explicit
+post-execution verification stage) — user chose the ticket-risk
+capability, both because it's the most directly ADR-sanctioned move and
+because `packages/intelligence/src/capabilities/ticket-risk.ts` already
+produces real `ticket.stuck` findings (support tickets are the newest
+real Business Graph entity, via Zendesk, ADR 0054) that the Agent
+Fabric never reached until now.
+
+**Confirmed via direct reading, not just the Plan agent's report, that
+the entire trust boundary is already generic over capability** —
+`agent-router.ts`, `agent-gateway.ts`, `claude-provider.ts`,
+`deterministic-provider.ts`, `evidence-sufficiency.ts`,
+`domain/src/index.ts`'s `evaluatePolicy`, and `ticket-risk.ts` itself
+needed zero changes; only five files encoded the two-domain assumption
+as literal structure: `packages/schemas/src/index.ts`
+(`agentCapabilitySchema`/`dataAccess` enums — explicitly anticipated
+by their own existing comment: "widen this enum only when a third real
+[capability] is added, not speculatively"), `agent-card.ts`
+(`AGENT_REGISTRY`), `parallel-specialist-coordinator.ts`
+(`runParallelSpecialists`, the real logic change — a third
+best-effort-exclusion selection following the exact existing
+finance/delivery doctrine), `agent-result-reconciler.ts` (`buildTitle`'s
+truth table, extended from 2 to 3 domains, 8 cases), and
+`run-agent-investigation.ts` (derives `ticketFindings`, threads it
+through evidence-sufficiency/dispatch/reconciliation alongside the
+existing two). `FIXED_AUTONOMOUSLY`.
+
+**Documented, not silently accepted, the one real known consequence**:
+with exactly two real registry entries and three capabilities, the
+third domain in any investigation can never get a backend distinct from
+_both_ others — best case is two distinct backends across three
+domains. This is the existing best-effort doctrine honestly extended,
+not a new gap introduced by this change; called out in code comments at
+the ticket-selection site, the module doc comment, and
+`docs/feature-dictionary-coverage.md`, specifically so a future reader
+doesn't mistake it for a bug.
+
+**Verified himself, not just implemented**: `pnpm -r typecheck` clean
+across all 12 workspace packages; `pnpm -r test` green (schemas 132,
+application 139 — up from 132, the 7 new tests covering the ticket
+capability's schema validation, registry declaration, `selectAgent`
+routing, all four new `buildTitle` combinations, and two new
+`parallel-specialist-coordinator` cases including ticket-specialist
+failure isolation); `pnpm lint`/`pnpm format:check` clean repo-wide.
+Live-verified against the real running dev server: signed in as guest,
+triggered "investigate risk" via the real command bar, got the correct
+honest "Nothing to investigate right now" (all three domains legitimately
+empty in a zero-connector guest workspace — the same empty-domain path
+the test suite also covers) with zero console errors — proof the new
+three-domain wiring runs for real without regressing the existing
+two-domain behavior, though a live ticket-risk _finding_ specifically
+still needs a real Zendesk-connected workspace to exercise end to end
+(same environment limitation noted throughout this session's earlier
+Customer POV audit).
+
+**Propagated the change to where it was claimed elsewhere**:
+`docs/feature-dictionary-coverage.md`'s Agent Fabric section (31–35)
+now names three real capabilities, describes what `interpret_ticket_risk`
+covers, and explicitly documents the two-real-agents/three-capabilities
+backend-distinctness consequence. Left `docs/feature-dictionary-
+coverage.md`'s headline "two-specialist Agent Fabric" line unchanged —
+still accurate, since it counts specialist _cards_ (still 2), not
+capabilities (now 3), and conflating the two would itself have been a
+new inaccuracy.
+
 ## Next up (priority order for future iterations)
 
 1. **The Customer POV sweep (this window, Iteration 35 the latest

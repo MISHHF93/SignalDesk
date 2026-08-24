@@ -24,12 +24,25 @@ describe("AGENT_REGISTRY", () => {
     }
   });
 
-  it("each real specialist declares both capabilities", () => {
+  it("each real specialist declares all three real capabilities", () => {
     for (const card of AGENT_REGISTRY) {
       expect(card.capabilities).toEqual(
         expect.arrayContaining([
           "interpret_financial_risk",
           "interpret_delivery_risk",
+          "interpret_ticket_risk",
+        ]),
+      );
+    }
+  });
+
+  it("each real specialist declares data access for all three finding types", () => {
+    for (const card of AGENT_REGISTRY) {
+      expect(card.dataAccess).toEqual(
+        expect.arrayContaining([
+          "invoice_findings",
+          "task_findings",
+          "ticket_findings",
         ]),
       );
     }

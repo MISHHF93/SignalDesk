@@ -41,6 +41,21 @@ function taskFinding(): IntelligenceFinding {
   };
 }
 
+function ticketFinding(): IntelligenceFinding {
+  return {
+    id: "stuck-ticket:org-1:ticket-1",
+    type: "ticket.stuck",
+    title: "Support ticket stuck",
+    summary: "Ticket remained open 3 days past its response threshold.",
+    severity: "medium",
+    confidence: 0.9,
+    evidence: [],
+    freshness: { asOf: new Date(), status: "fresh" },
+    explanation: { trigger: "no reply past threshold", confidence: "high" },
+    detectedAt: new Date(),
+  };
+}
+
 function stubResult(
   taskId: string,
   agent: AgentCard,
@@ -57,7 +72,7 @@ function stubResult(
 }
 
 describe("runParallelSpecialists", () => {
-  it("dispatches to both domains on genuinely different agents when both are available", async () => {
+  it("dispatches all three domains, reusing a backend once both real agents are already assigned", async () => {
     const dispatch = vi.fn(
       async (
         task: AgentTask,
@@ -69,13 +84,24 @@ describe("runParallelSpecialists", () => {
     const results = await runParallelSpecialists(
       { findings: [invoiceFinding()] },
       { findings: [taskFinding()] },
+      { findings: [ticketFinding()] },
       ALL_AVAILABLE,
       dispatch,
     );
 
-    expect(results).toHaveLength(2);
-    expect(new Set(results.map((r) => r.agentId)).size).toBe(2);
-    expect(dispatch).toHaveBeenCalledTimes(2);
+    expect(results).toHaveLength(3);
+    expect(dispatch).toHaveBeenCalledTimes(3);
+    // Only two real agents exist, so the third domain can't get a backend
+    // distinct from both others — finance and ticket both fall back to the
+    // same first-eligible agent (claude-specialist), delivery genuinely
+    // differs (deterministic-specialist). This is the documented
+    // best-effort consequence, not a bug.
+    const agentIds = results.map((r) => r.agentId);
+    expect(agentIds).toEqual([
+      "claude-specialist",
+      "deterministic-specialist",
+      "claude-specialist",
+    ]);
   });
 
   it("contributes nothing for a domain with no findings", async () => {
@@ -90,6 +116,7 @@ describe("runParallelSpecialists", () => {
     const results = await runParallelSpecialists(
       { findings: [] },
       { findings: [taskFinding()] },
+      { findings: [] },
       ALL_AVAILABLE,
       dispatch,
     );
@@ -98,7 +125,7 @@ describe("runParallelSpecialists", () => {
     expect(dispatch).toHaveBeenCalledTimes(1);
   });
 
-  it("dispatches both domains to the same agent when only one is eligible at all (no ANTHROPIC_API_KEY)", async () => {
+  it("dispatches every domain to the same agent when only one is eligible at all (no ANTHROPIC_API_KEY)", async () => {
     const onlyDeterministic = {
       isAvailable: (card: AgentCard) => card.provider === "deterministic",
     };
@@ -113,17 +140,18 @@ describe("runParallelSpecialists", () => {
     const results = await runParallelSpecialists(
       { findings: [invoiceFinding()] },
       { findings: [taskFinding()] },
+      { findings: [ticketFinding()] },
       onlyDeterministic,
       dispatch,
     );
 
-    expect(results).toHaveLength(2);
+    expect(results).toHaveLength(3);
     expect(results.every((r) => r.agentId === "deterministic-specialist")).toBe(
       true,
     );
   });
 
-  it("contributes nothing when no agent is eligible for either domain", async () => {
+  it("contributes nothing when no agent is eligible for any domain", async () => {
     const dispatch = vi.fn(
       async (
         task: AgentTask,
@@ -135,6 +163,7 @@ describe("runParallelSpecialists", () => {
     const results = await runParallelSpecialists(
       { findings: [invoiceFinding()] },
       { findings: [taskFinding()] },
+      { findings: [ticketFinding()] },
       NONE_AVAILABLE,
       dispatch,
     );
@@ -150,6 +179,7 @@ describe("runParallelSpecialists", () => {
 
     const results = await runParallelSpecialists(
       { findings: [invoiceFinding()] },
+      { findings: [] },
       { findings: [] },
       ALL_AVAILABLE,
       dispatch,
@@ -173,6 +203,7 @@ describe("runParallelSpecialists", () => {
     await runParallelSpecialists(
       { findings: [finding] },
       { findings: [] },
+      { findings: [] },
       ALL_AVAILABLE,
       dispatch,
     );
@@ -181,7 +212,7 @@ describe("runParallelSpecialists", () => {
     expect(passedFindings).toEqual([finding]);
   });
 
-  it("one specialist failing does not prevent the other from completing", async () => {
+  it("one specialist failing does not prevent the others from completing", async () => {
     const dispatch = vi.fn(
       async (
         task: AgentTask,
@@ -198,12 +229,40 @@ describe("runParallelSpecialists", () => {
     const results = await runParallelSpecialists(
       { findings: [invoiceFinding()] },
       { findings: [taskFinding()] },
+      { findings: [ticketFinding()] },
       ALL_AVAILABLE,
       dispatch,
     );
 
-    expect(results).toHaveLength(2);
+    expect(results).toHaveLength(3);
     const statuses = results.map((r) => r.status).sort();
-    expect(statuses).toEqual(["completed", "failed"]);
+    expect(statuses).toEqual(["completed", "completed", "failed"]);
+  });
+
+  it("ticket specialist failing does not prevent finance/delivery from completing", async () => {
+    const dispatch = vi.fn(
+      async (
+        task: AgentTask,
+        agent: AgentCard,
+        findings: readonly IntelligenceFinding[],
+      ) => {
+        if (task.requestedCapability === "interpret_ticket_risk") {
+          throw new Error("ticket specialist down");
+        }
+        return stubResult(task.id, agent, findings);
+      },
+    );
+
+    const results = await runParallelSpecialists(
+      { findings: [invoiceFinding()] },
+      { findings: [taskFinding()] },
+      { findings: [ticketFinding()] },
+      ALL_AVAILABLE,
+      dispatch,
+    );
+
+    expect(results).toHaveLength(3);
+    const statuses = results.map((r) => r.status).sort();
+    expect(statuses).toEqual(["completed", "completed", "failed"]);
   });
 });
