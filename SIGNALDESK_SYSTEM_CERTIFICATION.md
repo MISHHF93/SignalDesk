@@ -898,3 +898,84 @@ future pass: live-verify this fix once guest-session budget resets;
 close the four `VERIFIED_STATIC`/`OWNER_ACTION_REQUIRED` adversarial
 scenarios with real Anthropic credentials; decide the connector-
 connect/disconnect role-gating question this pass surfaced.
+
+### Pass 6 — 2026-08-24: closed three of the four remaining open items — live-verified the freshness fix, isolated the advisory lock, and proved transactional integrity with real live tests (a first for this environment)
+
+The guest-session rate limit reset. Rather than letting Pass 5's fix
+sit as `VERIFIED_STATIC` indefinitely, retried the two live checks it
+had been blocked on, then closed the one remaining adversarial scenario
+that didn't actually need external credentials.
+
+**Freshness/error-surfacing fix (Pass 5): `VERIFIED` live.** Signed in
+as guest, confirmed no live-status notice renders before the first poll
+(page.tsx's own initial banner is still honest at that moment), waited
+through a real 47-second poll cycle, and confirmed "Cards updated just
+now." rendered exactly as designed. Zero console errors. Screenshot
+captured.
+
+**Advisory lock, isolated from the rate limit this time: `VERIFIED`
+live.** Phase 4's attempt got crowded out by the rate limit firing
+first; this pass used a genuinely fresh, zero-history org and fired two
+concurrent "investigate" requests from two tabs of the same session.
+Result: tab 1 — "Investigation complete."; tab 2 — "An investigation is
+already running for this workspace. Please wait a moment and try
+again." — the lock's own distinct message, confirmed different from
+the rate-limit denial. Database confirms exactly one real
+`agent_collaborations` row from the concurrent pair, not two.
+
+**Transactional integrity under interruption: `VERIFIED` live — the
+one adversarial scenario this pass could close without external
+credentials.** Wrote `packages/persistence/tests/tenant-context.test.ts`
+(4 new tests) directly against `withTenantContext`, the one transaction
+wrapper every real Safe Action and persistence write in this app goes
+through — no prior test exercised it directly. Proves, against the
+real database: a successful callback commits; a thrown error rolls
+back a real insert; critically, **a genuine Postgres constraint
+violation on a _second_ statement rolls back an already-succeeded
+_first_ statement in the same transaction** (the strongest form of the
+"no partial writes" guarantee, and the one the adversarial scenario
+specifically asked for); an invalid `organizationId` is rejected before
+a transaction even opens. All 4 pass live.
+
+**Ran the complete live-database persistence suite for the first time
+this session (likely the first time in this environment at all) — all
+524 tests, 73 files, pass against the real Supabase dev database.**
+Every previous live run in this session targeted one test file or a
+small ad-hoc script; this was the full suite, unfiltered.
+
+**That full run surfaced a real, previously-unexecuted bug — in a test
+written yesterday, never actually run live until today.** `internal-
+tasks.test.ts`'s "cannot complete another organization's task" test
+passed `organizationId` from org A and `userId` from org B — a
+mismatched pair `resolveMembershipId` correctly rejects with "No
+membership found..." before ever reaching the task lookup the test
+meant to exercise. This combination can never occur through the real
+Server Action (both values always come from the same session), so the
+test wasn't actually proving cross-tenant isolation — it was
+incidentally proving membership resolution instead, and had been
+silently doing so since it was written, invisible because it only ever
+ran in `describe.skipIf(!DATABASE_URL)` mode without `DATABASE_URL`
+set. Rewrote it to the real attack surface: a legitimate org B session
+(self-consistent `organizationId`/`userId`, exactly what a real caller
+produces) attempting to complete a task id that belongs to org A.
+`FIXED_AUTONOMOUSLY` — re-run live, passes for the right reason now.
+
+**A genuine application of "fire the relevant Claude Code skills," at
+the user's explicit request**: ran the `security-review` skill against
+this pass's own diff (the new test file + the corrected test) before
+committing. Zero findings — test-only files, no production code path,
+fully parameterized queries, a correctness fix rather than a coverage
+weakening. Recorded as real evidence the diff is clean, not skipped.
+
+**Verified himself**: full repo-wide `typecheck`/`lint`/`format:check`
+green; the normal (no `DATABASE_URL`) `pnpm -r test` run correctly
+shows the new file skipping (73 files/524 tests, up from 72/520,
+6 run + 518 skipped in persistence); the live run (`DATABASE_URL` set)
+shows all 524 passing for real.
+
+**Genuinely remaining, not further closeable from this session**: the
+two adversarial scenarios needing real Anthropic credentials (prompt
+injection, specialist disagreement) — `OWNER_ACTION_REQUIRED`. The
+connector-connect/disconnect role-gating question Pass 5 surfaced is a
+product decision, not a bug — deliberately left for the user rather
+than decided unilaterally.

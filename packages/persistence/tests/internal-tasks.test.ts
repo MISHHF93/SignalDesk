@@ -236,28 +236,38 @@ describe.skipIf(!process.env.DATABASE_URL)(
     });
 
     it("completeInternalTask cannot complete another organization's task", async () => {
-      const orgA = await seedOrganization(pool);
+      const orgA = await seedMembership(pool);
       const orgB = await seedMembership(pool);
 
       const task = await createInternalTask(
         pool,
-        orgB.organizationId,
-        orgB.userId,
+        orgA.organizationId,
+        orgA.userId,
         {
-          title: "Org B's task",
-          idempotencyKey: "card-action:org-b:complete",
+          title: "Org A's task",
+          idempotencyKey: "card-action:org-a:complete",
         },
       );
 
+      // A legitimate org B session — both organizationId and userId
+      // genuinely belong to org B, the same as every real caller (the
+      // Server Action always derives both from one authenticated
+      // session, never a mismatched pair) — attempting to complete a
+      // task id that belongs to a different organization. This is the
+      // real attack surface a client-supplied foreign id represents;
+      // a mismatched organizationId/userId pair (which resolveMembershipId
+      // would reject before ever reaching the task lookup) is not
+      // something the real call site can produce and was the bug in an
+      // earlier version of this test.
       await expect(
-        completeInternalTask(pool, orgA.id, orgB.userId, {
+        completeInternalTask(pool, orgB.organizationId, orgB.userId, {
           taskId: task.id,
         }),
       ).rejects.toThrow(/not found/i);
 
       const status = await withTenantContext(
         pool,
-        orgB.organizationId,
+        orgA.organizationId,
         async (client) => {
           const result = await client.query(
             "select status from internal_tasks where id = $1",
