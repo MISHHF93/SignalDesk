@@ -7,6 +7,7 @@ import {
   listAllTasks,
   listGoals,
   listLeadsForAttention,
+  listOpenInternalTasks,
   listOverdueInvoices,
   listOverdueTasks,
   listRecentPayments,
@@ -14,6 +15,7 @@ import {
   listUnansweredExternalMessages,
   type DatabasePool,
   type GoalRecord,
+  type OpenInternalTask,
   type OrganizationBusinessProfile,
 } from "@signaldesk/persistence";
 import type { BusinessAttention } from "@signaldesk/application";
@@ -44,6 +46,13 @@ export interface TodaysAttention extends BusinessAttention {
    * `page.tsx` renders these directly (status computed from `metrics`
    * above via `evaluateGoal`) rather than re-fetching. */
   readonly goals: readonly GoalRecord[];
+  /**
+   * Every internal task still open — the other half of the loop a card's
+   * "create a task" quick action only ever started: without this, a task
+   * created from the One Page had nowhere to be seen or marked done again.
+   * `page.tsx` renders these via `TasksPanel`.
+   */
+  readonly openTasks: readonly OpenInternalTask[];
 }
 
 /**
@@ -76,6 +85,7 @@ export async function getTodaysAttention(
     goals,
     recentUnansweredMessages,
     stuckSupportTickets,
+    openTasks,
   ] = await Promise.all([
     listLeadsForAttention(db, session.organizationId),
     listOverdueInvoices(db, session.organizationId),
@@ -89,6 +99,7 @@ export async function getTodaysAttention(
     listGoals(db, session.organizationId),
     listUnansweredExternalMessages(db, session.organizationId),
     listStuckSupportTickets(db, session.organizationId),
+    listOpenInternalTasks(db, session.organizationId),
   ]);
 
   const metrics = computeBusinessMetrics({
@@ -123,5 +134,6 @@ export async function getTodaysAttention(
     businessProfile,
     metrics,
     goals,
+    openTasks,
   };
 }

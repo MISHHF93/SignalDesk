@@ -1,20 +1,25 @@
 import { CardActions } from "./card-actions";
+import { CardFeedbackButtons } from "./card-feedback-buttons";
 import { CardBadges, WhyDisclosure } from "./card-shell";
 import type { CardComponentProps } from "./card-types";
 
 /**
  * Mirrors `TaskRiskCard` exactly — no financial context, no owner
- * (messages have no owner/assignee concept in this phase), and no
- * `CardFeedbackButtons` (deliberately out of scope for this slice — see
- * docs/adr/0050-gmail-message-ingestion.md's out-of-scope list; wiring it
- * in would need a `card_feedback.card_type` check-constraint migration
- * this phase doesn't otherwise need). The counterparty is already named
- * in `card.summary` (see `evaluateMessageAwaitingReply`,
- * `@signaldesk/domain`), so no separate contact line is needed here.
+ * (messages have no owner/assignee concept in this phase). Re-checked
+ * 2026-08-23: this comment previously said `CardFeedbackButtons` was out
+ * of scope pending a `card_feedback.card_type` check-constraint
+ * migration — migration 0055 (`card_feedback_type_sync.sql`) already
+ * widened that constraint to cover `message_follow_up` (and every other
+ * real card type), so the prerequisite this note described is done; the
+ * button is wired in below like every other risk-finding card. The
+ * counterparty is already named in `card.summary` (see
+ * `evaluateMessageAwaitingReply`, `@signaldesk/domain`), so no separate
+ * contact line is needed here.
  */
 export function MessageFollowUpCard({
   card,
   createTaskAction,
+  recordCardFeedbackAction,
 }: CardComponentProps) {
   return (
     <article
@@ -35,6 +40,12 @@ export function MessageFollowUpCard({
           <WhyDisclosure card={card} />
           <CardActions card={card} createTaskAction={createTaskAction} />
         </div>
+        {recordCardFeedbackAction ? (
+          <CardFeedbackButtons
+            card={card}
+            recordCardFeedbackAction={recordCardFeedbackAction}
+          />
+        ) : null}
       </div>
     </article>
   );

@@ -295,8 +295,10 @@ ahead of the real Signal Fusion architecture.
 
 Real: severity ranking via the versioned priority formula;
 `card_feedback` (ADR 0032) is a real, live, count-based adaptive signal
-(useful/not-relevant reactions on 5 real card types) — genuinely "Adaptive
-Attention," just not yet used to recalibrate ranking. **Not built**:
+(useful/not-relevant reactions on 8 real card types as of 2026-08-23,
+was 5 when this line was first written — ADR 0032's own "Update
+2026-08-23" has the current list) — genuinely "Adaptive Attention," just
+not yet used to recalibrate ranking. **Not built**:
 Role-Aware Attention (no longer blocked on multi-member orgs existing —
 see Section 41 — but the ranking logic itself remains unbuilt), Attention
 Budget/Smart Escalation (blocked on Section 10's missing event fabric —
@@ -385,18 +387,25 @@ workflow beyond the single Safe Action (`create_internal_task`).
 
 ## 26. Safe Action Gateway — **PARTIAL**
 
-Real precedent, not the full state machine: `create_internal_task` is one
-real, audited, idempotent, tenant-scoped write path — every mutating
-action in the app extends this same pattern rather than a second one.
-Real "done means verified" precedent exists at the highest-stakes call
-site (`billing/checkout/return` refuses the client-side Stripe redirect
-and reads the webhook-synced row as truth). This session closed the one
-real idempotency gap found (`start-checkout.ts`'s double-submit race,
+Real precedent, not the full state machine: `create_internal_task` and
+`complete_internal_task` (2026-08-24) are two real, audited,
+tenant-scoped write paths on the same table — every mutating action in
+the app extends this same pattern rather than a second one.
+`complete_internal_task` is naturally idempotent by construction (its
+`UPDATE` only ever matches a currently-`open` row) rather than needing
+a caller-supplied idempotency key the way the create path does. Real
+"done means verified" precedent exists at the highest-stakes call site
+(`billing/checkout/return` refuses the client-side Stripe redirect and
+reads the webhook-synced row as truth) and now also at the ordinary
+one: `TasksPanel` never removes a task from view until the server
+actually confirms completion. This session closed the one real
+idempotency gap found (`start-checkout.ts`'s double-submit race,
 `docs/25-issue-audit.md` issue 19). **Not built**: the formal `PROPOSED→
 POLICY_CHECK→APPROVAL→EXECUTING→VERIFYING→VERIFIED/FAILED` state machine
-as named types — today's real write is a direct audited insert, not a
-staged pipeline; execution locks/compensation exist only at the one
-in-memory checkout guard, not generalized.
+as named types — today's real writes are direct audited inserts/updates,
+not a staged pipeline; execution locks/compensation exist only at the one
+in-memory checkout guard, not generalized; no quick action exists yet for
+reassigning an owner or replying inline.
 
 ## 27. Ownership Engine — **PARTIAL**
 
@@ -476,7 +485,7 @@ and is tested but unrendered anywhere), model-result caching, batching.
 ## 38. Evaluation Laboratory — **PARTIAL, mostly NOT_BUILT**
 
 Real: `card_feedback` (ADR 0032) — a genuine, live, count-based useful/
-not-relevant signal on 5 real card types, deliberately built as proof a
+not-relevant signal on 8 real card types (2026-08-23; was 5), deliberately built as proof a
 narrow real evaluation signal can exist before full infrastructure does.
 **Not built** (deliberately, per repeated reasoning in
 `docs/product-vision-backlog.md`'s Prompt 13): evaluation datasets,
@@ -623,9 +632,10 @@ connector supplying the data they'd need.
 
 The pipeline is real for the narrow slice that exists: every real finding
 already carries what/why/evidence, resolvable ownership feeds "who,"
-`recommendedActionTypes` feeds "what should happen," and the one real
-Safe Action (`create_internal_task`) is the "execute" step, with the
-checkout-lock fix this session strengthening its idempotency guarantee.
+`recommendedActionTypes` feeds "what should happen," and the two real
+Safe Actions (`create_internal_task`, `complete_internal_task`) are the
+"execute" and "close the loop" steps, with the checkout-lock fix this
+session strengthening the create path's idempotency guarantee.
 **Not built**: "what options exist" (no `DecisionOption` objects, Section
 22), "what can SignalDesk prepare" beyond one scenario type (Section 23).
 

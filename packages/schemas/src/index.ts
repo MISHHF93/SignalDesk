@@ -926,6 +926,20 @@ export function parseCreateInternalTaskInput(
   return createInternalTaskInputSchema.parse(input);
 }
 
+export const completeInternalTaskInputSchema = z.strictObject({
+  taskId: z.uuid(),
+});
+
+export type CompleteInternalTaskInput = z.infer<
+  typeof completeInternalTaskInputSchema
+>;
+
+export function parseCompleteInternalTaskInput(
+  input: unknown,
+): CompleteInternalTaskInput {
+  return completeInternalTaskInputSchema.parse(input);
+}
+
 // Goal Intelligence (Prompt 22, docs/product-vision-backlog.md, ADR 0035).
 // Redeclared here rather than imported from @signaldesk/semantics' own
 // METRIC_CATALOG — this package has no dependency on that one (the same

@@ -1,16 +1,19 @@
 import Link from "next/link";
 
 import { CardActions } from "./card-actions";
+import { CardFeedbackButtons } from "./card-feedback-buttons";
 import { CardBadges, WhyDisclosure } from "./card-shell";
 import type { CardComponentProps } from "./card-types";
 
 /**
- * Mirrors `TaskRiskCard`'s owner line but `MessageFollowUpCard`'s
- * omission of `CardFeedbackButtons` — `card_feedback_card_type_allowed`
- * (`packages/persistence/src/schema.ts`) is a stale check constraint that
- * already doesn't cover `ownership_gap`/`message_follow_up` either;
- * widening it is a pre-existing, disclosed gap unrelated to this
- * connector, not something to silently fix as a side effect here.
+ * Mirrors `TaskRiskCard`'s owner line and, since migration 0055
+ * (`card_feedback_type_sync.sql`) widened `card_feedback_card_type_allowed`
+ * to cover every real card type, its `CardFeedbackButtons` too — an
+ * earlier version of this comment claimed the constraint still blocked
+ * `ticket_risk`/`ownership_gap`/`message_follow_up`, which was true when
+ * written but stale by the time it was re-checked (2026-08-23): the
+ * constraint has covered all three since 0055 landed, the missing piece
+ * was only ever this component never rendering the button.
  *
  * The title links to `/tickets/{card.entity.id}` — the real
  * `support_tickets.id` `composeCards` already carries onto the card via
@@ -20,7 +23,11 @@ import type { CardComponentProps } from "./card-types";
  * when absent is a real, not just defensive, case (a card without a
  * single-entity reference has nothing to link to).
  */
-export function TicketRiskCard({ card, createTaskAction }: CardComponentProps) {
+export function TicketRiskCard({
+  card,
+  createTaskAction,
+  recordCardFeedbackAction,
+}: CardComponentProps) {
   return (
     <article
       className="attentionCard dynamicCard"
@@ -49,6 +56,12 @@ export function TicketRiskCard({ card, createTaskAction }: CardComponentProps) {
           <WhyDisclosure card={card} />
           <CardActions card={card} createTaskAction={createTaskAction} />
         </div>
+        {recordCardFeedbackAction ? (
+          <CardFeedbackButtons
+            card={card}
+            recordCardFeedbackAction={recordCardFeedbackAction}
+          />
+        ) : null}
       </div>
     </article>
   );

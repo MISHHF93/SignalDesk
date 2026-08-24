@@ -1,6 +1,7 @@
 "use client";
 
 import type { ActionProposal, IntelligenceCard } from "@signaldesk/schemas";
+import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { Button } from "../_components/button";
@@ -22,6 +23,7 @@ export function CardActions({
   card: IntelligenceCard;
   createTaskAction: CreateInternalTaskAction;
 }) {
+  const router = useRouter();
   const [status, setStatus] = useState<ActionStatus>("idle");
   const [message, setMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -53,6 +55,11 @@ export function CardActions({
               ).toLocaleTimeString()}.`
             : `Already created "${result.task.title}" — no duplicate was made.`,
         );
+        // "Your tasks" (TasksPanel) is server-rendered from data fetched
+        // before this submission — refresh so a freshly created task
+        // actually appears there without a manual reload, the same gap
+        // CreateGoalForm's own router.refresh() call closes for goals.
+        router.refresh();
       } else {
         setStatus("error");
         setMessage(`Action failed. ${result.error}`);

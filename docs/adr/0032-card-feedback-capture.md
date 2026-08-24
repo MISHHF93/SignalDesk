@@ -91,6 +91,20 @@ After a real submission, the buttons are replaced with "Feedback
 recorded — thanks," never anything implying ranking changed, since it
 doesn't yet.
 
+**Update (2026-08-23)**: the UI half this ADR's own 2026-08-21 update
+left open ("removes the landmine for whichever adds it next") is now
+done. `TicketRiskCard`, `MessageFollowUpCard`, and `OwnershipGapCard` all
+render `CardFeedbackButtons` now, using the exact same optional-prop
+pattern `TaskRiskCard` already established — `recordCardFeedbackAction`
+was already threaded through `renderCard` to every card type
+unconditionally, so no plumbing changed, only these three components'
+own JSX. Eight of the ten registered card types collect feedback today,
+not five or six: `lead_risk`, `invoice_risk`, `task_risk`,
+`payment_received`, `goal_variance`, `ownership_gap`, `message_follow_up`,
+`ticket_risk`. Still correctly excluded, unchanged: `agent_recommendation`
+(its own approve/dismiss feedback, ADR 0027) and `integration_health`
+(a status card, not a risk finding).
+
 ## Explicitly out of scope
 
 Ranking/calibration adjustment of any kind — this is capture only.

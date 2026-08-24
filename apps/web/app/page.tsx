@@ -11,7 +11,9 @@ import { BusinessMetricsPanel } from "./_components/business-metrics-panel";
 import { CommandCenterBoard } from "./_components/command-center-board";
 import { DailyBriefPanel } from "./_components/daily-brief-panel";
 import { GoalsPanel } from "./_components/goals-panel";
+import { TasksPanel } from "./_components/tasks-panel";
 import { approveAgentActionProposalAction } from "./_actions/approve-agent-action-proposal";
+import { completeInternalTaskAction } from "./_actions/complete-internal-task";
 import { createGoalAction } from "./_actions/create-goal";
 import { createInternalTaskAction } from "./_actions/create-internal-task";
 import { dismissAgentActionProposalAction } from "./_actions/dismiss-agent-action-proposal";
@@ -73,6 +75,7 @@ export default async function CommandCenterPage() {
       businessProfile,
       metrics,
       goals,
+      openTasks,
     },
     latestBrief,
   ] = await Promise.all([
@@ -158,6 +161,12 @@ export default async function CommandCenterPage() {
           recordCardFeedbackAction={recordCardFeedbackAction}
         />
       </section>
+
+      <TasksPanel
+        openTasks={openTasks}
+        completeInternalTaskAction={completeInternalTaskAction}
+        now={now}
+      />
 
       <DailyBriefPanel
         generateAction={generateDailyBriefAction}

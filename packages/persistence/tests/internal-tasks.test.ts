@@ -1,7 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { DatabasePool } from "../src/client";
-import { createInternalTask } from "../src/internal-tasks";
+import {
+  completeInternalTask,
+  createInternalTask,
+  listOpenInternalTasks,
+} from "../src/internal-tasks";
 import { withTenantContext } from "../src/tenant-context";
 import { getTestPool, seedMembership, seedOrganization } from "./support";
 
@@ -169,6 +173,131 @@ describe.skipIf(!process.env.DATABASE_URL)(
       );
 
       expect(status).toBe("completed");
+    });
+
+    it("completeInternalTask marks an open task completed and records a matching audit event", async () => {
+      const { organizationId, userId } = await seedMembership(pool);
+      const task = await createInternalTask(pool, organizationId, userId, {
+        title: "Follow up with Priya",
+        idempotencyKey: "card-action:lead-3:follow-up",
+      });
+
+      const completed = await completeInternalTask(
+        pool,
+        organizationId,
+        userId,
+        { taskId: task.id },
+      );
+
+      expect(completed.status).toBe("completed");
+      expect(completed.updated).toBe(true);
+
+      const [taskRow, auditRow] = await withTenantContext(
+        pool,
+        organizationId,
+        async (client) => {
+          const taskResult = await client.query(
+            "select status from internal_tasks where id = $1",
+            [task.id],
+          );
+          const auditResult = await client.query(
+            "select event_type, subject_id, outcome from audit_events where subject_id = $1 and event_type = 'internal_task.completed'",
+            [task.id],
+          );
+          return [taskResult.rows[0], auditResult.rows[0]];
+        },
+      );
+
+      expect(taskRow).toEqual({ status: "completed" });
+      expect(auditRow).toEqual({
+        event_type: "internal_task.completed",
+        subject_id: task.id,
+        outcome: "succeeded",
+      });
+    });
+
+    it("completeInternalTask is idempotent — completing an already-completed task is a no-op, not an error", async () => {
+      const { organizationId, userId } = await seedMembership(pool);
+      const task = await createInternalTask(pool, organizationId, userId, {
+        title: "Follow up with Priya",
+        idempotencyKey: "card-action:lead-4:follow-up",
+      });
+
+      const first = await completeInternalTask(pool, organizationId, userId, {
+        taskId: task.id,
+      });
+      const second = await completeInternalTask(pool, organizationId, userId, {
+        taskId: task.id,
+      });
+
+      expect(first.updated).toBe(true);
+      expect(second.updated).toBe(false);
+      expect(second.status).toBe("completed");
+    });
+
+    it("completeInternalTask cannot complete another organization's task", async () => {
+      const orgA = await seedOrganization(pool);
+      const orgB = await seedMembership(pool);
+
+      const task = await createInternalTask(
+        pool,
+        orgB.organizationId,
+        orgB.userId,
+        {
+          title: "Org B's task",
+          idempotencyKey: "card-action:org-b:complete",
+        },
+      );
+
+      await expect(
+        completeInternalTask(pool, orgA.id, orgB.userId, {
+          taskId: task.id,
+        }),
+      ).rejects.toThrow(/not found/i);
+
+      const status = await withTenantContext(
+        pool,
+        orgB.organizationId,
+        async (client) => {
+          const result = await client.query(
+            "select status from internal_tasks where id = $1",
+            [task.id],
+          );
+          return result.rows[0]?.status;
+        },
+      );
+
+      expect(status).toBe("open");
+    });
+
+    it("listOpenInternalTasks returns only this organization's open tasks, newest first", async () => {
+      const { organizationId, userId } = await seedMembership(pool);
+
+      const first = await createInternalTask(pool, organizationId, userId, {
+        title: "First task",
+        idempotencyKey: "card-action:list-1",
+      });
+      const second = await createInternalTask(pool, organizationId, userId, {
+        title: "Second task",
+        idempotencyKey: "card-action:list-2",
+      });
+      const third = await createInternalTask(pool, organizationId, userId, {
+        title: "Third task, already done",
+        idempotencyKey: "card-action:list-3",
+      });
+      await completeInternalTask(pool, organizationId, userId, {
+        taskId: third.id,
+      });
+
+      const otherOrg = await seedMembership(pool);
+      await createInternalTask(pool, otherOrg.organizationId, otherOrg.userId, {
+        title: "Other org's task",
+        idempotencyKey: "card-action:list-other",
+      });
+
+      const openTasks = await listOpenInternalTasks(pool, organizationId);
+
+      expect(openTasks.map((task) => task.id)).toEqual([second.id, first.id]);
     });
   },
 );

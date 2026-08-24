@@ -1,6 +1,7 @@
 "use client";
 
 import type { FilterDefinition, IntelligenceCard } from "@signaldesk/schemas";
+import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 
 import type {
@@ -197,6 +198,7 @@ export function CommandCenterBoard({
   simulateInvoicePaymentAction?: SimulateInvoicePaymentAction;
   recordCardFeedbackAction?: RecordCardFeedbackAction;
 }) {
+  const router = useRouter();
   const [activeFilters, setActiveFilters] = useState<
     readonly FilterDefinition[]
   >([]);
@@ -305,6 +307,15 @@ export function CommandCenterBoard({
         }
 
         setStatusMessage(describeCommandTaskResult(created, alreadyExisted));
+
+        if (created > 0) {
+          // Same gap CardActions' own router.refresh() closes: "Your
+          // tasks" is server-rendered from data fetched before this
+          // command ran, so a freshly created task needs a refresh to
+          // actually appear there.
+          router.refresh();
+        }
+
         return;
       }
 

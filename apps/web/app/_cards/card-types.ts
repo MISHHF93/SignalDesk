@@ -21,9 +21,14 @@ export interface CardComponentProps {
   readonly dismissAgentActionProposalAction?: DismissAgentActionProposalAction;
   /** Present for every card; only `InvoiceRiskCard` uses it (ADR 0031). */
   readonly simulateInvoicePaymentAction?: SimulateInvoicePaymentAction;
-  /** Present for every card; only the five deterministic-risk card types
-   * use it (ADR 0032) — `agent_recommendation` already has its own
+  /** Present for every card; used by every deterministic-risk card type
+   * (ADR 0032) — `agent_recommendation` already has its own
    * approve/dismiss feedback (ADR 0027), `integration_health` is a status
-   * card, not a risk finding to react to. */
+   * card, not a risk finding to react to. Re-checked 2026-08-23: this
+   * used to be "only the five" — `ticket_risk`, `ownership_gap`, and
+   * `message_follow_up` were left out pending migration 0055
+   * (`card_feedback_type_sync.sql`), which has since widened
+   * `card_feedback_card_type_allowed` to cover them; all three now use
+   * it too, so it's eight of the ten registered card types, not five. */
   readonly recordCardFeedbackAction?: RecordCardFeedbackAction;
 }

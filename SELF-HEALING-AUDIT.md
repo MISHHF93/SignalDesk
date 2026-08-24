@@ -5269,6 +5269,357 @@ environment), so the bug had no chance of surfacing through the visual
 sweeps that caught the CSS and accessibility issues; only a direct code
 read could have caught it.
 
+## Iteration 71 — 2026-08-23: closed out two bug-class sweeps by elimination — every `formatRelativeTime` call site and every `idempotencyKey` in the app checked, nothing left of either class
+
+User: "sure go ahead," approving the ticket-detail fix's commit/push
+(landed as `7d2c270`) and continuing the same evaluation. Applied the
+same discipline this session has repeated since Iteration 63 — a bug
+class found once deserves a full sweep, not just a fix where it was
+noticed — to both of this session's most recent finds.
+
+**`formatRelativeTime`: grepped every call site in `apps/web/app`.**
+Six real usages beyond the now-fixed `dueAt` case:
+`ticket.lastActivityAt`, `ticket.source.lastSyncedAt`,
+`card.freshness.asOf`, `metric.asOf`, `action.occurredAt`,
+`health.lastSuccessfulSyncAt` — every one of them a genuinely
+past-only value (a sync time, an occurrence, a freshness snapshot),
+correctly used. `dueAt` was the one true instance of the bug class in
+the whole app, not the first of several. Also checked for other
+forward-looking date fields that might have the _same_ problem through
+a _different_ formatter: `team-panel.tsx`'s invite `expiresAt` and
+`trust/page.tsx`'s capability-grant `expiresAt` both already handle
+their forward/backward distinction correctly today — the invite check
+is a plain boolean comparison, and the trust page explicitly branches
+on `expiresAt > now` before choosing between "Active until X"/"Expired
+X," never routing through the past-only formatter at all.
+
+**`idempotencyKey`: grepped every real usage across `apps/web/app`.**
+Seven call sites total. Five already confirmed stable in earlier
+iterations (`approve-agent-action-proposal.ts`, `card-actions.tsx`,
+`command-center-board.tsx`, and `create-goal-form.tsx`/`create-goal.ts`'s
+now-fixed pair) plus `run-agent-investigation.ts`'s `randomUUID()` —
+still present by design, now correctly inert because the advisory lock
+added in Iteration 61 is what actually prevents the double-run, not
+this key's stability. No other `randomUUID()`-as-idempotency-key
+instance exists anywhere in the app.
+
+**Verified himself, not just implemented.** Two negative results, both
+earned by exhaustive grep rather than assumed from having fixed one
+instance — turning "fixed the one I found" into "fixed the one that
+existed," a materially stronger claim for both bug classes this session
+already treated as high-priority.
+
+## Iteration 72 — 2026-08-23: a stale code comment led to a real feature gap, not just a doc fix — `CardFeedbackButtons` wired up for the three risk card types an already-landed migration had unblocked but nobody finished wiring
+
+User: "sure keep going," continuing the same evaluation. Reading
+`ticket-risk-card.tsx` for Iteration 70's due-date fix left one more
+thing unchecked: its own doc comment claimed
+`card_feedback_card_type_allowed` was a stale constraint still blocking
+feedback on `ownership_gap`/`message_follow_up` (and, by extension,
+`ticket_risk` itself). Checked the actual constraint in
+`packages/persistence/src/schema.ts` rather than trusting the comment —
+it already lists all three, alongside every other real card type.
+
+**Traced this to its actual source instead of guessing.** Found
+migration `0055_card_feedback_type_sync.sql`, and ADR 0032's own
+"Update (2026-08-21)" addendum, already fully explaining what happened:
+the constraint had drifted out of sync with `cardTypeSchema`, migration
+0055 fixed the database half, and that same addendum explicitly says so
+— "this just removes the landmine for whichever adds it next, it
+doesn't change which card types actually collect feedback today." The
+UI half was deliberately left as a named follow-up, not an oversight;
+`ticket-risk-card.tsx`'s comment (and `message-follow-up-card.tsx`'s
+identical claim) just never got updated to reflect that 0055 had
+already shipped.
+
+**Delivered the follow-up rather than just correcting the comment.**
+Confirmed nothing else was blocking it first: `card-feedback-buttons.tsx`
+carries no card-type restriction of its own, `record-card-feedback.ts`
+passes `cardType` straight through to the database with no independent
+check, and `registry.tsx`'s `renderCard` already threads
+`recordCardFeedbackAction` to every card type unconditionally — the
+only missing piece really was these three components' own JSX. Wired
+`<CardFeedbackButtons>` into `TicketRiskCard`, `MessageFollowUpCard`,
+and `OwnershipGapCard`, matching `TaskRiskCard`'s exact established
+pattern (`recordCardFeedbackAction` destructured, conditionally
+rendered at the end of `attentionFooter`). Eight of ten registered card
+types collect feedback now, not five or six.
+
+**Propagated the correction everywhere it was stated, not just where it
+was noticed** — the same discipline this session has applied
+repeatedly since Iteration 54: fixed the two components' own stale
+comments, `card-types.ts`'s shared prop doc ("only the five" → the real
+current set of eight, naming both still-legitimate exclusions by
+reason), added a new dated "Update (2026-08-23)" addendum to ADR 0032
+itself (following its own established addendum convention rather than
+rewriting the 2026-08-21 one), and corrected the two matching "5 real
+card types" mentions in `docs/feature-dictionary-coverage.md`.
+
+**Verified as far as this environment allows.** `pnpm -r typecheck`
+and monorepo-wide `pnpm lint` both clean; formatted, `pnpm format:check`
+clean. Live-checked the one thing actually checkable here: started the
+real dev server, signed in as guest, confirmed the Today page still
+renders with zero console errors after the registry-level changes — but
+none of the three affected card types can be populated with real data
+in this environment (no message/ticket/ownership-gap findings reachable
+without a real connector), so the buttons' actual on-screen appearance
+is unverified beyond the code path being structurally identical to
+`TaskRiskCard`'s already-proven one.
+
+## Iteration 73 — 2026-08-24: the premise didn't hold, so the fix targeted the real gap instead — a card's "create a task" quick action had nowhere for that task to be seen or finished again
+
+User asked, in effect, to make the platform faster to act on and to
+fix every button that's "read-only instead of clickable" — the kind of
+broad, unscoped ask this audit's own discipline treats as a prompt to
+investigate first, not a literal to-do list. Three parallel Explore
+passes covered: every interactive control in `_cards/`,
+`command-center-board.tsx`, and `page.tsx`; the Safe Action backend
+pattern end to end; and README/backlog/feature-dictionary honesty
+status. The dashboard came back clean — every card type's buttons
+already call a real Safe Action or are honestly disabled/omitted
+(`data-quality-panel.tsx`'s no-button-at-all pattern, the nav lock icon)
+— no dead `onClick`, no `href="#"`, no stub found anywhere in that
+scope. **A user complaint that doesn't match the code is still a real
+signal, just not the one it names** — the same discipline this audit
+applied to garbled or imprecise reports before: find what's actually
+true, then fix that.
+
+**What was actually true**: `create_internal_task` is this app's one
+real "quick action," but it was a one-way door. `CardActions` creates
+a task and shows a success toast — and that's the end of it. No
+surface anywhere reads `internal_tasks` back; the row just sits in the
+database, invisible, forever open. A user acting quickly on a card had
+no way to see what they'd just created, and no way to mark it done
+without reaching into the database directly. That's the literal shape
+of "I couldn't act on this quickly" even though every button involved
+was already real.
+
+**Closed the loop, following the existing pattern exactly rather than
+inventing a new one.** Added `complete_internal_task` as the Safe
+Action gateway's second real write, in the exact shape
+`createInternalTask` already established
+(`packages/persistence/src/internal-tasks.ts`): tenant-scoped via
+`withTenantContext`, a matching `audit_events` row
+(`internal_task.completed`), naturally idempotent by construction (the
+`UPDATE` only ever matches a currently-`open` row, so no caller-
+supplied idempotency key is needed the way the create path needs one).
+Added `listOpenInternalTasks` as the read half. Wired both into a new
+`TasksPanel` (`apps/web/app/_components/tasks-panel.tsx`) rendered on
+`/` between the priority queue and the Daily Brief — every open task,
+with a real one-click "Mark done" that never removes the row from view
+until the server actually confirms it, the same "no optimistic Done"
+rule `CardActions` already followed for creation.
+
+**Found and fixed a second, related gap while wiring the first: three
+task-creating call sites never refreshed the page, so a freshly
+created task wouldn't have appeared in the new panel either.**
+`CardActions`, `CommandCenterBoard`'s bulk "create a task for these"
+command, and `AgentRecommendationCard`'s Approve button all create a
+real task but none called `router.refresh()` — harmless before (nothing
+rendered the result), a real gap now. `CreateGoalForm` already had the
+exact fix for the identical problem (server-rendered list, client
+mutation); applied the same `router.refresh()` call and comment to all
+three, on success only.
+
+**Verified further than most iterations this session could manage**,
+because the gap was reachable without a real connector (unlike the
+message/ticket/ownership-gap cards Iteration 72 couldn't populate).
+`pnpm -r typecheck`, monorepo `pnpm lint`, and `pnpm format:check` all
+clean; `pnpm -r test` green (the new persistence tests — completion,
+idempotent replay, cross-tenant denial, `listOpenInternalTasks`
+filtering — skip themselves under `describe.skipIf(!DATABASE_URL)`
+like every other live-DB suite in this environment, but do exist,
+mirroring the existing `createInternalTask` test file's exact
+structure). Then went further than a static check: found this
+session's dev server already running persistently on port 3100 (not
+3000 — a `next dev`'s own multi-instance detection caught that a
+second `pnpm dev` would have collided, port 3000 itself belonging to
+an unrelated CareDroid project on this machine), signed in as guest
+via a real headless-Chromium session, and — since a zero-connector
+guest workspace has no card with a recommended action to click —
+seeded one real `internal_tasks` row directly against the live dev
+Supabase database using the identical schema/audit-event shape
+`createInternalTask` itself writes (resolving the guest's own
+organization id via the same `resolve_memberships_for_identity`
+`SECURITY DEFINER` function the real sign-in path uses, not a
+bypass). Reloaded: `TasksPanel` rendered the seeded task. Clicked
+"Mark done" for real: the row disappeared from the UI, zero console
+errors, and a direct database read afterward confirmed
+`status = 'completed'` and a real `internal_task.completed` audit
+event with `outcome: 'succeeded'` — the complete loop, verified against
+a real database, not just typechecked.
+
+**Propagated the correction to every place that claimed the old
+count.** README's "Actions, approvals, and audit trail" and "AI
+orchestration" rows ("`create_internal_task` is a real... write" / "one
+safe database-backed action") and `docs/feature-dictionary-coverage.md`
+sections 26 (Safe Action Gateway) and 54 (Next-Best-Action
+Intelligence) all named exactly one real write; all four now name two
+and describe what closes.
+
+## Iteration 74 — 2026-08-24: closed out Iteration 73's own open item by elimination — `/profile`, `/billing`, `/agents`, and `/trust` swept and confirmed clean, and the reassign-owner/reply-inline question resolved as a user decision, not a build
+
+Continuing the same session ("continue"). Iteration 73 left one item
+genuinely open: its dead-control sweep only covered `/` — `/profile`,
+`/billing`, `/agents`, and `/trust` were never checked. Swept all four
+this iteration, past a shallow grep (which came back clean but can't
+catch subtler issues) into a manual pass over every button, form, and
+status label. Also clean: `/profile`'s six forms (business profile,
+preferences, delete-org, team invite/revoke, AI provider connect/
+disconnect) all call real, substantive server actions with real error/
+success feedback; the "Editing planned" Personal-details badge and
+Security section's MFA/social-sign-in items correctly render no button
+at all, matching `data-quality-panel.tsx`'s own honest-disable
+precedent. `/billing`'s six controls all call real Stripe APIs behind
+advisory-lock double-submit protection, and `checkout/[planKey]` shows
+an honest "Billing isn't configured yet" notice rather than a dead
+form when Stripe credentials are absent. `/agents` and `/trust` are
+pure read-only disclosure pages — no buttons or forms at all — and
+both correctly show "No" for whether the Agent Fabric can act
+autonomously (`canExecute` is `z.literal(false)` in the schema itself,
+not just convention). Across the whole app, Iteration 73's task-
+completion loop remains the one real gap found and fixed this session.
+
+**The other half of Iteration 73's open item — reassign-owner and
+reply-inline — turned out not to be a build question at all.**
+Investigated what either would actually take: every connector in the
+catalog carries `actionsImplemented: false` (`packages/integrations/src/index.ts`)
+— there is no write-back path to any external system anywhere in this
+codebase, only one-way sync. Reassigning a synced lead's owner or
+replying to a synced ticket only means something if it changes the
+record in Asana/HubSpot/Zendesk itself; SignalDesk can't do that for
+any connector today. This is already named and deliberately deferred
+in `docs/product-vision-backlog.md`'s "Bring-your-out AI key..." entry
+("gated on the separate, deliberate `canExecute`/write-action trust
+decision the Agent Fabric was built around"), not an oversight this
+audit discovered. Presented the real tradeoff to the user directly
+(stop here / scope one real external write / add a local-only
+non-synced annotation instead) rather than picking one silently —
+this is exactly the kind of scope decision the standing instructions
+say to record rather than build past. **User chose to stop here.**
+Recorded, not built: the right call, since a rushed external write
+is a materially bigger blast-radius change than anything else this
+session touched, and this repo's own stated priority order ranks
+authorization/action safety above shipping speed.
+
+## Iteration 75 — 2026-08-24: a repository-wide Customer POV / Product Reality re-audit, run against a much more exhaustive checklist than Iterations 20-35 used — found the core claim already resolved, and got live proof of it against a fresh production build rather than trusting the old screenshots
+
+User issued a large, fully-specified "Customer POV / Product Reality
+Audit" brief — personas (customer user / customer admin / operator-
+developer), a long leak-pattern taxonomy (`.env`, client secrets,
+RAG/embeddings/MCP/vector-database/queue/cron/worker/model-router
+terminology, raw stack traces, etc.), and a required final-report
+format — using the exact same Slack "Developer setup required" screen
+as the motivating example that opened Iteration 20 earlier today.
+
+**The premise needed checking against what's actually in the repo
+before doing anything, same discipline as every iteration since.**
+Before writing a line of code, grepped this very file for prior
+"Customer POV" work and found an entire existing thread: Iterations
+20-35 (2026-08-23) already ran essentially this exact audit —
+`isLocalDevelopment()` was added specifically to stop
+`connector-detail-content.tsx` (the shared renderer behind all 14 real
+connectors' detail pages, including Slack) from showing raw
+`.env.local`/client-ID/client-secret/"restart the dev server"
+instructions to anyone but a real local developer; the same gate was
+extended to the OAuth-provider sign-in hint on `/login`/`/signup`; the
+`/integrations` list page, `/trust`, `/agents`, `/support`,
+`/profile`, `/billing`, `/briefs`, `/tickets/[id]`, legal pages, data
+export, and all 14 OAuth callback routes were each read and fixed
+where they leaked engineering vocabulary, raw IDs, or internal
+citations; global `error.tsx`/`global-error.tsx`/`not-found.tsx`
+boundaries were added (none existed before); a real scripted
+sign-up→connect→Today E2E test was written
+(`e2e/signup-to-integration.spec.ts`); and a real raw-Stripe-credential
+leak plus a recurring raw-UUID/hash-and-slug leak class were found and
+fixed later in the same thread (Iterations 30, 35). This session's own
+Iterations 73-74 (earlier today) independently swept `/profile`,
+`/billing`, `/agents`, and `/trust` again and found them clean —
+consistent with, not contradicting, that history.
+
+**So this pass's actual job was narrower than "execute the audit from
+scratch": verify the prior fixes still hold, close the one genuinely
+open item, and run the user's more exhaustive new checklist — which is
+real, additive value (RAG/embeddings/MCP/vector-database/model-router/
+queue-concurrency/cron-schedule terminology was never explicitly
+grepped for before) — against a repo that turned out to already be in
+good shape.**
+
+**Closed the one standing open item.** The prior thread's last "Next
+up" note flagged `ticket-detail-content.tsx`'s `getSourceSystemLabel()`
+fix as unverified against a real synced ticket (no guest-reachable path
+creates one). Read `getSourceSystemLabel` itself
+(`packages/integrations/src/index.ts`): a real three-step fallback
+(catalog connector name → a non-catalog label map → the raw slug only
+as a last resort for a genuinely unknown system) — for any ticket
+actually synced from Zendesk, the first branch always resolves to
+"Zendesk," never a raw slug. Live verification against a real
+Zendesk-synced ticket remains the one thing this environment still
+can't do (same limitation recorded since Iteration 22), but the code
+path itself is now confirmed correct, not just present.
+
+**Ran the new terminology sweep the user's checklist specifically
+added — clean.** Grepped every `.tsx` file under `apps/web/app` for
+RAG, embeddings, vector database, Agent Fabric, semantic layer,
+retrieval pipeline, event bus, canonical mapper, tool registry, model
+router, queue concurrency, cron schedule, webhook endpoint, feature
+flag, `.env`, `localhost`, `pnpm`/`npm`, migration, Vercel, Supabase,
+stack trace, MCP, Redis, queue, cron, worker. Every hit was one of:
+a `/**`or `//` code comment (never rendered); a `NEXT_PUBLIC_*`
+publishable-key read (Stripe's own publishable keys are meant to be
+client-side, not a secret); the already-`isLocalDevelopment()`-gated
+dev-only content from Iterations 20/21 (confirmed by reading each
+gate, not assumed); the `/agents` page's own "Agent Fabric" language,
+which is that page's established `ADMIN_APPROPRIATE` classification
+from Iteration 20 (nav-excluded, "Never shown to ordinary members");
+or `/legal/privacy`'s subprocessor disclosure (Supabase/Vercel/Stripe/
+Anthropic), which is the legally-correct place to name real
+infrastructure vendors, not a leak. Zero new `ACCIDENTAL_PRODUCT_LEAK`
+instances found. Also re-read `ai-provider-panel.tsx`,
+`business-profile-form.tsx`, and `preferences-form.tsx` fresh against
+the user's BYO-AI-POV and settings-POV sections specifically — all
+three already speak in plain business/customer language ("Connect your
+own Anthropic key," "Expected response time," "Morning brief") with no
+infrastructure concepts a customer would need to understand to use
+them.
+
+**Got real proof instead of trusting the existing screenshots in this
+file.** Ran a genuine `next build` (not `next dev` — the actual
+`NODE_ENV=production` boundary `isLocalDevelopment()` keys off),
+served it on a clean port, signed in as a real guest via headless
+Chromium, and navigated to the exact page and connector this whole
+thread started from. Live result: "Slack connection is temporarily
+unavailable / This isn't something you need to do anything about —
+SignalDesk hasn't finished setting up Slack connections for this
+workspace yet. Your other connected systems and existing data are
+unaffected." — scanned the full rendered page text against every leak
+pattern (`.env`, client secret/id, localhost, "restart the server",
+"developer app", `api.slack.com`, `pnpm`/`npm`) and found none; same
+result on `/login` and a second connector (HubSpot); zero console
+errors across all three pages. This is the first time in this audit
+thread a _fresh_ production build (not a build from earlier in the
+day, not `next dev`) was used for the verification — closing the exact
+category of false-negative Iteration 21 already caught once with a
+stale build.
+
+**`OWNER_ACTION_REQUIRED` items, unchanged and correctly still
+unbuilt-from-code:** real Slack/HubSpot/etc. developer-app credentials
+for this deployment, custom SMTP for Supabase Auth (dev confirmed
+unconfigured, production unconfirmed — `LAUNCH-BLOCKERS.md` #8), and
+every other external registration `LAUNCH-BLOCKERS.md` already tracks.
+None of these can or should be worked around with a fabricated
+customer-facing state — the existing "temporarily unavailable" copy is
+the correct terminal state until they're real.
+
+**Verified himself, not just implemented:** a genuine `next build`
+succeeded (63 routes compiled); the resulting production server was
+driven live end to end as described above; `git status` after
+confirmed no stray verification artifacts were left in the repo. No
+source file needed a code change this pass — the fixes this audit
+would have made were already made in Iterations 20-35, and today's
+value was independent re-verification plus a wider terminology check
+that came back clean, not a re-fix of the same ground.
+
 ## Next up (priority order for future iterations)
 
 1. **The Customer POV sweep (this window, Iteration 35 the latest
@@ -5332,6 +5683,13 @@ read could have caught it.
    accurately described and untouched by this session's Resend
    error-wrapping fix, a different part of the same file. Worth
    re-running after the next batch of fixes, not before.
+9. ~~Iteration 73's dead-control inventory only covered `/`~~ —
+   **resolved, Iteration 74**: `/profile`, `/billing`, `/agents`, and
+   `/trust` swept and confirmed clean; reassign-owner/reply-inline
+   confirmed blocked on the deliberate, already-deferred external-write
+   trust decision (not a build gap), and the user chose to stop there
+   rather than open that scope now. Revisit only if a future request
+   explicitly wants to scope a real external write for one connector.
 
 ## `OWNER_ACTION_REQUIRED` (cannot be resolved autonomously)
 

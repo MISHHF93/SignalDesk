@@ -632,6 +632,65 @@ input {
   font-size: 0.85rem;
 }
 
+.tasksSection {
+  margin-bottom: 2.15rem;
+  border-radius: 1rem;
+  padding: 1.15rem 1.3rem;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.tasksList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.taskRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--line-soft);
+}
+
+.taskRow:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.taskRowMain {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.taskTitle {
+  font-size: 0.85rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.taskMeta {
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.taskRowError {
+  font-size: 0.68rem;
+  color: var(--ember-ink);
+}
+
+.taskCompleteButton {
+  flex-shrink: 0;
+}
+
 .goalForm {
   display: flex;
   flex-direction: column;

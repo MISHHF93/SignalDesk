@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { Button } from "../_components/button";
@@ -24,6 +25,7 @@ export function AgentRecommendationCard({
   approveAgentActionProposalAction,
   dismissAgentActionProposalAction,
 }: CardComponentProps) {
+  const router = useRouter();
   const [status, setStatus] = useState<ActionStatus>("idle");
   const [message, setMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -47,6 +49,13 @@ export function AgentRecommendationCard({
             ? "Task created."
             : "Already created — no duplicate was made.",
         );
+        // Same gap CardActions' own router.refresh() closes: "Your
+        // tasks" is server-rendered from data fetched before this
+        // approval, so the newly created task needs a refresh to
+        // actually appear there.
+        if (result.created) {
+          router.refresh();
+        }
       } else {
         setStatus("error");
         setMessage(`Action failed. ${result.error}`);

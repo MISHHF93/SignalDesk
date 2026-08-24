@@ -3,6 +3,7 @@ import type {
   ParseCommandResult,
 } from "@signaldesk/application";
 import type {
+  CompleteInternalTaskInput,
   CreateGoalInput,
   CreateInternalTaskInput,
   IntelligenceCard,
@@ -35,6 +36,26 @@ export type CreateInternalTaskActionResult =
 export type CreateInternalTaskAction = (
   input: CreateInternalTaskInput,
 ) => Promise<CreateInternalTaskActionResult>;
+
+export type CompleteInternalTaskActionResult =
+  | {
+      readonly ok: true;
+      readonly task: {
+        readonly id: string;
+        readonly title: string;
+        /**
+         * `false` when the task was already completed before this call —
+         * see `CreateInternalTaskActionResult.task.created`'s own doc
+         * comment for why this distinction matters to the caller.
+         */
+        readonly updated: boolean;
+      };
+    }
+  | { readonly ok: false; readonly error: string };
+
+export type CompleteInternalTaskAction = (
+  input: CompleteInternalTaskInput,
+) => Promise<CompleteInternalTaskActionResult>;
 
 export type ParseCommandAction = (
   rawText: string,
