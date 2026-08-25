@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+import type { PoolClient } from "pg";
+
 import type { DatabasePool } from "./client";
 import { withTenantContext } from "./tenant-context";
 
@@ -60,35 +62,52 @@ export interface RecordInternalCostEventInput {
   readonly metadata?: Record<string, unknown>;
 }
 
+/**
+ * The actual insert, given an already tenant-scoped client — mirrors
+ * `insertAuditEvent`'s own split (audit-events.ts): shared by
+ * `recordInternalCostEvent` (opens its own transaction) and
+ * `recordOutcome` (agent-gateway.ts), which composes this with
+ * `insertAgentTaskResultWithClient`/`insertAuditEvent` in one transaction
+ * — see `insertAgentTaskResultWithClient`'s own doc comment for the real
+ * bug this closes.
+ */
+export async function recordInternalCostEventWithClient(
+  client: PoolClient,
+  organizationId: string,
+  input: RecordInternalCostEventInput,
+): Promise<InternalCostEvent> {
+  const result = await client.query<InternalCostEventRow>(
+    `insert into public.internal_cost_events
+       (id, organization_id, event_type, quantity, estimated_cost_cents, metadata)
+     values ($1, $2, $3, $4, $5, $6)
+     returning id, organization_id, event_type, quantity, estimated_cost_cents, metadata, occurred_at`,
+    [
+      randomUUID(),
+      organizationId,
+      input.eventType,
+      input.quantity ?? 1,
+      input.estimatedCostCents ?? null,
+      JSON.stringify(input.metadata ?? {}),
+    ],
+  );
+
+  const row = result.rows[0];
+
+  if (!row) {
+    throw new Error("internal_cost_events insert returned no row");
+  }
+
+  return toInternalCostEvent(row);
+}
+
 export async function recordInternalCostEvent(
   pool: DatabasePool,
   organizationId: string,
   input: RecordInternalCostEventInput,
 ): Promise<InternalCostEvent> {
-  return withTenantContext(pool, organizationId, async (client) => {
-    const result = await client.query<InternalCostEventRow>(
-      `insert into public.internal_cost_events
-         (id, organization_id, event_type, quantity, estimated_cost_cents, metadata)
-       values ($1, $2, $3, $4, $5, $6)
-       returning id, organization_id, event_type, quantity, estimated_cost_cents, metadata, occurred_at`,
-      [
-        randomUUID(),
-        organizationId,
-        input.eventType,
-        input.quantity ?? 1,
-        input.estimatedCostCents ?? null,
-        JSON.stringify(input.metadata ?? {}),
-      ],
-    );
-
-    const row = result.rows[0];
-
-    if (!row) {
-      throw new Error("internal_cost_events insert returned no row");
-    }
-
-    return toInternalCostEvent(row);
-  });
+  return withTenantContext(pool, organizationId, (client) =>
+    recordInternalCostEventWithClient(client, organizationId, input),
+  );
 }
 
 export interface InternalCostSummary {

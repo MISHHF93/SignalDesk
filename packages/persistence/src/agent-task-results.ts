@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
 
+import type { PoolClient } from "pg";
+
 import type { DatabasePool } from "./client";
 import type { DraftedContent } from "./agent-collaborations";
 import { withTenantContext } from "./tenant-context";
@@ -115,6 +117,51 @@ function toRecord(row: AgentTaskResultRow): AgentTaskResultRecord {
 }
 
 /**
+ * The actual insert, given an already tenant-scoped client — mirrors
+ * `insertAuditEvent`'s own split (audit-events.ts): shared by
+ * `insertAgentTaskResult` (opens its own transaction) and any caller that
+ * must write this in the SAME transaction as other state, e.g.
+ * `recordOutcome` (agent-gateway.ts), which composes this with
+ * `recordInternalCostEventWithClient`/`insertAuditEvent` in one
+ * transaction — a real bug found by review: those three writes used to
+ * each open their own independent transaction, so a transient failure on
+ * the last of the three could leave a "completed" task result and a real
+ * cost event committed while the audit event never wrote, and the
+ * caller's own catch-and-retry then inserted a *second*, contradictory
+ * "failed" task result and cost event on top of the first.
+ */
+export async function insertAgentTaskResultWithClient(
+  client: PoolClient,
+  organizationId: string,
+  input: InsertAgentTaskResultInput,
+): Promise<AgentTaskResultRecord> {
+  const result = await client.query<AgentTaskResultRow>(
+    `insert into agent_task_results (
+       id, organization_id, collaboration_id, agent_id, capability, status,
+       claims, evidence_ids, confidence_basis_points, started_at, completed_at,
+       drafted_content
+     ) values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12::jsonb)
+     returning ${TASK_RESULT_COLUMNS}`,
+    [
+      randomUUID(),
+      organizationId,
+      input.collaborationId,
+      input.agentId,
+      input.capability,
+      input.status,
+      JSON.stringify(input.claims),
+      JSON.stringify(input.evidenceIds),
+      input.confidenceBasisPoints,
+      input.startedAt,
+      input.completedAt,
+      input.draftedContent ? JSON.stringify(input.draftedContent) : null,
+    ],
+  );
+
+  return toRecord(result.rows[0]!);
+}
+
+/**
  * The durable evidence one specialist call actually happened — written by
  * AgentGatewayService.dispatch (apps/web/app/_lib/agent-gateway.ts)
  * immediately after a provider call resolves, whether it succeeded, failed,
@@ -127,32 +174,9 @@ export async function insertAgentTaskResult(
   organizationId: string,
   input: InsertAgentTaskResultInput,
 ): Promise<AgentTaskResultRecord> {
-  return withTenantContext(pool, organizationId, async (client) => {
-    const result = await client.query<AgentTaskResultRow>(
-      `insert into agent_task_results (
-         id, organization_id, collaboration_id, agent_id, capability, status,
-         claims, evidence_ids, confidence_basis_points, started_at, completed_at,
-         drafted_content
-       ) values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12::jsonb)
-       returning ${TASK_RESULT_COLUMNS}`,
-      [
-        randomUUID(),
-        organizationId,
-        input.collaborationId,
-        input.agentId,
-        input.capability,
-        input.status,
-        JSON.stringify(input.claims),
-        JSON.stringify(input.evidenceIds),
-        input.confidenceBasisPoints,
-        input.startedAt,
-        input.completedAt,
-        input.draftedContent ? JSON.stringify(input.draftedContent) : null,
-      ],
-    );
-
-    return toRecord(result.rows[0]!);
-  });
+  return withTenantContext(pool, organizationId, (client) =>
+    insertAgentTaskResultWithClient(client, organizationId, input),
+  );
 }
 
 const MAX_AGENT_TASK_RESULTS = 500;

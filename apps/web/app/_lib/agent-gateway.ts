@@ -16,10 +16,10 @@ import {
 } from "@signaldesk/intelligence";
 import {
   assertGrantActive,
-  insertAgentTaskResult,
+  insertAgentTaskResultWithClient,
   insertAuditEvent,
   mintCapabilityGrant,
-  recordInternalCostEvent,
+  recordInternalCostEventWithClient,
   withTenantContext,
   type AgentDelegationGrant,
   type DatabasePool,
@@ -75,6 +75,24 @@ export class CapabilityEscalationError extends Error {
   }
 }
 
+/**
+ * Persists the task result, the cost event (when applicable), and the
+ * audit event as one atomic transaction — not three independent writes.
+ *
+ * Real bug found by review: these three used to each open their own
+ * transaction. A transient failure on the last of the three (the audit
+ * write) left the first two committed — a real "completed" task result
+ * and a real cost event on record — while the caller's own catch block
+ * (both `dispatch`/`dispatchMessageDraft`/`dispatchContentDraft` call
+ * `recordOutcome` a second time on any thrown error, including one thrown
+ * by this very function) then inserted a *second*, contradictory "failed"
+ * task result and cost event on top of the first, and wrote an audit
+ * event claiming the task failed when the specialist actually completed
+ * successfully. Wrapping all three in one `withTenantContext` transaction
+ * means a failure on any of them rolls back all of them, so the retry
+ * starts from a clean slate instead of layering a second write on top of
+ * a partial first one.
+ */
 async function recordOutcome(
   deps: AgentGatewayDeps,
   task: AgentTask,
@@ -93,47 +111,47 @@ async function recordOutcome(
 ): Promise<void> {
   const completedAt = new Date();
 
-  await insertAgentTaskResult(deps.pool, deps.organizationId, {
-    collaborationId: deps.collaborationId,
-    agentId: agent.id,
-    capability: task.requestedCapability,
-    status: outcome.status,
-    claims: outcome.result?.claims ?? [],
-    evidenceIds: outcome.result?.evidenceIds ?? [],
-    confidenceBasisPoints:
-      outcome.result === null
-        ? null
-        : Math.round(outcome.result.confidence * 10_000),
-    startedAt,
-    completedAt,
-    draftedContent: outcome.result?.draftedContent ?? null,
-  });
-
-  // Real unit-economics instrumentation (Prompt 36, docs/product-vision-
-  // backlog.md, ADR 0045) — only when a specialist backed by the real,
-  // cost-incurring Claude provider was actually invoked
-  // (`agent.provider === "anthropic"` AND the call was really attempted,
-  // not rejected before reaching the provider). The deterministic
-  // specialist has zero marginal cost, so recording an event for it would
-  // be noise, not a real data point; a policy-denied task never touches
-  // the provider at all, so recording one there would misrepresent a
-  // denial as an incurred cost. No per-token pricing table exists yet, so
-  // `estimatedCostCents` stays honestly null rather than a fabricated
-  // figure.
-  if (agent.provider === "anthropic" && outcome.providerCallAttempted) {
-    await recordInternalCostEvent(deps.pool, deps.organizationId, {
-      eventType: "claude_specialist_invocation",
-      metadata: {
-        agentId: agent.id,
-        capability: task.requestedCapability,
-        outcome: outcome.status,
-        latencyMs: completedAt.getTime() - startedAt.getTime(),
-      },
+  await withTenantContext(deps.pool, deps.organizationId, async (client) => {
+    await insertAgentTaskResultWithClient(client, deps.organizationId, {
+      collaborationId: deps.collaborationId,
+      agentId: agent.id,
+      capability: task.requestedCapability,
+      status: outcome.status,
+      claims: outcome.result?.claims ?? [],
+      evidenceIds: outcome.result?.evidenceIds ?? [],
+      confidenceBasisPoints:
+        outcome.result === null
+          ? null
+          : Math.round(outcome.result.confidence * 10_000),
+      startedAt,
+      completedAt,
+      draftedContent: outcome.result?.draftedContent ?? null,
     });
-  }
 
-  await withTenantContext(deps.pool, deps.organizationId, (client) =>
-    insertAuditEvent(client, deps.organizationId, {
+    // Real unit-economics instrumentation (Prompt 36, docs/product-vision-
+    // backlog.md, ADR 0045) — only when a specialist backed by the real,
+    // cost-incurring Claude provider was actually invoked
+    // (`agent.provider === "anthropic"` AND the call was really attempted,
+    // not rejected before reaching the provider). The deterministic
+    // specialist has zero marginal cost, so recording an event for it
+    // would be noise, not a real data point; a policy-denied task never
+    // touches the provider at all, so recording one there would
+    // misrepresent a denial as an incurred cost. No per-token pricing
+    // table exists yet, so `estimatedCostCents` stays honestly null
+    // rather than a fabricated figure.
+    if (agent.provider === "anthropic" && outcome.providerCallAttempted) {
+      await recordInternalCostEventWithClient(client, deps.organizationId, {
+        eventType: "claude_specialist_invocation",
+        metadata: {
+          agentId: agent.id,
+          capability: task.requestedCapability,
+          outcome: outcome.status,
+          latencyMs: completedAt.getTime() - startedAt.getTime(),
+        },
+      });
+    }
+
+    await insertAuditEvent(client, deps.organizationId, {
       actorKind: "agent",
       actorAgentId: agent.id,
       eventType: "agent.task.completed",
@@ -144,8 +162,8 @@ async function recordOutcome(
         capability: task.requestedCapability,
         collaborationId: deps.collaborationId,
       },
-    }),
-  );
+    });
+  });
 }
 
 /**
