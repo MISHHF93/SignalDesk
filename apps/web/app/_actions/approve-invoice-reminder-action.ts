@@ -1,5 +1,6 @@
 "use server";
 
+import type { Invoice } from "@signaldesk/domain";
 import {
   sendQuickBooksInvoiceReminder,
   UpstreamProviderError,
@@ -49,29 +50,28 @@ const MAX_AGENT_INVOICE_REMINDERS_PER_DAY = 20;
 /**
  * Attempts (or resumes) the real QuickBooks invoice-reminder send for one
  * already-approved collaboration, and records the outcome. Same shape as
- * `approve-task-nudge-action.ts`'s `attemptSend`.
+ * `approve-task-nudge-action.ts`'s `attemptSend`. Takes the invoice
+ * already fetched by the caller rather than re-fetching it — the fresh-
+ * approval path already needed it for the Pre-Flight Policy Audit, so
+ * refetching here was a real redundant DB round trip on every approval
+ * (found by review); the resume path fetches it once, immediately before
+ * calling this.
  */
 async function attemptSend(
   db: DatabasePool,
   organizationId: string,
   userId: string,
   collaborationId: string,
-  invoiceId: string,
+  invoice: Invoice,
   draftedContent: {
     readonly subject?: string | undefined;
     readonly body: string;
   },
 ): Promise<ApproveInvoiceReminderProposalActionResult> {
-  const invoice = await getInvoiceById(db, organizationId, invoiceId);
-
-  if (!invoice) {
-    return { ok: false, error: "This invoice could not be found." };
-  }
-
   const begun = await beginQuickBooksInvoiceReminderSend(db, organizationId, {
     userId,
     agentCollaborationId: collaborationId,
-    invoiceId,
+    invoiceId: invoice.id,
     subject: draftedContent.subject ?? "Payment reminder",
     body: draftedContent.body,
     idempotencyKey: `agent-collaboration:${collaborationId}:send_invoice_reminder`,
@@ -243,12 +243,22 @@ export async function approveInvoiceReminderProposalAction(
     const draftedContent = collaboration!.draftedContent!;
 
     if (path.kind === "resume") {
+      const invoice = await getInvoiceById(
+        db,
+        session.organizationId,
+        invoiceId,
+      );
+
+      if (!invoice) {
+        return { ok: false, error: "This invoice could not be found." };
+      }
+
       return attemptSend(
         db,
         session.organizationId,
         session.userId,
         collaborationId,
-        invoiceId,
+        invoice,
         draftedContent,
       );
     }
@@ -396,7 +406,7 @@ export async function approveInvoiceReminderProposalAction(
           session.organizationId,
           session.userId,
           collaborationId,
-          invoiceId,
+          invoiceForAudit,
           draftedContent,
         ),
     );

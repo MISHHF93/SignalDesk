@@ -1,5 +1,6 @@
 "use server";
 
+import type { Lead } from "@signaldesk/domain";
 import {
   createHubSpotDealNote,
   UpstreamProviderError,
@@ -50,29 +51,28 @@ const MAX_AGENT_DEAL_NOTES_PER_DAY = 20;
 /**
  * Attempts (or resumes) the real HubSpot note-create call for one already-
  * approved collaboration, and records the outcome. Same shape as
- * `approve-task-nudge-action.ts`'s `attemptSend`.
+ * `approve-task-nudge-action.ts`'s `attemptSend`. Takes the lead already
+ * fetched by the caller rather than re-fetching it — the fresh-approval
+ * path already needed it for the Pre-Flight Policy Audit, so refetching
+ * here was a real redundant DB round trip on every approval (found by
+ * review); the resume path fetches it once, immediately before calling
+ * this.
  */
 async function attemptSend(
   db: DatabasePool,
   organizationId: string,
   userId: string,
   collaborationId: string,
-  leadId: string,
+  lead: Lead,
   draftedContent: {
     readonly subject?: string | undefined;
     readonly body: string;
   },
 ): Promise<ApproveDealNoteProposalActionResult> {
-  const lead = await getLeadById(db, organizationId, leadId);
-
-  if (!lead) {
-    return { ok: false, error: "This deal could not be found." };
-  }
-
   const begun = await beginHubSpotDealNoteSend(db, organizationId, {
     userId,
     agentCollaborationId: collaborationId,
-    leadId,
+    leadId: lead.id,
     body: draftedContent.body,
     idempotencyKey: `agent-collaboration:${collaborationId}:post_deal_note`,
   });
@@ -232,12 +232,18 @@ export async function approveDealNoteProposalAction(
     const draftedContent = collaboration!.draftedContent!;
 
     if (path.kind === "resume") {
+      const lead = await getLeadById(db, session.organizationId, leadId);
+
+      if (!lead) {
+        return { ok: false, error: "This deal could not be found." };
+      }
+
       return attemptSend(
         db,
         session.organizationId,
         session.userId,
         collaborationId,
-        leadId,
+        lead,
         draftedContent,
       );
     }
@@ -380,7 +386,7 @@ export async function approveDealNoteProposalAction(
           session.organizationId,
           session.userId,
           collaborationId,
-          leadId,
+          leadForAudit,
           draftedContent,
         ),
     );

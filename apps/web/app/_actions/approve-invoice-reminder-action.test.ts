@@ -308,6 +308,21 @@ describe("approveInvoiceReminderProposalAction", () => {
     );
   });
 
+  it("regression: fetches the invoice only once on a fresh approval, reusing the audit fetch for the send instead of refetching", async () => {
+    // Real inefficiency found by review: attemptSend used to call
+    // getInvoiceById itself even though the fresh-approval path had
+    // already fetched the same invoice moments earlier for the Pre-Flight
+    // Policy Audit — a redundant DB round trip on every single approval.
+    mockedGetCurrentOrganization.mockResolvedValue(SESSION);
+    mockedGetAgentCollaboration.mockResolvedValue(FRESH_COLLABORATION);
+    mockedBeginSend.mockResolvedValue({ id: "send-1", alreadyResolved: null });
+    mockedSendReminder.mockResolvedValue(undefined);
+
+    await approveInvoiceReminderProposalAction("collab-1");
+
+    expect(mockedGetInvoiceById).toHaveBeenCalledTimes(1);
+  });
+
   it("approves and sends cleanly on the fresh happy path", async () => {
     mockedGetCurrentOrganization.mockResolvedValue(SESSION);
     mockedGetAgentCollaboration.mockResolvedValue(FRESH_COLLABORATION);

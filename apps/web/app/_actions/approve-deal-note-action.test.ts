@@ -312,6 +312,21 @@ describe("approveDealNoteProposalAction", () => {
     );
   });
 
+  it("regression: fetches the lead only once on a fresh approval, reusing the audit fetch for the send instead of refetching", async () => {
+    // Real inefficiency found by review: attemptSend used to call
+    // getLeadById itself even though the fresh-approval path had already
+    // fetched the same lead moments earlier for the Pre-Flight Policy
+    // Audit — a redundant DB round trip on every single approval.
+    mockedGetCurrentOrganization.mockResolvedValue(SESSION);
+    mockedGetAgentCollaboration.mockResolvedValue(FRESH_COLLABORATION);
+    mockedBeginSend.mockResolvedValue({ id: "send-1", alreadyResolved: null });
+    mockedCreateDealNote.mockResolvedValue({ noteId: "note-1" });
+
+    await approveDealNoteProposalAction("collab-1");
+
+    expect(mockedGetLeadById).toHaveBeenCalledTimes(1);
+  });
+
   it("approves and logs the note cleanly on the fresh happy path", async () => {
     mockedGetCurrentOrganization.mockResolvedValue(SESSION);
     mockedGetAgentCollaboration.mockResolvedValue(FRESH_COLLABORATION);
