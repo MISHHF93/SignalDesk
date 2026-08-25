@@ -20,6 +20,7 @@ import {
   startSyncJob,
   storeQuickBooksTokens,
   updateInvoiceStatusBySourceRecord,
+  withAdvisoryLock,
   type DatabasePool,
   type SyncJobTrigger,
 } from "@signaldesk/persistence";
@@ -36,6 +37,8 @@ import { getQuickBooksClientCredentials } from "./quickbooks-config";
 const MAX_INVOICE_PAGES = 20;
 const MAX_PAYMENT_PAGES = 20;
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
+const TOKEN_REFRESH_LOCK_MAX_ATTEMPTS = 5;
+const TOKEN_REFRESH_LOCK_RETRY_DELAY_MS = 300;
 
 /**
  * Whether `candidate` (a real `MetaData.LastUpdatedTime`) is chronologically
@@ -81,11 +84,29 @@ export interface QuickBooksSyncResult {
  * every call. QuickBooks also rotates the refresh token itself on every
  * use — the newly-returned one must be persisted too, or the next refresh
  * will fail.
+ *
+ * Real bug found by review: this used to read-check-refresh-store with no
+ * locking at all. Two concurrent callers for the same integration (a
+ * scheduled "Sync Now" and a manual approve action, say) could both read
+ * the same near-expiry token and both call `refreshQuickBooksAccessToken`
+ * with it — since QuickBooks rotates the refresh token on every use, only
+ * one of those two calls can actually succeed; the other gets a genuine
+ * `invalid_grant` rejection and fails outright.
+ *
+ * Fixed with the same real, cross-instance Postgres advisory lock
+ * (`withAdvisoryLock`) this codebase already uses for other external-API
+ * critical sections — but since it's non-blocking (returns `null`
+ * immediately when another caller already holds the key, rather than
+ * queuing), a losing caller here re-checks the stored tokens (the winner
+ * may have already refreshed and committed) and retries the whole
+ * function after a short delay, up to `TOKEN_REFRESH_LOCK_MAX_ATTEMPTS`
+ * times, instead of racing its own refresh call against the winner's.
  */
 export async function ensureFreshQuickBooksAccessToken(
   pool: DatabasePool,
   organizationId: string,
   integrationId: string,
+  attempt = 0,
 ): Promise<string> {
   const tokens = await getQuickBooksTokens(pool, organizationId, integrationId);
 
@@ -97,19 +118,60 @@ export async function ensureFreshQuickBooksAccessToken(
     return tokens.accessToken;
   }
 
-  const config = getQuickBooksClientCredentials();
-  const refreshed = await refreshQuickBooksAccessToken(
-    config,
-    tokens.refreshToken,
+  const refreshedAccessToken = await withAdvisoryLock(
+    pool,
+    `quickbooks-token-refresh:${integrationId}`,
+    async (): Promise<string> => {
+      // Re-read inside the lock — a concurrent caller may have already
+      // refreshed and stored a fresh token while we were waiting to
+      // acquire it.
+      const currentTokens =
+        (await getQuickBooksTokens(pool, organizationId, integrationId)) ??
+        tokens;
+
+      if (
+        currentTokens.expiresAt.getTime() - Date.now() >
+        TOKEN_REFRESH_BUFFER_MS
+      ) {
+        return currentTokens.accessToken;
+      }
+
+      const config = getQuickBooksClientCredentials();
+      const refreshed = await refreshQuickBooksAccessToken(
+        config,
+        currentTokens.refreshToken,
+      );
+
+      await storeQuickBooksTokens(pool, organizationId, integrationId, {
+        accessToken: refreshed.accessToken,
+        refreshToken: refreshed.refreshToken,
+        expiresAt: new Date(Date.now() + refreshed.expiresIn * 1000),
+      });
+
+      return refreshed.accessToken;
+    },
   );
 
-  await storeQuickBooksTokens(pool, organizationId, integrationId, {
-    accessToken: refreshed.accessToken,
-    refreshToken: refreshed.refreshToken,
-    expiresAt: new Date(Date.now() + refreshed.expiresIn * 1000),
-  });
+  if (refreshedAccessToken !== null) {
+    return refreshedAccessToken;
+  }
 
-  return refreshed.accessToken;
+  if (attempt >= TOKEN_REFRESH_LOCK_MAX_ATTEMPTS) {
+    throw new Error(
+      "Could not refresh the QuickBooks access token — another refresh for this connection was already in progress.",
+    );
+  }
+
+  await new Promise((resolve) =>
+    setTimeout(resolve, TOKEN_REFRESH_LOCK_RETRY_DELAY_MS),
+  );
+
+  return ensureFreshQuickBooksAccessToken(
+    pool,
+    organizationId,
+    integrationId,
+    attempt + 1,
+  );
 }
 
 /**
