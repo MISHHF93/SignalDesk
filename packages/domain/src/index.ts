@@ -626,13 +626,18 @@ const DEFAULT_CRITICAL_TICKET_HOURS = 72;
  * so an `evaluateOverdueTask`-style due-date rule would silently never
  * fire for the common case.
  *
- * Only `new`/`open`/`pending` tickets are evaluated. `hold` is
+ * Only `new`/`open` tickets are evaluated. `hold` and `pending` are both
  * deliberately excluded, not merged in with the "stuck" statuses: Zendesk
  * agents use `hold` specifically to mean "waiting on a third party
- * (engineering, the customer, a vendor)," not neglect by the support
- * team — surfacing it as "stuck" would be a false positive on a ticket
- * that's actually being tracked correctly. `solved`/`closed` are
- * obviously excluded as already-resolved.
+ * (engineering, the customer, a vendor)," and `pending` specifically means
+ * "the agent already replied and is waiting on the requester" — both are
+ * "someone else has the ball" states, not neglect by the support team, so
+ * surfacing either as "stuck" would be a false positive on a ticket that's
+ * actually being handled correctly (real bug found by review: `pending`
+ * used to be evaluated identically to `new`/`open`, so a ticket the
+ * support team had already answered could still fire a "critical" stuck
+ * finding purely because the customer was slow to reply). `solved`/
+ * `closed` are obviously excluded as already-resolved.
  */
 export function evaluateTicketStuck(
   ticket: SupportTicket,
@@ -652,11 +657,7 @@ export function evaluateTicketStuck(
     return null;
   }
 
-  if (
-    ticket.status !== "new" &&
-    ticket.status !== "open" &&
-    ticket.status !== "pending"
-  ) {
+  if (ticket.status !== "new" && ticket.status !== "open") {
     return null;
   }
 
@@ -681,11 +682,10 @@ export function evaluateTicketStuck(
   const assignee = ticket.assigneeName
     ? ` (assigned to ${ticket.assigneeName})`
     : " (unassigned)";
-  // Only "new"/"open"/"pending" ever reach here (the status check above),
-  // and "open" is the only one of the three starting with a vowel sound —
-  // caught live in the browser (real rendered text read "A open ticket"),
-  // not by the unit tests, which never asserted on this string's exact
-  // wording.
+  // Only "new"/"open" ever reach here (the status check above), and "open"
+  // is the one starting with a vowel sound — caught live in the browser
+  // (real rendered text read "A open ticket"), not by the unit tests,
+  // which never asserted on this string's exact wording.
   const article = ticket.status === "open" ? "An" : "A";
 
   return {
@@ -865,33 +865,45 @@ export const EXPOSURE_TYPE_LABEL: Record<ExposureType, string> = {
   FORECAST_IMPACT: "Forecast impact",
 };
 
+const TWELVE_HOURS_MS = 12 * 60 * 60 * 1000;
+
 /**
  * Converts a date-only string with no time-of-day component (QuickBooks'
  * `DueDate`/`TxnDate`, Asana's `due_on`, Jira's `duedate` — each a real
  * `yyyy-MM-dd` field, never a full timestamp) into a real ISO instant,
- * anchored to the END of that calendar day in UTC — not JavaScript's own
- * default interpretation of a bare date string, which is UTC midnight,
- * the *start* of the day.
+ * anchored so that an `elapsedMilliseconds = now - dueAt` overdue check
+ * (`evaluateOverdueInvoice`/`evaluateOverdueTask`, this file) can never
+ * fire before a business's true local "due by end of this calendar day"
+ * moment, for any real-world UTC offset — without needing the
+ * organization's own timezone at the mapper layer (mappers are pure,
+ * context-free transforms by design — no org context reaches them).
  *
- * This is the fix for a real, systemic bug (found by a deep audit,
- * 2026-08-22): every mapper that did `new Date(dateOnlyString)` directly
- * registered a "due" date at UTC midnight, which for any US (or other
- * UTC-negative) timezone is still the *previous* calendar day locally —
- * `evaluateOverdueInvoice`/`evaluateOverdueTask` (this file) then flagged
- * the record overdue up to a full day before its real local due date,
- * for every affected record, every time, not as an edge case.
+ * Real bug found by review (this instant used to be plain end-of-day
+ * UTC, `{dateOnly}T23:59:59.999Z`, itself the fix for an earlier bug —
+ * SELF-HEALING-AUDIT.md — that made the identical over-eager mistake in
+ * the opposite direction): end-of-day UTC is only safe for timezones at
+ * or ahead of UTC. For any UTC-negative timezone — the entire Western
+ * Hemisphere, including the US, this app's primary target ICP — local
+ * "23:59:59.999 on the due date" converts to a *later* UTC instant than
+ * `{dateOnly}T23:59:59.999Z` (e.g. New York, UTC-4: local end-of-day is
+ * `{dateOnly+1}T03:59:59.999Z`), so anchoring there fired the overdue
+ * check up to 12 hours before the real local deadline, for every
+ * affected record, every time — not an edge case, the default outcome
+ * for this app's own primary market.
  *
- * End-of-day UTC is the correct fix without needing the organization's
- * own timezone at the mapper layer (mappers are pure, context-free
- * transforms by design — no org context reaches them): for every
- * real-world UTC offset (UTC-12 through UTC+14), a business's true local
- * "due by end of this calendar day" moment always falls before this
- * instant, so an `elapsedMilliseconds = now - dueAt` overdue check can
- * never fire early. It can still under-report by up to a day for a
- * timezone ahead of UTC (e.g. UTC+14) — the safe direction for a
- * "what's stuck" signal to be wrong in, matching this app's own
- * discipline against fabricating false alarms.
+ * Adding a 12-hour buffer (reaching `{dateOnly+1}T11:59:59.999Z`) is the
+ * actual fix: UTC-12 is the most extreme behind-UTC offset in real-world
+ * use, and local end-of-day at UTC-12 converts to exactly
+ * `{dateOnly+1}T11:59:59.999Z` — so this instant is now guaranteed to
+ * fall at or after every real-world offset's true local deadline (UTC-12
+ * through UTC+14), never before. It still under-reports — by up to 12
+ * hours for UTC-12, growing to up to a day for a timezone far ahead of
+ * UTC (e.g. UTC+14) — the safe direction for a "what's stuck" signal to
+ * be wrong in, matching this app's own discipline against fabricating
+ * false alarms.
  */
 export function endOfDateOnlyDayUtc(dateOnly: string): string {
-  return new Date(`${dateOnly}T23:59:59.999Z`).toISOString();
+  return new Date(
+    new Date(`${dateOnly}T23:59:59.999Z`).getTime() + TWELVE_HOURS_MS,
+  ).toISOString();
 }

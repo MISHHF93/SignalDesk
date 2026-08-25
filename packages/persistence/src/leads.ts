@@ -93,6 +93,16 @@ const MAX_LEADS_FOR_ATTENTION = 10;
  * "closed" — that would be exactly the kind of vendor-name-shaped logic
  * the Connector Framework's capability-class design exists to avoid.
  * Tracked as a real, disclosed risk rather than a guessed fix.
+ *
+ * Real bug found by review, same root cause and fix as
+ * `listOverdueInvoices`/`listOverdueTasks` (see that doc comment for the
+ * full explanation): `leads` is append-only — a re-synced deal/opportunity
+ * inserts a brand-new row rather than updating the old one in place — so
+ * without deduping to the latest `source_records` row per
+ * `(source_system, external_record_id)`, a stale pre-re-sync row (still
+ * showing no owner, or no `last_interaction_at`) stays live here forever
+ * alongside its current replacement, producing a permanent duplicate/ghost
+ * `lead.follow_up_risk`/`ownership` finding for one real lead.
  */
 export async function listLeadsForAttention(
   pool: DatabasePool,
@@ -100,36 +110,39 @@ export async function listLeadsForAttention(
 ): Promise<readonly Lead[]> {
   return withTenantContext(pool, organizationId, async (client) => {
     const result = await client.query<LeadWithSourceRow>(
-      `select
-         l.id as id,
-         l.organization_id as organization_id,
-         l.contact_name as contact_name,
-         l.company_name as company_name,
-         l.value_cents as value_cents,
-         l.currency as currency,
-         l.stage as stage,
-         l.source_created_at as source_created_at,
-         l.last_interaction_at as last_interaction_at,
-         l.expected_response_hours as expected_response_hours,
-         l.owner_membership_id as owner_membership_id,
-         u.display_name as owner_display_name,
-         sr.integration_id as integration_id,
-         sr.source_system as source_system,
-         sr.external_record_id as external_record_id,
-         sr.source_version as source_version,
-         sr.raw_payload_sha256 as record_digest_sha256,
-         sr.ingested_at as last_synced_at
-       from leads l
-       join source_records sr
-         on sr.organization_id = l.organization_id and sr.id = l.source_record_id
-       join integrations i
-         on i.organization_id = l.organization_id and i.id = sr.integration_id
-       left join memberships m
-         on m.organization_id = l.organization_id and m.id = l.owner_membership_id
-       left join users u on u.id = m.user_id
-       where l.organization_id = $1
-         and i.status in ('active', 'degraded')
-       order by (l.last_interaction_at is null) desc, l.source_created_at asc
+      `select * from (
+         select distinct on (sr.source_system, sr.external_record_id)
+           l.id as id,
+           l.organization_id as organization_id,
+           l.contact_name as contact_name,
+           l.company_name as company_name,
+           l.value_cents as value_cents,
+           l.currency as currency,
+           l.stage as stage,
+           l.source_created_at as source_created_at,
+           l.last_interaction_at as last_interaction_at,
+           l.expected_response_hours as expected_response_hours,
+           l.owner_membership_id as owner_membership_id,
+           u.display_name as owner_display_name,
+           sr.integration_id as integration_id,
+           sr.source_system as source_system,
+           sr.external_record_id as external_record_id,
+           sr.source_version as source_version,
+           sr.raw_payload_sha256 as record_digest_sha256,
+           sr.ingested_at as last_synced_at
+         from leads l
+         join source_records sr
+           on sr.organization_id = l.organization_id and sr.id = l.source_record_id
+         join integrations i
+           on i.organization_id = l.organization_id and i.id = sr.integration_id
+         left join memberships m
+           on m.organization_id = l.organization_id and m.id = l.owner_membership_id
+         left join users u on u.id = m.user_id
+         where l.organization_id = $1
+           and i.status in ('active', 'degraded')
+         order by sr.source_system, sr.external_record_id, sr.observed_at desc
+       ) latest_leads
+       order by (last_interaction_at is null) desc, source_created_at asc
        limit ${MAX_LEADS_FOR_ATTENTION}`,
       [organizationId],
     );

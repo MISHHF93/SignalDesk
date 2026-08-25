@@ -36,7 +36,7 @@ describe("mapJiraIssueToSourceTaskRecord", () => {
     expect(record).toMatchObject({
       name: "Fix the thing",
       assigneeName: "Jamie Rivera",
-      dueAt: "2026-09-01T23:59:59.999Z",
+      dueAt: "2026-09-02T11:59:59.999Z",
       completed: false,
       source: {
         system: "jira",

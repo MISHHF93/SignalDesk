@@ -40,7 +40,7 @@ function fixtureInput(
 
 // Exercises listStuckSupportTickets against the live database — the join
 // across support_tickets/source_records/integrations/memberships, the
-// `new`/`open`/`pending`-only status filter, ordering, and the
+// `new`/`open`-only status filter, ordering, and the
 // active-integration-only filter. Mirrors list-overdue-tasks.test.ts's
 // exact coverage shape.
 describe.skipIf(!process.env.DATABASE_URL)(
@@ -98,7 +98,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       expect(ticket?.source.externalRecordId).toBe(input.externalRecordId);
     });
 
-    it.each(["hold", "solved", "closed"])(
+    it.each(["pending", "hold", "solved", "closed"])(
       "does not surface a %s ticket",
       async (status) => {
         const org = await seedOrganization(pool);
@@ -126,33 +126,162 @@ describe.skipIf(!process.env.DATABASE_URL)(
       },
     );
 
-    it.each(["new", "open", "pending"])(
-      "surfaces a %s ticket",
-      async (status) => {
-        const org = await seedOrganization(pool);
-        const integration = await seedIntegration(pool, org.id, {
-          sourceSystem: "zendesk",
-        });
-        const job = await seedSyncJob(
-          pool,
-          org.id,
-          integration.id,
-          "zendesk",
-          "support_ticket",
-        );
+    it.each(["new", "open"])("surfaces a %s ticket", async (status) => {
+      const org = await seedOrganization(pool);
+      const integration = await seedIntegration(pool, org.id, {
+        sourceSystem: "zendesk",
+      });
+      const job = await seedSyncJob(
+        pool,
+        org.id,
+        integration.id,
+        "zendesk",
+        "support_ticket",
+      );
 
-        await ingestZendeskTicket(
-          pool,
-          org.id,
-          integration.id,
-          fixtureInput(job.id, { status }),
-        );
+      await ingestZendeskTicket(
+        pool,
+        org.id,
+        integration.id,
+        fixtureInput(job.id, { status }),
+      );
 
-        const tickets = await listStuckSupportTickets(pool, org.id);
+      const tickets = await listStuckSupportTickets(pool, org.id);
 
-        expect(tickets).toHaveLength(1);
-      },
-    );
+      expect(tickets).toHaveLength(1);
+    });
+
+    // Real bug found by review: "pending" used to be evaluated identically
+    // to "new"/"open", but Zendesk's own meaning for "pending" is "the
+    // agent already replied and is waiting on the requester" — the same
+    // "someone else has the ball" state "hold" is already excluded for,
+    // not neglect by the support team.
+    it("does not surface a pending ticket no matter how long it's been waiting on the requester", async () => {
+      const org = await seedOrganization(pool);
+      const integration = await seedIntegration(pool, org.id, {
+        sourceSystem: "zendesk",
+      });
+      const job = await seedSyncJob(
+        pool,
+        org.id,
+        integration.id,
+        "zendesk",
+        "support_ticket",
+      );
+
+      await ingestZendeskTicket(
+        pool,
+        org.id,
+        integration.id,
+        fixtureInput(job.id, {
+          status: "pending",
+          lastActivityAt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000),
+        }),
+      );
+
+      const tickets = await listStuckSupportTickets(pool, org.id);
+
+      expect(tickets).toEqual([]);
+    });
+
+    /**
+     * Regression coverage for the same P0 dedup fix already applied to
+     * `listOverdueInvoices`/`listOverdueTasks`/`listLeadsForAttention` (see
+     * `listOverdueInvoices`'s doc comment): `ingestZendeskTicket` is
+     * append-only — a re-sync that observes a new `sourceVersion` for an
+     * already-known external record inserts a brand-new `support_tickets`
+     * row rather than updating the old one in place. Before this fix,
+     * `listStuckSupportTickets` joined straight against `support_tickets`
+     * with no dedup by external record, so a still-open re-synced ticket
+     * (or a stale row left behind once the *latest* row was marked solved)
+     * could surface as a second, ghost card on the live one-page dashboard
+     * for the same real-world ticket.
+     */
+    it("collapses a re-synced still-open ticket to one card, not two", async () => {
+      const org = await seedOrganization(pool);
+      const integration = await seedIntegration(pool, org.id, {
+        sourceSystem: "zendesk",
+      });
+      const job = await seedSyncJob(
+        pool,
+        org.id,
+        integration.id,
+        "zendesk",
+        "support_ticket",
+      );
+      const externalRecordId = `ticket-${randomUUID()}`;
+
+      await ingestZendeskTicket(
+        pool,
+        org.id,
+        integration.id,
+        fixtureInput(job.id, { externalRecordId, sourceVersion: "1" }),
+      );
+      // A re-sync that observes a reply: still open, but a new
+      // source_version — the exact ghost-row scenario.
+      await ingestZendeskTicket(
+        pool,
+        org.id,
+        integration.id,
+        fixtureInput(job.id, {
+          externalRecordId,
+          sourceVersion: "2",
+          assigneeName: "New Agent",
+        }),
+      );
+
+      const tickets = await listStuckSupportTickets(pool, org.id);
+      const matching = tickets.filter(
+        (ticket) => ticket.source.externalRecordId === externalRecordId,
+      );
+
+      expect(matching).toHaveLength(1);
+      // Reflects the latest observed state, not the first.
+      expect(matching[0]?.assigneeName).toBe("New Agent");
+      expect(matching[0]?.source.sourceVersion).toBe("2");
+    });
+
+    it("does not resurrect a stale open row once the latest re-sync is solved", async () => {
+      const org = await seedOrganization(pool);
+      const integration = await seedIntegration(pool, org.id, {
+        sourceSystem: "zendesk",
+      });
+      const job = await seedSyncJob(
+        pool,
+        org.id,
+        integration.id,
+        "zendesk",
+        "support_ticket",
+      );
+      const externalRecordId = `ticket-${randomUUID()}`;
+
+      await ingestZendeskTicket(
+        pool,
+        org.id,
+        integration.id,
+        fixtureInput(job.id, { externalRecordId, sourceVersion: "1" }),
+      );
+      // A later re-sync observes the ticket is now solved — a second,
+      // newer row with status "solved" alongside the old "open" one.
+      await ingestZendeskTicket(
+        pool,
+        org.id,
+        integration.id,
+        fixtureInput(job.id, {
+          externalRecordId,
+          sourceVersion: "2",
+          status: "solved",
+        }),
+      );
+
+      const tickets = await listStuckSupportTickets(pool, org.id);
+
+      expect(
+        tickets.some(
+          (ticket) => ticket.source.externalRecordId === externalRecordId,
+        ),
+      ).toBe(false);
+    });
 
     it("orders tickets oldest-activity-first", async () => {
       const org = await seedOrganization(pool);

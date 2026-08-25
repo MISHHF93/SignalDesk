@@ -6,7 +6,7 @@ import type {
 } from "../capability";
 import { CONFIDENCE_DETERMINISTIC_RULE } from "../confidence";
 import type { IntelligenceFinding } from "../finding";
-import { freshnessStatus } from "../format";
+import { formatHours, freshnessStatus } from "../format";
 
 /**
  * The real, visible consumer of Zendesk ticket ingestion — the first
@@ -14,9 +14,9 @@ import { freshnessStatus } from "../format";
  * `messageFollowUpIntelligence` exactly: evaluates every candidate in
  * `context.stuckSupportTickets`, not just one, since each is an
  * independent risk item. `evaluateTicketStuck` (`@signaldesk/domain`)
- * already excludes `hold`/`solved`/`closed` tickets — see that
- * function's own doc comment for why `hold` specifically is not treated
- * as neglect.
+ * already excludes `pending`/`hold`/`solved`/`closed` tickets — see that
+ * function's own doc comment for why `pending` and `hold` specifically
+ * are not treated as neglect.
  */
 export const ticketRiskIntelligence: IntelligenceCapability = {
   id: "ticket-risk",
@@ -54,6 +54,11 @@ export const ticketRiskIntelligence: IntelligenceCapability = {
           (now.getTime() - ticket.source.lastSyncedAt.getTime()) / 60_000,
         ),
       );
+      // Real bug found by review: this used to interpolate the raw
+      // fractional-hours float directly (e.g. "114.26302638888889 hours
+      // elapsed") — lead-risk.ts already formats the identical field via
+      // formatHours, this one just never got the same treatment.
+      const elapsedLabel = formatHours(signal.elapsedHours);
 
       findings.push({
         id: `ticket-risk:${ticket.organizationId}:${ticket.id}`,
@@ -87,7 +92,7 @@ export const ticketRiskIntelligence: IntelligenceCapability = {
         explanation: {
           trigger:
             "Open ticket exceeded the response-time threshold with no further activity.",
-          observedValue: `${signal.elapsedHours} hours elapsed`,
+          observedValue: `${elapsedLabel} hours elapsed`,
           expectedBaseline: `${signal.thresholdHours}-hour response threshold`,
           confidence: "high",
         },

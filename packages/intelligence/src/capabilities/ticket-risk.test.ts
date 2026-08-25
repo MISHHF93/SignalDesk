@@ -111,6 +111,26 @@ describe("ticketRiskIntelligence", () => {
     expect(findings).toHaveLength(0);
   });
 
+  it("regression: does not fire for a pending ticket, even long past the response threshold — the agent already replied and is waiting on the requester", async () => {
+    const findings = await ticketRiskIntelligence.evaluate({
+      ...BASE_CONTEXT,
+      now: new Date("2026-09-01T00:00:00.000Z"),
+      stuckSupportTickets: [ticket({ status: "pending" })],
+    });
+
+    expect(findings).toHaveLength(0);
+  });
+
+  it("regression: formats a fractional elapsed-hours value in observedValue rather than an unrounded raw float", async () => {
+    const findings = await ticketRiskIntelligence.evaluate({
+      ...BASE_CONTEXT,
+      now: new Date("2026-08-18T13:30:00.000Z"),
+      stuckSupportTickets: [ticket()],
+    });
+
+    expect(findings[0]?.explanation.observedValue).toBe("25.5 hours elapsed");
+  });
+
   it("returns no findings when nothing is stuck", async () => {
     const findings = await ticketRiskIntelligence.evaluate({
       ...BASE_CONTEXT,

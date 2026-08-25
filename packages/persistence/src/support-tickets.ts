@@ -155,14 +155,27 @@ export async function getSupportTicketById(
 }
 
 /**
- * Every `new`/`open`/`pending` ticket worth surfacing as potentially
- * stuck — mirrors `listOverdueTasks`'s "the real set, not one
- * representative record" shape, its owner-membership join, and its
- * `active`/`degraded` integration-status filter (ADR 0043). `hold` is
+ * Every `new`/`open` ticket worth surfacing as potentially stuck — mirrors
+ * `listOverdueTasks`'s "the real set, not one representative record"
+ * shape, its owner-membership join, and its `active`/`degraded`
+ * integration-status filter (ADR 0043). `hold` and `pending` are both
  * deliberately excluded here too, not just in the evaluator
- * (`evaluateTicketStuck`, `@signaldesk/domain`) — no point fetching rows
- * the evaluator will always skip. Ordered oldest-activity-first so the
- * most genuinely neglected tickets sort first.
+ * (`evaluateTicketStuck`, `@signaldesk/domain` — see that function's own
+ * doc comment for why `pending` specifically isn't neglect) — no point
+ * fetching rows the evaluator will always skip. Ordered oldest-activity-
+ * first so the most genuinely neglected tickets sort first.
+ *
+ * Real bug found by review, same root cause and fix as
+ * `listOverdueInvoices`/`listOverdueTasks`/`listLeadsForAttention` (see
+ * `listOverdueInvoices`'s doc comment for the full explanation):
+ * `support_tickets` is append-only — a re-synced ticket (a reply, a status
+ * change) inserts a brand-new row rather than updating the old one in
+ * place — so without deduping to the latest `source_records` row per
+ * `(source_system, external_record_id)`, a stale pre-re-sync row (still
+ * `open` with its old `last_activity_at`) stayed live here forever
+ * alongside its current replacement, including after the real ticket was
+ * solved — a permanent duplicate/ghost `ticket.stuck` finding for one real
+ * ticket.
  */
 export async function listStuckSupportTickets(
   pool: DatabasePool,
@@ -170,36 +183,39 @@ export async function listStuckSupportTickets(
 ): Promise<readonly SupportTicket[]> {
   return withTenantContext(pool, organizationId, async (client) => {
     const result = await client.query<StuckTicketRow>(
-      `select
-         t.id as id,
-         t.organization_id as organization_id,
-         t.subject as subject,
-         t.status as status,
-         t.priority as priority,
-         t.requester_name as requester_name,
-         t.assignee_name as assignee_name,
-         t.owner_membership_id as owner_membership_id,
-         u.display_name as owner_display_name,
-         t.due_at as due_at,
-         t.last_activity_at as last_activity_at,
-         sr.integration_id as integration_id,
-         sr.source_system as source_system,
-         sr.external_record_id as external_record_id,
-         sr.source_version as source_version,
-         sr.raw_payload_sha256 as record_digest_sha256,
-         sr.ingested_at as last_synced_at
-       from support_tickets t
-       join source_records sr
-         on sr.organization_id = t.organization_id and sr.id = t.source_record_id
-       join integrations ig
-         on ig.organization_id = t.organization_id and ig.id = sr.integration_id
-       left join memberships m
-         on m.organization_id = t.organization_id and m.id = t.owner_membership_id
-       left join users u on u.id = m.user_id
-       where t.organization_id = $1
-         and t.status in ('new', 'open', 'pending')
-         and ig.status in ('active', 'degraded')
-       order by t.last_activity_at asc
+      `select * from (
+         select distinct on (sr.source_system, sr.external_record_id)
+           t.id as id,
+           t.organization_id as organization_id,
+           t.subject as subject,
+           t.status as status,
+           t.priority as priority,
+           t.requester_name as requester_name,
+           t.assignee_name as assignee_name,
+           t.owner_membership_id as owner_membership_id,
+           u.display_name as owner_display_name,
+           t.due_at as due_at,
+           t.last_activity_at as last_activity_at,
+           sr.integration_id as integration_id,
+           sr.source_system as source_system,
+           sr.external_record_id as external_record_id,
+           sr.source_version as source_version,
+           sr.raw_payload_sha256 as record_digest_sha256,
+           sr.ingested_at as last_synced_at
+         from support_tickets t
+         join source_records sr
+           on sr.organization_id = t.organization_id and sr.id = t.source_record_id
+         join integrations ig
+           on ig.organization_id = t.organization_id and ig.id = sr.integration_id
+         left join memberships m
+           on m.organization_id = t.organization_id and m.id = t.owner_membership_id
+         left join users u on u.id = m.user_id
+         where t.organization_id = $1
+           and ig.status in ('active', 'degraded')
+         order by sr.source_system, sr.external_record_id, sr.observed_at desc
+       ) latest_tickets
+       where status in ('new', 'open')
+       order by last_activity_at asc
        limit ${MAX_STUCK_TICKETS}`,
       [organizationId],
     );

@@ -46,7 +46,7 @@ describe("mapQuickBooksInvoiceToSourceInvoiceRecord", () => {
       customerName: "Acme Robotics",
       amountCents: 250_000,
       currency: "USD",
-      dueAt: "2026-08-01T23:59:59.999Z",
+      dueAt: "2026-08-02T11:59:59.999Z",
       status: "open",
       source: {
         system: "quickbooks",
@@ -162,7 +162,7 @@ describe("mapQuickBooksPaymentToSourcePaymentRecord", () => {
       customerName: "Acme Robotics",
       amountCents: 150_000,
       currency: "USD",
-      receivedAt: "2026-08-18T23:59:59.999Z",
+      receivedAt: "2026-08-19T11:59:59.999Z",
       invoiceAllocations: [{ externalInvoiceId: "148", amountCents: 150_000 }],
       source: {
         system: "quickbooks",

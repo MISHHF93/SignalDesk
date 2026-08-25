@@ -134,6 +134,63 @@ describe.skipIf(!process.env.DATABASE_URL)(
       );
     });
 
+    /**
+     * Regression coverage for the same P0 dedup fix already applied to
+     * `listOverdueInvoices`/`listOverdueTasks` (see that doc comment):
+     * `ingestHubSpotDeal` is append-only — a re-sync that observes a new
+     * `sourceVersion` for an already-known external record inserts a
+     * brand-new `leads` row rather than updating the old one in place.
+     * Before this fix, `listLeadsForAttention` joined straight against
+     * `leads` with no dedup by external record, so a re-synced lead could
+     * surface as a second, ghost card on the live one-page dashboard for
+     * the same real-world deal.
+     */
+    it("collapses a re-synced lead to one card, reflecting the latest observed state", async () => {
+      const org = await seedOrganization(pool);
+      const integration = await seedIntegration(pool, org.id, {
+        sourceSystem: "hubspot",
+      });
+      const job = await seedSyncJob(pool, org.id, integration.id, "hubspot");
+      const externalRecordId = `deal-${randomUUID()}`;
+
+      await ingestHubSpotDeal(
+        pool,
+        org.id,
+        integration.id,
+        fixtureInput(job.id, {
+          externalRecordId,
+          sourceVersion: "2026-08-17T17:00:00.000Z",
+          lastInteractionAt: null,
+        }),
+      );
+      // A later re-sync observes the rep has since logged real contact —
+      // a second, newer row for the same real deal.
+      const resynced = await ingestHubSpotDeal(
+        pool,
+        org.id,
+        integration.id,
+        fixtureInput(job.id, {
+          externalRecordId,
+          sourceVersion: "2026-08-19T09:00:00.000Z",
+          lastInteractionAt: new Date("2026-08-19T09:00:00.000Z"),
+        }),
+      );
+
+      const leads = await listLeadsForAttention(pool, org.id);
+      const matching = leads.filter(
+        (lead) => lead.source.externalRecordId === externalRecordId,
+      );
+
+      expect(matching).toHaveLength(1);
+      expect(matching[0]?.id).toBe(resynced.leadId);
+      expect(matching[0]?.lastInteractionAt).toEqual(
+        new Date("2026-08-19T09:00:00.000Z"),
+      );
+      expect(matching[0]?.source.sourceVersion).toBe(
+        "2026-08-19T09:00:00.000Z",
+      );
+    });
+
     it("cannot see another organization's leads", async () => {
       const orgA = await seedOrganization(pool);
       const orgB = await seedOrganization(pool);

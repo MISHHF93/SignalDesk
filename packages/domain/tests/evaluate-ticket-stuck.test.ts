@@ -74,13 +74,12 @@ describe("evaluateTicketStuck", () => {
 
   // Regression coverage for a real bug caught only by live-browser
   // verification, not by any unit test before this file existed: "A open
-  // ticket" instead of "An open ticket". "new" and "pending" both take
-  // "A" (consonant sound); "open" is the one of the three statuses this
-  // evaluator ever sees that needs "An".
+  // ticket" instead of "An open ticket". "new" takes "A" (consonant
+  // sound); "open" is the one of the two statuses this evaluator ever
+  // sees that needs "An".
   it.each([
     ["new", "A new ticket"],
     ["open", "An open ticket"],
-    ["pending", "A pending ticket"],
   ] as const)(
     "uses the grammatically correct article for a %s ticket",
     (status, expectedPrefix) => {
@@ -94,7 +93,7 @@ describe("evaluateTicketStuck", () => {
     },
   );
 
-  it.each(["hold", "solved", "closed"] as const)(
+  it.each(["pending", "hold", "solved", "closed"] as const)(
     "does not evaluate a %s ticket at all",
     (status) => {
       const signal = evaluateTicketStuck(
@@ -106,6 +105,23 @@ describe("evaluateTicketStuck", () => {
       expect(signal).toBeNull();
     },
   );
+
+  // Real bug found by review: "pending" used to be evaluated identically
+  // to "new"/"open", so a ticket the support team had already answered
+  // (Zendesk's own meaning for "pending": waiting on the requester) could
+  // still fire a "stuck" finding purely because the customer was slow to
+  // reply — the same false-positive class "hold" was already excluded to
+  // prevent.
+  it("regression: never fires for a pending ticket, no matter how much time has elapsed", () => {
+    const signal = evaluateTicketStuck(
+      makeTicket({ status: "pending" }),
+      new Date("2026-09-01T12:00:00.000Z"),
+      24,
+      72,
+    );
+
+    expect(signal).toBeNull();
+  });
 
   it("labels an unassigned ticket correctly", () => {
     const signal = evaluateTicketStuck(
