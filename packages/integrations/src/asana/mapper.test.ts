@@ -38,7 +38,7 @@ describe("mapAsanaTaskToSourceTaskRecord", () => {
     expect(record).toMatchObject({
       name: "Ship Q3 report",
       assigneeName: "Jordan Lee",
-      dueAt: "2026-08-01T23:59:59.999Z",
+      dueAt: "2026-08-02T11:59:59.999Z",
       completed: false,
       source: {
         system: "asana",
@@ -78,6 +78,27 @@ describe("mapAsanaTaskToSourceTaskRecord", () => {
     ) as Record<string, unknown>;
 
     expect(record.assigneeName).toBeNull();
+  });
+
+  it("real bug found by review: an assignee present but with no resolvable name falls back to an id-carrying placeholder, not the same null as genuinely unassigned", () => {
+    const record = mapAsanaTaskToSourceTaskRecord(
+      task({ assignee: { gid: "62" } }),
+      NOW,
+    ) as Record<string, unknown>;
+
+    expect(record.assigneeName).toBe("Asana user 62");
+    // Distinct from the genuinely-unassigned case above — a real assignee
+    // exists (gid "62"), it just couldn't be named.
+    expect(record.assigneeName).not.toBeNull();
+  });
+
+  it("falls back to the same placeholder when the assignee's name is blank rather than absent", () => {
+    const record = mapAsanaTaskToSourceTaskRecord(
+      task({ assignee: { gid: "62", name: "   " } }),
+      NOW,
+    ) as Record<string, unknown>;
+
+    expect(record.assigneeName).toBe("Asana user 62");
   });
 
   it("falls back to a placeholder name when the task name is blank", () => {
@@ -134,5 +155,11 @@ describe("mapAsanaTaskToSourceTaskRecord", () => {
     expect(detectAsanaTaskDefaultedFields(task({ assignee: null }))).toEqual(
       [],
     );
+  });
+
+  it("detectAsanaTaskDefaultedFields flags an assignee present with no resolvable name as defaulted", () => {
+    expect(
+      detectAsanaTaskDefaultedFields(task({ assignee: { gid: "62" } })),
+    ).toEqual(["assignee.name"]);
   });
 });

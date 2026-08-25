@@ -18,6 +18,30 @@ function isTaskNameMissing(task: AsanaTask): boolean {
   return !task.name.trim();
 }
 
+// A real, non-null `gid` that has no resolvable `name` — a restricted-
+// visibility user, a since-deactivated or merged Asana account, or any
+// `opt_fields` omission — is a genuinely different case from the task
+// honestly having no assignee at all (`assignee === null`). Collapsing
+// both into the same `null` output (found by a deep audit) silently
+// turns a real, owned task into one that reads as unowned everywhere
+// downstream (`overdue-task.ts`'s owner fallback, the "who owns it?"
+// question this app exists to answer). Falls back to a placeholder
+// carrying the real id instead, the same pattern already used for
+// Zendesk's `resolveZendeskUserName`/QuickBooks' `CustomerRef.name`.
+function resolveAsanaAssigneeName(
+  assignee: AsanaTask["assignee"],
+): string | null {
+  if (assignee === null) {
+    return null;
+  }
+
+  return assignee.name?.trim() || `Asana user ${assignee.gid}`;
+}
+
+function isAsanaAssigneeNameUnresolvable(task: AsanaTask): boolean {
+  return task.assignee !== null && !task.assignee.name?.trim();
+}
+
 /**
  * Reports which critical fields this task would need a fallback for,
  * without performing the mapping itself — same schema-drift-visibility
@@ -28,7 +52,17 @@ function isTaskNameMissing(task: AsanaTask): boolean {
 export function detectAsanaTaskDefaultedFields(
   task: AsanaTask,
 ): readonly string[] {
-  return isTaskNameMissing(task) ? ["name"] : [];
+  const defaulted: string[] = [];
+
+  if (isTaskNameMissing(task)) {
+    defaulted.push("name");
+  }
+
+  if (isAsanaAssigneeNameUnresolvable(task)) {
+    defaulted.push("assignee.name");
+  }
+
+  return defaulted;
 }
 
 /**
@@ -71,7 +105,7 @@ export function mapAsanaTaskToSourceTaskRecord(
   return {
     id: randomUUID(),
     name: isTaskNameMissing(task) ? "Untitled Asana task" : task.name.trim(),
-    assigneeName: task.assignee?.name?.trim() || null,
+    assigneeName: resolveAsanaAssigneeName(task.assignee),
     dueAt,
     completed: task.completed,
     source: {

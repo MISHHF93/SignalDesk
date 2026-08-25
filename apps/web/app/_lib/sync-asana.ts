@@ -30,10 +30,11 @@ const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
 export interface AsanaSyncResult {
   readonly ingested: number;
   readonly skipped: number;
-  /** Tasks whose `name` was missing and fell back to a placeholder
-   * (`detectAsanaTaskDefaultedFields`) — mirrors `sync-hubspot.ts`'s own
-   * `defaultedNameCount`: logged for visibility, deliberately never
-   * folded into `skipped`, since the record still ingested successfully. */
+  /** Tasks whose `name` or resolved assignee name was missing/unresolvable
+   * and fell back to a placeholder (`detectAsanaTaskDefaultedFields`) —
+   * mirrors `sync-hubspot.ts`'s own `defaultedNameCount`: logged for
+   * visibility, deliberately never folded into `skipped`, since the
+   * record still ingested successfully. */
   readonly defaultedNameCount: number;
 }
 
@@ -232,7 +233,7 @@ export async function syncAsanaTasks(
   if (defaultedNameCount > 0) {
     logger.log(
       "warn",
-      `Asana sync: ${defaultedNameCount} task(s) had no usable name and fell back to a placeholder.`,
+      `Asana sync: ${defaultedNameCount} task(s) had an unresolvable name or assignee and fell back to a placeholder.`,
       {
         operation: "sync_asana.task_defaulted_name",
         connectorSlug: "asana",
