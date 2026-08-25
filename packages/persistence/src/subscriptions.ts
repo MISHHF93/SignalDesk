@@ -246,6 +246,22 @@ export interface UpdateSubscriptionFromStripeInput {
   readonly currentPeriodEnd?: Date | null;
   readonly cancelAtPeriodEnd?: boolean;
   readonly canceledAt?: Date | null;
+  /** The real Stripe event's own `created` timestamp (webhook callers
+   * only — direct, synchronous callers like cancel/resume/change-plan
+   * Server Actions and the reconciliation cron have no such value and
+   * should omit this entirely). When present, this write is only applied
+   * if it's at least as new as whatever event last actually wrote this
+   * row (`stripe_event_synced_at`) — Stripe does not guarantee webhook
+   * delivery order, so without this guard a delayed retry of a stale
+   * event (e.g. an old `invoice.payment_failed` arriving after a newer
+   * `customer.subscription.updated` already recorded `active`) could
+   * silently regress real state back to something Stripe itself has
+   * already superseded. Omitted entirely, this behaves exactly as before
+   * — an unconditional write, correct for a caller that just read fresh
+   * ground truth directly (a synchronous API response, or the
+   * reconciliation sweep's own `retrieveRawSubscription` call), not an
+   * out-of-band, possibly-delayed event. */
+  readonly stripeEventCreatedAt?: Date;
 }
 
 /**
@@ -257,6 +273,13 @@ export interface UpdateSubscriptionFromStripeInput {
  * `withTenantContext` lookup by Stripe id would need tenant context we
  * don't have yet at that point; this function assumes the tenant context
  * the caller already established.
+ *
+ * Returns `null` both when no row matches and when a real row exists but
+ * `stripeEventCreatedAt`'s ordering guard rejected this specific write as
+ * stale — the caller can't currently tell those two apart, matching this
+ * function's existing "no distinct not-found signal" contract; neither
+ * caller today needs to distinguish them (the webhook handler treats
+ * either case as "nothing more to do here").
  */
 export async function updateSubscriptionFromStripe(
   pool: DatabasePool,
@@ -275,8 +298,14 @@ export async function updateSubscriptionFromStripe(
            current_period_end = case when $11::boolean then $12::timestamptz else current_period_end end,
            cancel_at_period_end = coalesce($13, cancel_at_period_end),
            canceled_at = case when $14::boolean then $15::timestamptz else canceled_at end,
+           stripe_event_synced_at = case when $16::boolean then $17::timestamptz else stripe_event_synced_at end,
            updated_at = now()
        where organization_id = $1 and stripe_subscription_id = $2
+         and (
+           $16::boolean = false
+           or stripe_event_synced_at is null
+           or stripe_event_synced_at <= $17::timestamptz
+         )
        returning id, organization_id, plan_id, plan_price_id, status, stripe_customer_id,
                  stripe_subscription_id, stripe_mode, trial_ends_at, current_period_start,
                  current_period_end, cancel_at_period_end, canceled_at`,
@@ -296,6 +325,8 @@ export async function updateSubscriptionFromStripe(
         input.cancelAtPeriodEnd ?? null,
         "canceledAt" in input,
         input.canceledAt ?? null,
+        input.stripeEventCreatedAt !== undefined,
+        input.stripeEventCreatedAt ?? null,
       ],
     );
 

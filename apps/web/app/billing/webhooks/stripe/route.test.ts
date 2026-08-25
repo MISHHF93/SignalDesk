@@ -64,9 +64,14 @@ function subscriptionUpdatedEvent(input: {
   readonly status: string;
   readonly currentPeriodStart: number;
   readonly currentPeriodEnd: number;
+  /** Stripe's own event-level `created` (Unix seconds) — defaults to
+   * "now" for tests that don't care about delivery ordering; the
+   * out-of-order regression tests below set this explicitly. */
+  readonly created?: number;
 }) {
   return {
     id: `evt_${randomUUID()}`,
+    created: input.created ?? Math.floor(Date.now() / 1000),
     type: "customer.subscription.updated",
     data: {
       object: {
@@ -89,13 +94,18 @@ function subscriptionUpdatedEvent(input: {
   };
 }
 
-function invoicePaymentFailedEvent(stripeSubscriptionId: string) {
+function invoicePaymentFailedEvent(
+  stripeSubscriptionId: string,
+  options?: { readonly customer?: string; readonly created?: number },
+) {
   return {
     id: `evt_${randomUUID()}`,
+    created: options?.created ?? Math.floor(Date.now() / 1000),
     type: "invoice.payment_failed",
     data: {
       object: {
         subscription: stripeSubscriptionId,
+        customer: options?.customer ?? null,
       },
     },
   };
@@ -234,6 +244,78 @@ describe.skipIf(!process.env.DATABASE_URL)(
 
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ received: true });
+    });
+
+    it("regression: rejects a stale, out-of-order webhook rather than regressing state a newer event already recorded", async () => {
+      // Real bug found by review: Stripe does not guarantee webhook
+      // delivery order. A delayed retry of an older event arriving after
+      // a newer one already applied used to silently overwrite the
+      // correct, newer state with the stale one.
+      const { organizationId, stripeSubscriptionId, stripeCustomerId } =
+        await seedSubscribedOrganization();
+      const now = Math.floor(Date.now() / 1000);
+      const periodEnd = now + 30 * 24 * 60 * 60;
+
+      const newerEvent = subscriptionUpdatedEvent({
+        stripeSubscriptionId,
+        stripeCustomerId,
+        status: "active",
+        currentPeriodStart: now,
+        currentPeriodEnd: periodEnd,
+        created: now,
+      });
+
+      const newerResponse = await POST(signedRequest(newerEvent));
+      expect(newerResponse.status).toBe(200);
+
+      const afterNewer = await getOrganizationSubscription(
+        pool,
+        organizationId,
+      );
+      expect(afterNewer?.status).toBe("active");
+
+      // A delayed retry of an event Stripe generated an hour *before* the
+      // one that already applied arrives late — this must not regress
+      // the subscription back to 'past_due'.
+      const staleEvent = invoicePaymentFailedEvent(stripeSubscriptionId, {
+        created: now - 60 * 60,
+      });
+
+      const staleResponse = await POST(signedRequest(staleEvent));
+      expect(staleResponse.status).toBe(200);
+
+      const afterStale = await getOrganizationSubscription(
+        pool,
+        organizationId,
+      );
+      expect(afterStale?.status).toBe("active");
+    });
+
+    it("still applies a genuinely newer event after an older one, rather than blocking every later write", async () => {
+      const { organizationId, stripeSubscriptionId, stripeCustomerId } =
+        await seedSubscribedOrganization();
+      const now = Math.floor(Date.now() / 1000);
+
+      const olderEvent = subscriptionUpdatedEvent({
+        stripeSubscriptionId,
+        stripeCustomerId,
+        status: "active",
+        currentPeriodStart: now,
+        currentPeriodEnd: now + 30 * 24 * 60 * 60,
+        created: now - 60 * 60,
+      });
+
+      await POST(signedRequest(olderEvent));
+
+      const newerFailedEvent = invoicePaymentFailedEvent(stripeSubscriptionId, {
+        created: now,
+      });
+
+      const response = await POST(signedRequest(newerFailedEvent));
+      expect(response.status).toBe(200);
+
+      const after = await getOrganizationSubscription(pool, organizationId);
+      expect(after?.status).toBe("past_due");
     });
   },
 );

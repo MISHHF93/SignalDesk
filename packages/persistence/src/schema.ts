@@ -2553,6 +2553,20 @@ export const organizationSubscriptions = pgTable(
       mode: "date",
       withTimezone: true,
     }),
+    // The real Stripe event `created` timestamp of whichever webhook last
+    // actually wrote this row's Stripe-mirrored fields — `null` until the
+    // first webhook for this subscription lands. `updateSubscriptionFromStripe`
+    // (packages/persistence/src/subscriptions.ts) uses this to reject an
+    // out-of-order webhook retry (Stripe does not guarantee delivery
+    // order) rather than let a stale event silently regress state a newer
+    // one already superseded. Direct, synchronous callers (cancel/resume/
+    // change-plan Server Actions, the reconciliation cron's own fresh
+    // Stripe read) have no event to compare and don't touch this guard at
+    // all.
+    stripeEventSyncedAt: timestamp("stripe_event_synced_at", {
+      mode: "date",
+      withTimezone: true,
+    }),
     ...timestamps,
   },
   (table) => [

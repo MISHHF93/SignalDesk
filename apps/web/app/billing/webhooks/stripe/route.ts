@@ -32,6 +32,7 @@ function getPool(): DatabasePool {
 
 interface RawInvoice {
   readonly subscription: string | null;
+  readonly customer: string | null;
 }
 
 /**
@@ -40,10 +41,16 @@ interface RawInvoice {
  * current state onto it, via the same `mapStripeSubscriptionToSyncFields`
  * mapping the reconciliation sweep (`api/cron/billing-reconciliation/
  * route.ts`) reads Stripe's raw payload through — one tested source of
- * truth for both paths, not two independent guesses.
+ * truth for both paths, not two independent guesses. `eventCreatedAt`
+ * (the real Stripe event's own `created` timestamp, not this handler's
+ * own processing time) lets `updateSubscriptionFromStripe` reject this
+ * write if a newer event already recorded fresher state — see that
+ * function's own doc comment for why, since Stripe doesn't guarantee
+ * webhook delivery order.
  */
 async function syncSubscription(
   subscription: RawStripeSubscription,
+  eventCreatedAt: Date,
 ): Promise<void> {
   const db = getPool();
   const organizationId =
@@ -63,19 +70,32 @@ async function syncSubscription(
   await updateSubscriptionFromStripe(db, organizationId, subscription.id, {
     ...fields,
     status: fields.status as SubscriptionStatus,
+    stripeEventCreatedAt: eventCreatedAt,
   });
 }
 
-async function handleInvoicePaymentFailed(invoice: RawInvoice): Promise<void> {
+async function handleInvoicePaymentFailed(
+  invoice: RawInvoice,
+  eventCreatedAt: Date,
+): Promise<void> {
   if (!invoice.subscription) {
     return;
   }
 
   const db = getPool();
-  const organizationId = await findOrganizationIdByStripeSubscriptionId(
-    db,
-    invoice.subscription,
-  );
+  // Same subscription-id-first, customer-id-fallback resolution as
+  // `syncSubscription` — found missing here by review: without it, a
+  // subscription id this app hasn't recorded yet (the same edge case the
+  // fallback exists for above) silently dropped this event entirely
+  // instead of degrading the same way.
+  const organizationId =
+    (await findOrganizationIdByStripeSubscriptionId(
+      db,
+      invoice.subscription,
+    )) ??
+    (invoice.customer
+      ? await findOrganizationIdByStripeCustomerId(db, invoice.customer)
+      : null);
 
   if (!organizationId) {
     return;
@@ -83,6 +103,7 @@ async function handleInvoicePaymentFailed(invoice: RawInvoice): Promise<void> {
 
   await updateSubscriptionFromStripe(db, organizationId, invoice.subscription, {
     status: "past_due",
+    stripeEventCreatedAt: eventCreatedAt,
   });
 }
 
@@ -145,6 +166,12 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
+  // Stripe's own `created` is a Unix-seconds timestamp of when Stripe
+  // generated this event — the real ordering signal `syncSubscription`/
+  // `handleInvoicePaymentFailed` need, distinct from (and more meaningful
+  // than) whenever this handler happens to process it.
+  const eventCreatedAt = new Date(event.created * 1000);
+
   try {
     switch (event.type) {
       case "customer.subscription.created":
@@ -152,11 +179,13 @@ export async function POST(request: Request): Promise<NextResponse> {
       case "customer.subscription.deleted":
         await syncSubscription(
           event.data.object as unknown as RawStripeSubscription,
+          eventCreatedAt,
         );
         break;
       case "invoice.payment_failed":
         await handleInvoicePaymentFailed(
           event.data.object as unknown as RawInvoice,
+          eventCreatedAt,
         );
         break;
       case "customer.subscription.trial_will_end": {

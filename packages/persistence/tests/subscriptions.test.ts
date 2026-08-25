@@ -140,6 +140,130 @@ describe.skipIf(!process.env.DATABASE_URL)(
       );
     });
 
+    it("regression: rejects a write whose stripeEventCreatedAt is older than the last one that actually applied", async () => {
+      // Real bug found by review: Stripe does not guarantee webhook
+      // delivery order. Without this guard, a delayed retry of an older
+      // event arriving after a newer one already applied would silently
+      // overwrite the correct, newer state with the stale one.
+      const { organizationId } = await seedMembership(pool);
+      const business = await getPlanByKey(pool, "business");
+      const stripeSubscriptionId = `sub_test_${organizationId}`;
+      const now = new Date();
+      const anHourAgo = new Date(now.getTime() - 60 * 60 * 1000);
+
+      await createOrganizationSubscription(pool, organizationId, {
+        planId: business?.id as string,
+        planPriceId: null,
+        status: "trialing",
+        stripeCustomerId: `cus_test_${organizationId}`,
+        stripeSubscriptionId,
+        stripeMode: "test",
+        trialEndsAt: null,
+        currentPeriodStart: null,
+        currentPeriodEnd: null,
+      });
+
+      const newer = await updateSubscriptionFromStripe(
+        pool,
+        organizationId,
+        stripeSubscriptionId,
+        { status: "active", stripeEventCreatedAt: now },
+      );
+      expect(newer?.status).toBe("active");
+
+      const stale = await updateSubscriptionFromStripe(
+        pool,
+        organizationId,
+        stripeSubscriptionId,
+        { status: "past_due", stripeEventCreatedAt: anHourAgo },
+      );
+      expect(stale).toBeNull();
+
+      const fetched = await getOrganizationSubscription(pool, organizationId);
+      expect(fetched?.status).toBe("active");
+    });
+
+    it("regression: still applies a genuinely newer stripeEventCreatedAt write after an older one", async () => {
+      const { organizationId } = await seedMembership(pool);
+      const business = await getPlanByKey(pool, "business");
+      const stripeSubscriptionId = `sub_test_${organizationId}`;
+      const anHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+      const now = new Date();
+
+      await createOrganizationSubscription(pool, organizationId, {
+        planId: business?.id as string,
+        planPriceId: null,
+        status: "trialing",
+        stripeCustomerId: `cus_test_${organizationId}`,
+        stripeSubscriptionId,
+        stripeMode: "test",
+        trialEndsAt: null,
+        currentPeriodStart: null,
+        currentPeriodEnd: null,
+      });
+
+      await updateSubscriptionFromStripe(
+        pool,
+        organizationId,
+        stripeSubscriptionId,
+        {
+          status: "active",
+          stripeEventCreatedAt: anHourAgo,
+        },
+      );
+
+      const updated = await updateSubscriptionFromStripe(
+        pool,
+        organizationId,
+        stripeSubscriptionId,
+        { status: "past_due", stripeEventCreatedAt: now },
+      );
+
+      expect(updated?.status).toBe("past_due");
+    });
+
+    it("applies unconditionally, with no ordering guard, when stripeEventCreatedAt is omitted", async () => {
+      // Direct, synchronous callers (cancel/resume/change-plan Server
+      // Actions, the reconciliation cron) have no event to compare and
+      // must keep their existing always-write behavior.
+      const { organizationId } = await seedMembership(pool);
+      const business = await getPlanByKey(pool, "business");
+      const stripeSubscriptionId = `sub_test_${organizationId}`;
+
+      await createOrganizationSubscription(pool, organizationId, {
+        planId: business?.id as string,
+        planPriceId: null,
+        status: "trialing",
+        stripeCustomerId: `cus_test_${organizationId}`,
+        stripeSubscriptionId,
+        stripeMode: "test",
+        trialEndsAt: null,
+        currentPeriodStart: null,
+        currentPeriodEnd: null,
+      });
+
+      await updateSubscriptionFromStripe(
+        pool,
+        organizationId,
+        stripeSubscriptionId,
+        {
+          status: "active",
+          stripeEventCreatedAt: new Date(),
+        },
+      );
+
+      // No stripeEventCreatedAt at all here — must not be blocked by the
+      // synced timestamp the previous call just recorded.
+      const updated = await updateSubscriptionFromStripe(
+        pool,
+        organizationId,
+        stripeSubscriptionId,
+        { status: "past_due" },
+      );
+
+      expect(updated?.status).toBe("past_due");
+    });
+
     it("resurrects a canceled subscription into a brand new one, in place", async () => {
       const { organizationId } = await seedMembership(pool);
       const business = await getPlanByKey(pool, "business");
