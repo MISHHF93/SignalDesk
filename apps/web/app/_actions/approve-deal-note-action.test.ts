@@ -224,6 +224,27 @@ describe("approveDealNoteProposalAction", () => {
     expect(mockedBeginSend).not.toHaveBeenCalled();
   });
 
+  it("regression: never passes expectedAmountCents to the Pre-Flight Policy Audit, even for a valued lead", async () => {
+    // Real bug found by review: this used to pass expectedAmountCents
+    // whenever the lead had a nonzero valueCents, but a deal note is
+    // free-text relationship content with no expected dollar figure —
+    // pre-flight-policy-audit.ts's own doc comment says only an invoice
+    // reminder carries one. Passing it permanently blocked every
+    // deterministically-drafted deal note for a valued lead (that
+    // template never states a dollar amount) with an "amount mismatch"
+    // violation.
+    mockedGetCurrentOrganization.mockResolvedValue(SESSION);
+    mockedGetAgentCollaboration.mockResolvedValue(FRESH_COLLABORATION);
+    mockedBeginSend.mockResolvedValue({ id: "send-1", alreadyResolved: null });
+    mockedCreateDealNote.mockResolvedValue({ noteId: "note-1" });
+
+    await approveDealNoteProposalAction("collab-1");
+
+    expect(mockedRunPreFlightPolicyAudit).toHaveBeenCalledWith(
+      expect.not.objectContaining({ expectedAmountCents: expect.anything() }),
+    );
+  });
+
   it("blocks a fresh approval at the daily post-volume limit, recording why", async () => {
     mockedGetCurrentOrganization.mockResolvedValue(SESSION);
     mockedGetAgentCollaboration.mockResolvedValue(FRESH_COLLABORATION);

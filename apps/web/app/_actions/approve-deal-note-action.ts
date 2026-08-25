@@ -308,11 +308,20 @@ export async function approveDealNoteProposalAction(
       leadId,
     );
 
+    // Real bug found by review: this used to pass expectedAmountCents
+    // whenever the lead had a nonzero value, but a deal note is free-text
+    // relationship-management content with no expected dollar figure to
+    // validate against — pre-flight-policy-audit.ts's own doc comment
+    // already documents that only an invoice reminder carries one, and
+    // that a task nudge/deal note/ticket reply never should. Passing it
+    // here meant every deal-note approval for a valued lead drafted via
+    // the deterministic specialist (draftDealNoteDeterministically's own
+    // template never states a dollar amount) was permanently blocked by
+    // the "doesn't state a dollar amount at all" violation — a full
+    // functional break of this feature whenever ANTHROPIC_API_KEY isn't
+    // configured, not an edge case.
     const policyAudit = runPreFlightPolicyAudit({
       draftedContent,
-      ...(leadForAudit.valueCents > 0
-        ? { expectedAmountCents: leadForAudit.valueCents }
-        : {}),
       mostRecentSentAt,
     });
 
