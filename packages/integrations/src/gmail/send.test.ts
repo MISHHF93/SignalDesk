@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UpstreamProviderError } from "../shared/upstream-error";
 import {
   GmailInsufficientScopeError,
+  GmailInvalidRecipientError,
   sendGmailMessage,
   type SendGmailMessageInput,
 } from "./client";
@@ -105,6 +106,39 @@ describe("sendGmailMessage", () => {
 
     expect(rawMessage).toMatch(/Subject: =\?UTF-8\?B\?/);
     expect(rawMessage).not.toContain("Café");
+  });
+
+  it("regression: refuses to send when the recipient address contains a line break, never calling Gmail", async () => {
+    // Real vulnerability found by review: `To: ${input.to}` is spliced
+    // directly into a raw RFC 2822 header line with no escaping (unlike
+    // Subject, which always gets MIME-encoded whenever it isn't plain
+    // printable ASCII — see the "MIME-encodes a non-ASCII subject" test
+    // above). counterpartyEmail's own schema only trims/lowercases/bounds
+    // the value; it was never a real mailbox validator. Without this
+    // guard, an embedded CR/LF in a stored counterparty address would let
+    // an attacker terminate the To header early and inject arbitrary
+    // extra headers (a hidden Bcc, a rewritten Subject) into a message
+    // this app sends on the tenant's behalf.
+    await expect(
+      sendGmailMessage("access-token", {
+        ...INPUT,
+        to: "victim@example.com>\r\nBcc: attacker@evil.example",
+      }),
+    ).rejects.toThrow(GmailInvalidRecipientError);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("still sends a normal single-line address unaffected by the guard", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, { id: "msg_1", threadId: "thread-123" }),
+    );
+
+    await sendGmailMessage("access-token", INPUT);
+
+    const rawMessage = decodeRawMessage(fetchMock);
+
+    expect(rawMessage).toContain(`To: ${INPUT.to}`);
   });
 
   it("throws GmailInsufficientScopeError on a real insufficient-scope 403, not a generic upstream error", async () => {

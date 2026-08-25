@@ -201,7 +201,10 @@ export interface SendGmailMessageResult {
  * RFC 2822 header values must be ASCII; non-ASCII text (a customer's real
  * name, an accented word in a subject) is instead carried as a MIME
  * "encoded word" (RFC 2047) — never sent as raw UTF-8 bytes in a header,
- * which mail servers are not required to accept.
+ * which mail servers are not required to accept. Any embedded CR/LF also
+ * falls outside `\x20-\x7E`, so it always takes this same base64 path too —
+ * a literal control character can never survive into the header line this
+ * produces.
  */
 function encodeMimeHeaderValue(value: string): string {
   if (/^[\x20-\x7E]*$/.test(value)) {
@@ -211,7 +214,45 @@ function encodeMimeHeaderValue(value: string): string {
   return `=?UTF-8?B?${Buffer.from(value, "utf-8").toString("base64")}?=`;
 }
 
+/**
+ * A real Gmail rejection this app can name specifically, distinct from
+ * `UpstreamProviderError` (no HTTP response is involved — this is a local
+ * check, same shape as `GmailInsufficientScopeError`) and from a generic
+ * `Error` (the approve action needs to tell this apart from a genuinely
+ * ambiguous failure — see `approve-message-reply-action.ts`).
+ */
+export class GmailInvalidRecipientError extends Error {
+  constructor() {
+    super(
+      "This message's recipient address contains a line break and cannot be sent safely.",
+    );
+    this.name = "GmailInvalidRecipientError";
+  }
+}
+
+/**
+ * Unlike Subject (see `encodeMimeHeaderValue` above), `To` must stay a real,
+ * unencoded RFC 5321 mailbox — an SMTP server needs it literally
+ * addressable, not a MIME "encoded word" (that's only valid for a display
+ * name/phrase, not the address itself). So a `To` value can't be defused
+ * the way Subject's is; a literal CR/LF in it must instead be refused
+ * outright, since letting it through would let the value terminate this
+ * header early and inject arbitrary extra headers (a hidden Bcc, a
+ * rewritten Subject) into the raw message this function builds.
+ * `counterpartyEmail`'s own schema (`packages/schemas/src/index.ts`) only
+ * trims/lowercases/bounds the value — it was never a real mailbox
+ * validator — so this is the actual last line of defense, not a redundant
+ * belt-and-suspenders check.
+ */
+function assertSafeRecipientAddress(to: string): void {
+  if (/[\r\n]/.test(to)) {
+    throw new GmailInvalidRecipientError();
+  }
+}
+
 function buildRawMimeMessage(input: SendGmailMessageInput): string {
+  assertSafeRecipientAddress(input.to);
+
   const headers = [
     `To: ${input.to}`,
     `Subject: ${encodeMimeHeaderValue(input.subject)}`,

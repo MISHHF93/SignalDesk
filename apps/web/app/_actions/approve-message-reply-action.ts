@@ -2,6 +2,7 @@
 
 import {
   GmailInsufficientScopeError,
+  GmailInvalidRecipientError,
   sendGmailMessage,
   UpstreamProviderError,
 } from "@signaldesk/integrations/gmail";
@@ -52,8 +53,10 @@ const MAX_AGENT_EMAIL_SENDS_PER_DAY = 20;
  * logic.
  *
  * Distinguishes a real Gmail rejection (`UpstreamProviderError`/
- * `GmailInsufficientScopeError` — Gmail was reached and definitely did not
- * accept the send) from any other thrown error (network failure, timeout —
+ * `GmailInsufficientScopeError`/`GmailInvalidRecipientError` — Gmail was
+ * reached and definitely did not accept the send, or the send was refused
+ * locally before ever reaching Gmail for a reason that will never resolve
+ * itself) from any other thrown error (network failure, timeout —
  * genuinely unknown whether Gmail received the request). Only the former is
  * recorded as `'failed'` (safe to retry); the latter leaves the row
  * `'pending'`, exactly `beginCustomerEmailReplySend`'s documented, disclosed
@@ -156,14 +159,15 @@ async function attemptSend(
   } catch (error) {
     if (
       error instanceof GmailInsufficientScopeError ||
+      error instanceof GmailInvalidRecipientError ||
       error instanceof UpstreamProviderError
     ) {
       outcome = { status: "failed", failureReason: error.message };
-      // ADR 0058/0059: `GmailInsufficientScopeError` has no HTTP status of
-      // its own (it's a local check, not a caught upstream response) —
-      // only classify when this really is an `UpstreamProviderError`; the
-      // scope error already has its own dedicated, more specific message
-      // (and its own reconnect link) below.
+      // ADR 0058/0059: `GmailInsufficientScopeError`/
+      // `GmailInvalidRecipientError` have no HTTP status of their own
+      // (both are local checks, not a caught upstream response) — only
+      // classify when this really is an `UpstreamProviderError`; the other
+      // two already have their own dedicated, specific messages.
       if (error instanceof UpstreamProviderError) {
         recoveryClassification = classifyRecoveryStrategy(error, {
           providerName: "Gmail",

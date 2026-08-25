@@ -19,6 +19,7 @@ vi.mock("@signaldesk/integrations/gmail", async (importOriginal) => {
 
 import {
   GmailInsufficientScopeError,
+  GmailInvalidRecipientError,
   sendGmailMessage,
   UpstreamProviderError,
 } from "@signaldesk/integrations/gmail";
@@ -264,6 +265,31 @@ describe("approveMessageReplyProposalAction", () => {
     });
     expect(mockedResetAgentCollaborationOutcome).not.toHaveBeenCalled();
     expect(mockedClassifyRecoveryStrategy).not.toHaveBeenCalled();
+  });
+
+  it("regression: records 'failed' (not left stranded 'pending') when the recipient address is refused as unsafe, without rolling back the claim", async () => {
+    // A GmailInvalidRecipientError (packages/integrations/src/gmail/client.ts)
+    // is thrown locally, before Gmail is ever contacted, for an address
+    // containing a line break — a real header-injection vector found by
+    // review. Like GmailInsufficientScopeError, this is never ambiguous:
+    // it will never resolve itself on retry, so it must be recorded
+    // 'failed' rather than left 'pending' forever.
+    mockedGetCurrentOrganization.mockResolvedValue(SESSION);
+    mockedGetAgentCollaboration.mockResolvedValue(FRESH_COLLABORATION);
+    mockedSendGmailMessage.mockRejectedValue(new GmailInvalidRecipientError());
+
+    const result = await approveMessageReplyProposalAction("collab-1");
+
+    expect(result.ok).toBe(false);
+    expect(mockedResetAgentCollaborationOutcome).not.toHaveBeenCalled();
+    expect(mockedClassifyRecoveryStrategy).not.toHaveBeenCalled();
+    expect(mockedCompleteSend).toHaveBeenCalledWith(
+      undefined,
+      "org-1",
+      "user-1",
+      "send-1",
+      expect.objectContaining({ status: "failed" }),
+    );
   });
 
   it("does not roll back the claim on a definite (non-throwing outcome) provider rejection", async () => {
