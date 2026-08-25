@@ -1,0 +1,17 @@
+-- Supabase's own security advisor (run immediately after applying
+-- migrations 0056-0060 to business-dashboard-production): a real,
+-- unauthenticated cross-tenant data leak, found and closed the same
+-- session it was introduced.
+--
+-- list_stripe_linked_subscriptions() (0056_billing_reconciliation_sweep.sql)
+-- is a SECURITY DEFINER function that bypasses RLS and returns every
+-- tenant's Stripe subscription id/customer id/status/billing dates.
+-- Postgres grants EXECUTE to PUBLIC by default on CREATE FUNCTION unless
+-- explicitly revoked; 0056 only ever added an explicit grant to
+-- app_runtime, but never revoked that implicit PUBLIC grant. The result:
+-- the function stayed callable by anon (fully unauthenticated) and
+-- authenticated alike via PostgREST's auto-exposed
+-- /rest/v1/rpc/list_stripe_linked_subscriptions endpoint -- confirmed via
+-- Supabase's advisor immediately after this migration set went live,
+-- before any real traffic could exploit it.
+revoke execute on function public.list_stripe_linked_subscriptions() from public, anon, authenticated;
