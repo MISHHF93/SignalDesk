@@ -14,7 +14,6 @@ import {
   getOrganizationSubscription,
   getPlanByKey,
   getPlanPriceById,
-  recordAuditEvent,
   updateSubscriptionFromStripe,
   withAdvisoryLock,
   type DatabasePool,
@@ -22,6 +21,7 @@ import {
 
 import { describeActionError } from "../_lib/describe-action-error";
 import { checkRateLimit } from "../_lib/rate-limit";
+import { recordAuditEventSafely } from "../_lib/safe-audit-event";
 import { getCurrentOrganization } from "../_lib/session";
 import {
   getStripeSecretKey,
@@ -239,7 +239,7 @@ export async function changePlanAction(
           },
         );
 
-        await recordAuditEvent(db, session.organizationId, {
+        await recordAuditEventSafely(db, session.organizationId, {
           userId: session.userId,
           eventType: "subscription.plan_changed",
           subjectType: "organization_subscription",

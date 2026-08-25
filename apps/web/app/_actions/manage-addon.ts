@@ -12,7 +12,6 @@ import {
   getEnabledPlanAddons,
   getOrganizationSubscription,
   listSubscriptionAddons,
-  recordAuditEvent,
   removeSubscriptionAddon,
   upsertSubscriptionAddon,
   withAdvisoryLock,
@@ -21,6 +20,7 @@ import {
 
 import { describeActionError } from "../_lib/describe-action-error";
 import { checkRateLimit } from "../_lib/rate-limit";
+import { recordAuditEventSafely } from "../_lib/safe-audit-event";
 import { getCurrentOrganization } from "../_lib/session";
 import {
   getStripeSecretKey,
@@ -131,7 +131,7 @@ export async function addAddonAction(
           result.subscriptionItemId,
         );
 
-        await recordAuditEvent(db, session.organizationId, {
+        await recordAuditEventSafely(db, session.organizationId, {
           userId: session.userId,
           eventType: "subscription.addon_added",
           subjectType: "organization_subscription",
@@ -246,7 +246,7 @@ export async function removeAddonAction(
           addon.id,
         );
 
-        await recordAuditEvent(db, session.organizationId, {
+        await recordAuditEventSafely(db, session.organizationId, {
           userId: session.userId,
           eventType: "subscription.addon_removed",
           subjectType: "organization_subscription",

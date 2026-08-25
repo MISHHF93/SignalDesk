@@ -9,13 +9,13 @@ import {
 import {
   createDatabasePool,
   getOrganizationSubscription,
-  recordAuditEvent,
   updateSubscriptionFromStripe,
   type DatabasePool,
 } from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
 import { checkRateLimit } from "../_lib/rate-limit";
+import { recordAuditEventSafely } from "../_lib/safe-audit-event";
 import { getCurrentOrganization } from "../_lib/session";
 import { getStripeSecretKey } from "../_lib/stripe-billing-config";
 
@@ -95,7 +95,7 @@ export async function resumeSubscriptionAction(
       },
     );
 
-    await recordAuditEvent(db, session.organizationId, {
+    await recordAuditEventSafely(db, session.organizationId, {
       userId: session.userId,
       eventType: "subscription.resumed",
       subjectType: "organization_subscription",

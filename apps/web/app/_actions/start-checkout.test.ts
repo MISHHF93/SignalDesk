@@ -242,4 +242,32 @@ describe("startCheckoutAction — paid checkout audit trail", () => {
     );
     expect(mockedRecordAuditEvent).toHaveBeenCalled();
   });
+
+  it("regression: still reports the real successful checkout even when recording the audit event itself fails", async () => {
+    // Same real bug shape as the promo-redemption regression above,
+    // applied to the trailing recordAuditEvent call itself
+    // (recordAuditEventSafely, apps/web/app/_lib/safe-audit-event.ts): by
+    // the time it runs, the real Stripe subscription and the local row
+    // already exist, so a transient failure here must never turn an
+    // already-real success into a reported "Checkout failed."
+    mockedRecordAuditEvent.mockRejectedValue(
+      new Error("audit_events insert timed out"),
+    );
+
+    const result = await startCheckoutAction(
+      { error: null, clientSecret: null },
+      paidCheckoutFormData(),
+    );
+
+    expect(result).toEqual({
+      error: null,
+      clientSecret: "pi_123_secret_abc", // gitleaks:allow — fake test fixture, not a real Stripe secret
+    });
+    expect(mockedErrorReporterCaptureException).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({
+        operation: "billing_action.record_audit_event",
+      }),
+    );
+  });
 });

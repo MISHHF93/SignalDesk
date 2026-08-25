@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../_lib/session");
 vi.mock("../_lib/rate-limit");
 vi.mock("../_lib/stripe-billing-config");
+vi.mock("../_lib/error-reporter");
 vi.mock("next/navigation");
 vi.mock("@signaldesk/persistence");
 vi.mock("@signaldesk/integrations/stripe-billing");
@@ -24,6 +25,7 @@ import {
   withAdvisoryLock,
 } from "@signaldesk/persistence";
 
+import { errorReporter } from "../_lib/error-reporter";
 import { getCurrentOrganization } from "../_lib/session";
 import {
   getStripeSecretKey,
@@ -49,6 +51,9 @@ const mockedUpdateSubscriptionFromStripe = vi.mocked(
 );
 const mockedRecordAuditEvent = vi.mocked(recordAuditEvent);
 const mockedRedirect = vi.mocked(redirect);
+const mockedErrorReporterCaptureException = vi.mocked(
+  errorReporter.captureException,
+);
 
 const SESSION = {
   organizationId: "org-1",
@@ -267,6 +272,27 @@ describe("changePlanAction — double-submit protection", () => {
       undefined,
       "org-1",
       expect.objectContaining({ eventType: "subscription.plan_changed" }),
+    );
+  });
+
+  it("regression: still redirects on the real successful plan change even when recording the audit event itself fails", async () => {
+    // Real bug found by review, same shape as cancel/resume-subscription's
+    // own regression: recordAuditEvent used to be a bare call right after
+    // the real Stripe price update and local DB update had already
+    // succeeded — a transient failure here fell into the same catch that
+    // reports "Failed to change your plan," discarding an already-real
+    // success.
+    mockedRecordAuditEvent.mockRejectedValue(
+      new Error("audit_events insert timed out"),
+    );
+
+    await expect(changePlanAction("business")).rejects.toThrow(/NEXT_REDIRECT/);
+
+    expect(mockedErrorReporterCaptureException).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({
+        operation: "billing_action.record_audit_event",
+      }),
     );
   });
 

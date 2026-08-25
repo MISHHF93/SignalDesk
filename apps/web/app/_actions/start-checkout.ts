@@ -16,7 +16,6 @@ import {
   getOrganizationSubscription,
   getPlanByKey,
   getRedeemablePromoPrice,
-  recordAuditEvent,
   recordPromoRedemption,
   resurrectOrganizationSubscription,
   withAdvisoryLock,
@@ -27,6 +26,7 @@ import {
 import { describeActionError } from "../_lib/describe-action-error";
 import { errorReporter } from "../_lib/error-reporter";
 import { checkRateLimit } from "../_lib/rate-limit";
+import { recordAuditEventSafely } from "../_lib/safe-audit-event";
 import { getCurrentOrganization } from "../_lib/session";
 import {
   getStripeMode,
@@ -331,7 +331,7 @@ export async function startCheckoutAction(
             );
           }
 
-          await recordAuditEvent(db, session.organizationId, {
+          await recordAuditEventSafely(db, session.organizationId, {
             userId: session.userId,
             eventType: "subscription.checkout_completed",
             subjectType: "organization_subscription",
@@ -418,7 +418,7 @@ export async function startCheckoutAction(
           );
         }
 
-        await recordAuditEvent(db, session.organizationId, {
+        await recordAuditEventSafely(db, session.organizationId, {
           userId: session.userId,
           eventType: "subscription.checkout_completed",
           subjectType: "organization_subscription",
