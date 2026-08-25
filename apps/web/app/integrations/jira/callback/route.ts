@@ -12,6 +12,7 @@ import {
   storeJiraTokens,
 } from "@signaldesk/persistence";
 
+import { errorReporter } from "../../../_lib/error-reporter";
 import { getJiraOAuthConfig } from "../../../_lib/jira-config";
 import { consumeOAuthState } from "../../../_lib/oauth-state";
 import { checkRateLimit, getClientIp } from "../../../_lib/rate-limit";
@@ -174,7 +175,10 @@ export async function GET(request: Request) {
       `${origin}/integrations/jira?jira=connected&synced=${ingested}`,
     );
   } catch (error) {
-    console.error("Jira OAuth callback failed", error);
+    errorReporter.captureException(error, {
+      operation: "jira_oauth_callback.callback",
+      connectorSlug: "jira",
+    });
     return redirectTo("error");
   }
 }

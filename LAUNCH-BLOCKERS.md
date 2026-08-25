@@ -295,7 +295,7 @@ any of these six connectors syncing content), but real scoping/product
 decisions are needed before building any one of them, not just
 engineering time.
 
-### 11. Structured application logging — partially closed 2026-08-24 (ADR 0061)
+### 11. ~~Structured application logging~~ — RESOLVED 2026-08-24 (ADR 0061)
 
 Distinct from error monitoring (P0 #3). Investigating found Server
 Actions already had real structured error reporting (`errorReporter` via
@@ -307,11 +307,16 @@ monitoring at all. A new `Logger` interface
 (`packages/application/src/observability/logger.ts`, same seam pattern
 as `ErrorReporter`) now covers structured info/warn logging for those
 three, and their genuine caught exceptions now route through the
-existing `errorReporter` too. Still real, still P2, not closed
-completely: ~36 other files (OAuth callbacks, disconnect actions, sync
-functions) still use raw `console.*` — lower operational value than the
-three fixed, since most already fail closed to a safe user-facing
-outcome regardless — see ADR 0061's own scope section.
+existing `errorReporter` too. A same-day follow-up pass then extended
+both seams to all 36 remaining raw `console.*` call sites (14 OAuth
+callbacks, 11 disconnect actions, `delete-organization.ts`,
+`start-checkout.ts`, 8 sync functions, plus
+`billing/payment-method/return/route.ts`, found mid-sweep). The only two
+raw `console.*` call sites left in the app — `error.tsx` (browser-side,
+a different unbuilt seam) and `packages/intelligence/src/registry.ts`
+(would require a new cross-package dependency for one line) — are
+deliberate, documented exclusions, not oversights. See ADR 0061's
+"Follow-up" section for the full account.
 
 ### 12. OAuth-based invite acceptance
 

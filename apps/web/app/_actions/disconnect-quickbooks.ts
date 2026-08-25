@@ -12,6 +12,7 @@ import {
 } from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
+import { logger } from "../_lib/logger";
 import {
   getQuickBooksClientCredentials,
   isQuickBooksConfigured,
@@ -74,8 +75,15 @@ export async function disconnectQuickBooksAction(
         );
 
         if (!revoked) {
-          console.error(
-            `QuickBooks remote token revocation failed for integration ${integration.id}; proceeding with local disconnect anyway`,
+          logger.log(
+            "warn",
+            "QuickBooks remote token revocation failed; proceeding with local disconnect anyway",
+            {
+              operation: "quickbooks_disconnect.revoke_token",
+              connectorSlug: "quickbooks",
+              organizationId: session.organizationId,
+              correlationId: integration.id,
+            },
           );
         }
       }

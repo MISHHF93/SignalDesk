@@ -12,6 +12,7 @@ import {
 } from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
+import { logger } from "../_lib/logger";
 import { getCurrentOrganization } from "../_lib/session";
 
 export interface DisconnectGoogleCalendarState {
@@ -64,8 +65,15 @@ export async function disconnectGoogleCalendarAction(
       const revoked = await revokeGoogleCalendarToken(tokens.refreshToken);
 
       if (!revoked) {
-        console.error(
-          `Google Calendar remote token revocation failed for integration ${integration.id}; proceeding with local disconnect anyway`,
+        logger.log(
+          "warn",
+          "Google Calendar remote token revocation failed; proceeding with local disconnect anyway",
+          {
+            operation: "google-calendar_disconnect.revoke_token",
+            connectorSlug: "google-calendar",
+            organizationId: session.organizationId,
+            correlationId: integration.id,
+          },
         );
       }
     }

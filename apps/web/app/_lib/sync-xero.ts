@@ -20,6 +20,8 @@ import {
 } from "@signaldesk/persistence";
 import { parseSourceInvoiceRecord } from "@signaldesk/schemas";
 
+import { errorReporter } from "./error-reporter";
+import { logger } from "./logger";
 import { getXeroClientCredentials } from "./xero-config";
 
 // Mirrors the QuickBooks sync's own stopgap (see that file's doc comment)
@@ -141,10 +143,12 @@ export async function syncXeroInvoices(
             integrationId,
           });
         } catch (validationError) {
-          console.error(
-            `Skipping Xero invoice ${rawInvoice.InvoiceID}: failed validation`,
-            validationError,
-          );
+          errorReporter.captureException(validationError, {
+            operation: "sync_xero.invoice_validation",
+            connectorSlug: "xero",
+            organizationId,
+            correlationId: integrationId,
+          });
           skipped += 1;
           continue;
         }
@@ -244,8 +248,15 @@ export async function syncXeroInvoices(
   });
 
   if (skipped > 0) {
-    console.error(
-      `Xero sync: skipped ${skipped} invoice(s) that failed validation for integration ${integrationId}.`,
+    logger.log(
+      "warn",
+      `Xero sync: skipped ${skipped} invoice(s) that failed validation.`,
+      {
+        operation: "sync_xero.invoice_summary",
+        connectorSlug: "xero",
+        organizationId,
+        correlationId: integrationId,
+      },
     );
   }
 

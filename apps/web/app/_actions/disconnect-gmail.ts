@@ -12,6 +12,7 @@ import {
 } from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
+import { logger } from "../_lib/logger";
 import { getCurrentOrganization } from "../_lib/session";
 
 export interface DisconnectGmailState {
@@ -65,8 +66,15 @@ export async function disconnectGmailAction(
       const revoked = await revokeGmailToken(tokens.refreshToken);
 
       if (!revoked) {
-        console.error(
-          `Gmail remote token revocation failed for integration ${integration.id}; proceeding with local disconnect anyway`,
+        logger.log(
+          "warn",
+          "Gmail remote token revocation failed; proceeding with local disconnect anyway",
+          {
+            operation: "gmail_disconnect.revoke_token",
+            connectorSlug: "gmail",
+            organizationId: session.organizationId,
+            correlationId: integration.id,
+          },
         );
       }
     }

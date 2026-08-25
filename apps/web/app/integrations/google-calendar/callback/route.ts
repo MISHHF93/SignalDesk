@@ -9,6 +9,7 @@ import {
   storeGoogleCalendarTokens,
 } from "@signaldesk/persistence";
 
+import { errorReporter } from "../../../_lib/error-reporter";
 import { getGoogleOAuthConfig } from "../../../_lib/google-config";
 import {
   consumeOAuthState,
@@ -130,7 +131,10 @@ export async function GET(request: Request) {
       `${origin}/integrations/google-calendar?google-calendar=connected`,
     );
   } catch (error) {
-    console.error("Google Calendar OAuth callback failed", error);
+    errorReporter.captureException(error, {
+      operation: "google-calendar_oauth_callback.callback",
+      connectorSlug: "google-calendar",
+    });
     return redirectTo("error");
   }
 }

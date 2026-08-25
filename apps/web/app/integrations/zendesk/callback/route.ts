@@ -9,6 +9,7 @@ import {
   storeZendeskTokens,
 } from "@signaldesk/persistence";
 
+import { errorReporter } from "../../../_lib/error-reporter";
 import { getZendeskOAuthConfig } from "../../../_lib/zendesk-config";
 import {
   consumeOAuthState,
@@ -178,7 +179,10 @@ export async function GET(request: Request) {
       `${origin}/integrations/zendesk?zendesk=connected&synced=${ingested}`,
     );
   } catch (error) {
-    console.error("Zendesk OAuth callback failed", error);
+    errorReporter.captureException(error, {
+      operation: "zendesk_oauth_callback.callback",
+      connectorSlug: "zendesk",
+    });
     return redirectTo("error");
   }
 }

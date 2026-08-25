@@ -10,6 +10,7 @@ import {
   storeSalesforceTokens,
 } from "@signaldesk/persistence";
 
+import { errorReporter } from "../../../_lib/error-reporter";
 import { getSalesforceOAuthConfig } from "../../../_lib/salesforce-config";
 import {
   consumeOAuthState,
@@ -194,7 +195,10 @@ export async function GET(request: Request) {
       `${origin}/integrations/salesforce?salesforce=connected&synced=${ingested}`,
     );
   } catch (error) {
-    console.error("Salesforce OAuth callback failed", error);
+    errorReporter.captureException(error, {
+      operation: "salesforce_oauth_callback.callback",
+      connectorSlug: "salesforce",
+    });
     return redirectTo("error");
   }
 }

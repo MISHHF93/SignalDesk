@@ -12,6 +12,7 @@ import {
 } from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
+import { logger } from "../_lib/logger";
 import { getCurrentOrganization } from "../_lib/session";
 
 export interface DisconnectZendeskState {
@@ -72,8 +73,15 @@ export async function disconnectZendeskAction(
       );
 
       if (!revoked) {
-        console.error(
-          `Zendesk remote token revocation failed for integration ${integration.id}; proceeding with local disconnect anyway`,
+        logger.log(
+          "warn",
+          "Zendesk remote token revocation failed; proceeding with local disconnect anyway",
+          {
+            operation: "zendesk_disconnect.revoke_token",
+            connectorSlug: "zendesk",
+            organizationId: session.organizationId,
+            correlationId: integration.id,
+          },
         );
       }
     }

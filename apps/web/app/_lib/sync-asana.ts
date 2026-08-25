@@ -20,6 +20,8 @@ import {
 import { parseSourceTaskRecord } from "@signaldesk/schemas";
 
 import { getAsanaClientCredentials } from "./asana-config";
+import { errorReporter } from "./error-reporter";
+import { logger } from "./logger";
 
 // Mirrors the OAuth callback's own per-workspace stopgap.
 const MAX_TASK_PAGES_PER_WORKSPACE = 20;
@@ -159,10 +161,12 @@ export async function syncAsanaTasks(
               integrationId,
             });
           } catch (validationError) {
-            console.error(
-              `Skipping Asana task ${rawTask.gid}: failed validation`,
-              validationError,
-            );
+            errorReporter.captureException(validationError, {
+              operation: "sync_asana.task_validation",
+              connectorSlug: "asana",
+              organizationId,
+              correlationId: integrationId,
+            });
             skipped += 1;
             continue;
           }
@@ -213,14 +217,28 @@ export async function syncAsanaTasks(
   });
 
   if (skipped > 0) {
-    console.error(
-      `Asana sync: skipped ${skipped} task(s) that failed validation for integration ${integrationId}.`,
+    logger.log(
+      "warn",
+      `Asana sync: skipped ${skipped} task(s) that failed validation.`,
+      {
+        operation: "sync_asana.task_summary",
+        connectorSlug: "asana",
+        organizationId,
+        correlationId: integrationId,
+      },
     );
   }
 
   if (defaultedNameCount > 0) {
-    console.error(
-      `Asana sync: ${defaultedNameCount} task(s) had no usable name and fell back to a placeholder for integration ${integrationId}.`,
+    logger.log(
+      "warn",
+      `Asana sync: ${defaultedNameCount} task(s) had no usable name and fell back to a placeholder.`,
+      {
+        operation: "sync_asana.task_defaulted_name",
+        connectorSlug: "asana",
+        organizationId,
+        correlationId: integrationId,
+      },
     );
   }
 

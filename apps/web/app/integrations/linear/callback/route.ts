@@ -12,6 +12,7 @@ import {
   storeLinearTokens,
 } from "@signaldesk/persistence";
 
+import { errorReporter } from "../../../_lib/error-reporter";
 import { getLinearOAuthConfig } from "../../../_lib/linear-config";
 import {
   consumeOAuthState,
@@ -123,7 +124,10 @@ export async function GET(request: Request) {
       `${origin}/integrations/linear?linear=connected`,
     );
   } catch (error) {
-    console.error("Linear OAuth callback failed", error);
+    errorReporter.captureException(error, {
+      operation: "linear_oauth_callback.callback",
+      connectorSlug: "linear",
+    });
     return redirectTo("error");
   }
 }

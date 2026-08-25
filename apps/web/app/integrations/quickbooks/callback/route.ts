@@ -9,6 +9,7 @@ import {
   storeQuickBooksTokens,
 } from "@signaldesk/persistence";
 
+import { errorReporter } from "../../../_lib/error-reporter";
 import { consumeOAuthState } from "../../../_lib/oauth-state";
 import { getQuickBooksOAuthConfig } from "../../../_lib/quickbooks-config";
 import { checkRateLimit, getClientIp } from "../../../_lib/rate-limit";
@@ -187,7 +188,10 @@ export async function GET(request: Request) {
       `${origin}/integrations/quickbooks?quickbooks=connected&synced=${ingested}`,
     );
   } catch (error) {
-    console.error("QuickBooks OAuth callback failed", error);
+    errorReporter.captureException(error, {
+      operation: "quickbooks_oauth_callback.callback",
+      connectorSlug: "quickbooks",
+    });
     return redirectTo("error");
   }
 }

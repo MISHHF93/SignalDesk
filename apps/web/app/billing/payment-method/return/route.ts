@@ -12,6 +12,7 @@ import {
   type DatabasePool,
 } from "@signaldesk/persistence";
 
+import { errorReporter } from "../../../_lib/error-reporter";
 import { getCurrentOrganization } from "../../../_lib/session";
 import { getStripeSecretKey } from "../../../_lib/stripe-billing-config";
 
@@ -93,7 +94,11 @@ export async function GET(request: Request): Promise<NextResponse> {
 
     return redirectTo("payment_method_updated");
   } catch (error) {
-    console.error("Failed to attach payment method after setup", error);
+    errorReporter.captureException(error, {
+      operation: "payment_method_return.attach",
+      connectorSlug: "stripe",
+      organizationId: session.organizationId,
+    });
     return redirectTo("payment_method_failed");
   }
 }

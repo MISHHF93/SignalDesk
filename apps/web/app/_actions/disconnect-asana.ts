@@ -14,6 +14,7 @@ import {
 
 import { getAsanaOAuthConfig, isAsanaConfigured } from "../_lib/asana-config";
 import { describeActionError } from "../_lib/describe-action-error";
+import { logger } from "../_lib/logger";
 import { getCurrentOrganization } from "../_lib/session";
 
 export interface DisconnectAsanaState {
@@ -70,8 +71,15 @@ export async function disconnectAsanaAction(
         const revoked = await revokeAsanaToken(config, tokens.refreshToken);
 
         if (!revoked) {
-          console.error(
-            `Asana remote token revocation failed for integration ${integration.id}; proceeding with local disconnect anyway`,
+          logger.log(
+            "warn",
+            "Asana remote token revocation failed; proceeding with local disconnect anyway",
+            {
+              operation: "asana_disconnect.revoke_token",
+              connectorSlug: "asana",
+              organizationId: session.organizationId,
+              correlationId: integration.id,
+            },
           );
         }
       }

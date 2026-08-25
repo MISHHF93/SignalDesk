@@ -12,6 +12,7 @@ import {
 } from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
+import { logger } from "../_lib/logger";
 import { getCurrentOrganization } from "../_lib/session";
 
 export interface DisconnectLinearState {
@@ -66,8 +67,15 @@ export async function disconnectLinearAction(
       const revoked = await revokeLinearToken(tokens.refreshToken);
 
       if (!revoked) {
-        console.error(
-          `Linear remote token revocation failed for integration ${integration.id}; proceeding with local disconnect anyway`,
+        logger.log(
+          "warn",
+          "Linear remote token revocation failed; proceeding with local disconnect anyway",
+          {
+            operation: "linear_disconnect.revoke_token",
+            connectorSlug: "linear",
+            organizationId: session.organizationId,
+            correlationId: integration.id,
+          },
         );
       }
     }

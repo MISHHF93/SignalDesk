@@ -2,6 +2,9 @@
 
 - Status: Accepted
 - Date: 2026-08-24
+- **Update (2026-08-24, same-day follow-up)**: the "future pass" named in
+  this ADR's own scope section below has now happened — see "Follow-up:
+  the remaining 36 files" after the Consequences section.
 
 ## Context
 
@@ -84,3 +87,63 @@ the same error-reporting seam every Server Action already uses — closing
 the specific, narrow gap this session's own P2 review found, not the
 full 39-file sweep the original LAUNCH-BLOCKERS.md item could have been
 read as implying.
+
+## Follow-up: the remaining 36 files (2026-08-24, same day)
+
+The "future pass" named above happened the same day. All 14 OAuth
+callback routes, all 11 disconnect actions, `delete-organization.ts`'s
+shared token-revocation helper, `start-checkout.ts`'s four orphaned-
+subscription cleanup sites, all 8 `sync-*.ts` functions, and (found in
+the same sweep but missed from the original file list above)
+`billing/payment-method/return/route.ts` now route through the same two
+seams:
+
+- A real caught exception (an OAuth callback's catch block, a sync
+  function's per-record validation failure, an orphaned-subscription
+  cleanup failure) → `errorReporter.captureException(error, { operation,
+connectorSlug, organizationId?, correlationId? })`.
+- A non-exception operational event with no error object (a remote
+  token-revocation call that returned `false` rather than throwing, a
+  sync's end-of-run "skipped N records" or "N records had a defaulted
+  name" summary) → `logger.log("warn", message, { ...same context
+shape })`.
+
+`operation` values follow a `<file_or_domain>.<action>` convention
+matching the three original Route Handlers (e.g.
+`asana_oauth_callback.callback`, `sync_quickbooks.invoice_validation`,
+`stripe_disconnect.revoke_token`, `delete_organization.revoke_token`,
+`start_checkout.cancel_orphaned_subscription`).
+
+**Still deliberately untouched, not overlooked:**
+
+- **`apps/web/app/error.tsx`**. A `"use client"` error boundary — its
+  `console.error(error)` runs in the browser, not Node. That is a
+  different, currently unbuilt seam (client-side error tracking, e.g. a
+  browser SDK for the same error-monitoring vendor P0 #3 is waiting on),
+  not an omission from this one.
+- **`packages/intelligence/src/registry.ts`**. The `intelligence`
+  package does not depend on `@signaldesk/application` — they are
+  sibling layers in this repo's package dependency graph (both consume
+  `persistence`/`goals`/`semantics`; neither consumes the other).
+  Reaching for the `Logger` seam here would mean adding a new
+  cross-package dependency for one console line, a real architecture
+  change out of proportion to what this pass is for.
+- **The 2 `console.info` calls** in `sync-asana.ts`/`sync-quickbooks.ts`
+  (a task/invoice with no due date — already explicitly commented as
+  "not a sync failure," logged for visibility only). Left as `console.info`
+  rather than promoted to `logger.log("info", ...)`: genuinely benign,
+  and touching them added no operational value this pass was chasing.
+- **The disconnect actions' own outer `catch (error) { return { error:
+describeActionError(error, ...) } }` blocks** — already routed through
+  the correct existing seam before this pass; only each file's one
+  non-throwing `if (!revoked)` branch needed the new `logger` call.
+
+Verified with the full sequence this repo's process calls for:
+`pnpm -r typecheck`, `pnpm lint`, `pnpm --filter web test`,
+`pnpm format:check`, and a real `next build` — all clean, all 36 files
+(35 originally scoped + the one found mid-sweep) changed with zero
+behavior change beyond the logging call itself.
+
+This closes LAUNCH-BLOCKERS.md P2 #11 completely — the only two
+remaining raw `console.*` call sites in the app are the two named above,
+both for reasons specific to their own architecture, not oversights.

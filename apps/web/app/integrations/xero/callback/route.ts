@@ -12,6 +12,7 @@ import {
   storeXeroTokens,
 } from "@signaldesk/persistence";
 
+import { errorReporter } from "../../../_lib/error-reporter";
 import { consumeOAuthState } from "../../../_lib/oauth-state";
 import { checkRateLimit, getClientIp } from "../../../_lib/rate-limit";
 import { getCurrentOrganization } from "../../../_lib/session";
@@ -175,7 +176,10 @@ export async function GET(request: Request) {
       `${origin}/integrations/xero?xero=connected&synced=${ingested}`,
     );
   } catch (error) {
-    console.error("Xero OAuth callback failed", error);
+    errorReporter.captureException(error, {
+      operation: "xero_oauth_callback.callback",
+      connectorSlug: "xero",
+    });
     return redirectTo("error");
   }
 }

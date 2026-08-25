@@ -12,6 +12,7 @@ import {
 } from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
+import { logger } from "../_lib/logger";
 import { getCurrentOrganization } from "../_lib/session";
 
 export interface DisconnectHubSpotState {
@@ -71,8 +72,15 @@ export async function disconnectHubSpotAction(
       );
 
       if (!revoked) {
-        console.error(
-          `HubSpot remote token revocation failed for integration ${integration.id}; proceeding with local disconnect anyway`,
+        logger.log(
+          "warn",
+          "HubSpot remote token revocation failed; proceeding with local disconnect anyway",
+          {
+            operation: "hubspot_disconnect.revoke_token",
+            connectorSlug: "hubspot",
+            organizationId: session.organizationId,
+            correlationId: integration.id,
+          },
         );
       }
     }

@@ -9,6 +9,7 @@ import {
   storeMicrosoftCalendarTokens,
 } from "@signaldesk/persistence";
 
+import { errorReporter } from "../../../_lib/error-reporter";
 import { getMicrosoftOAuthConfig } from "../../../_lib/microsoft-config";
 import {
   consumeOAuthState,
@@ -129,7 +130,10 @@ export async function GET(request: Request) {
       `${origin}/integrations/microsoft-calendar?microsoft-calendar=connected`,
     );
   } catch (error) {
-    console.error("Microsoft Calendar OAuth callback failed", error);
+    errorReporter.captureException(error, {
+      operation: "microsoft-calendar_oauth_callback.callback",
+      connectorSlug: "microsoft-calendar",
+    });
     return redirectTo("error");
   }
 }

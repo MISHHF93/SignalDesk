@@ -19,7 +19,9 @@ import {
 } from "@signaldesk/persistence";
 import { parseSourceMessageRecord } from "@signaldesk/schemas";
 
+import { errorReporter } from "./error-reporter";
 import { getGoogleOAuthConfig } from "./google-config";
+import { logger } from "./logger";
 
 // Must match apps/web/app/integrations/gmail/callback/route.ts's own
 // CALLBACK_PATH — not shared as a constant anywhere today (each
@@ -203,10 +205,12 @@ export async function syncGmailMessages(
             leadId: null,
           });
         } catch (validationError) {
-          console.error(
-            `Skipping Gmail message ${fullMessage.id}: failed validation`,
-            validationError,
-          );
+          errorReporter.captureException(validationError, {
+            operation: "sync_gmail.message_validation",
+            connectorSlug: "gmail",
+            organizationId,
+            correlationId: integrationId,
+          });
           skipped += 1;
           continue;
         }
@@ -265,8 +269,15 @@ export async function syncGmailMessages(
   });
 
   if (skipped > 0) {
-    console.error(
-      `Gmail sync: skipped ${skipped} message(s) that failed validation for integration ${integrationId}.`,
+    logger.log(
+      "warn",
+      `Gmail sync: skipped ${skipped} message(s) that failed validation.`,
+      {
+        operation: "sync_gmail.message_summary",
+        connectorSlug: "gmail",
+        organizationId,
+        correlationId: integrationId,
+      },
     );
   }
 

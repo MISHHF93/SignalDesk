@@ -9,6 +9,7 @@ import {
   storeMicrosoftOutlookTokens,
 } from "@signaldesk/persistence";
 
+import { errorReporter } from "../../../_lib/error-reporter";
 import { getMicrosoftOAuthConfig } from "../../../_lib/microsoft-config";
 import {
   consumeOAuthState,
@@ -130,7 +131,10 @@ export async function GET(request: Request) {
       `${origin}/integrations/microsoft-outlook?microsoft-outlook=connected`,
     );
   } catch (error) {
-    console.error("Microsoft Outlook OAuth callback failed", error);
+    errorReporter.captureException(error, {
+      operation: "microsoft-outlook_oauth_callback.callback",
+      connectorSlug: "microsoft-outlook",
+    });
     return redirectTo("error");
   }
 }

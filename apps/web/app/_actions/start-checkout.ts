@@ -24,6 +24,7 @@ import {
 } from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
+import { errorReporter } from "../_lib/error-reporter";
 import { checkRateLimit } from "../_lib/rate-limit";
 import { getCurrentOrganization } from "../_lib/session";
 import {
@@ -261,10 +262,12 @@ export async function startCheckoutAction(
               stripe,
               trial.subscriptionId,
             ).catch((cancelError: unknown) => {
-              console.error(
-                `Failed to cancel orphaned trial subscription ${trial.subscriptionId} after a local save error for organization ${session.organizationId}; needs manual Stripe reconciliation`,
-                cancelError,
-              );
+              errorReporter.captureException(cancelError, {
+                operation: "start_checkout.cancel_orphaned_subscription",
+                connectorSlug: "stripe",
+                organizationId: session.organizationId,
+                correlationId: trial.subscriptionId,
+              });
             });
             throw saveError;
           }
@@ -274,10 +277,12 @@ export async function startCheckoutAction(
               stripe,
               trial.subscriptionId,
             ).catch((cancelError: unknown) => {
-              console.error(
-                `Failed to cancel orphaned trial subscription ${trial.subscriptionId} after resurrectOrganizationSubscription returned null for organization ${session.organizationId}; needs manual Stripe reconciliation`,
-                cancelError,
-              );
+              errorReporter.captureException(cancelError, {
+                operation: "start_checkout.cancel_orphaned_subscription",
+                connectorSlug: "stripe",
+                organizationId: session.organizationId,
+                correlationId: trial.subscriptionId,
+              });
             });
             return {
               error: "Checkout failed. Please try again.",
@@ -326,10 +331,12 @@ export async function startCheckoutAction(
         } catch (saveError) {
           await cancelOrphanedSubscription(stripe, result.subscriptionId).catch(
             (cancelError: unknown) => {
-              console.error(
-                `Failed to cancel orphaned subscription ${result.subscriptionId} after a local save error for organization ${session.organizationId}; needs manual Stripe reconciliation`,
-                cancelError,
-              );
+              errorReporter.captureException(cancelError, {
+                operation: "start_checkout.cancel_orphaned_subscription",
+                connectorSlug: "stripe",
+                organizationId: session.organizationId,
+                correlationId: result.subscriptionId,
+              });
             },
           );
           throw saveError;
@@ -338,10 +345,12 @@ export async function startCheckoutAction(
         if (!savedSubscription) {
           await cancelOrphanedSubscription(stripe, result.subscriptionId).catch(
             (cancelError: unknown) => {
-              console.error(
-                `Failed to cancel orphaned subscription ${result.subscriptionId} after resurrectOrganizationSubscription returned null for organization ${session.organizationId}; needs manual Stripe reconciliation`,
-                cancelError,
-              );
+              errorReporter.captureException(cancelError, {
+                operation: "start_checkout.cancel_orphaned_subscription",
+                connectorSlug: "stripe",
+                organizationId: session.organizationId,
+                correlationId: result.subscriptionId,
+              });
             },
           );
           return {

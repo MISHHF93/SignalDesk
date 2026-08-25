@@ -54,6 +54,8 @@ import {
 
 import { getAsanaOAuthConfig, isAsanaConfigured } from "../_lib/asana-config";
 import { describeActionError } from "../_lib/describe-action-error";
+import { errorReporter } from "../_lib/error-reporter";
+import { logger } from "../_lib/logger";
 import {
   getQuickBooksClientCredentials,
   isQuickBooksConfigured,
@@ -254,15 +256,24 @@ async function revokeRemoteAccess(
     }
 
     if (revoked === false) {
-      console.error(
-        `${sourceSystem} remote token revocation failed for integration ${integrationId} during organization deletion; proceeding with local disconnect anyway`,
+      logger.log(
+        "warn",
+        `${sourceSystem} remote token revocation failed during organization deletion; proceeding with local disconnect anyway`,
+        {
+          operation: "delete_organization.revoke_token",
+          connectorSlug: sourceSystem,
+          organizationId,
+          correlationId: integrationId,
+        },
       );
     }
   } catch (error) {
-    console.error(
-      `${sourceSystem} remote token revocation threw for integration ${integrationId} during organization deletion; proceeding with local disconnect anyway`,
-      error,
-    );
+    errorReporter.captureException(error, {
+      operation: "delete_organization.revoke_token",
+      connectorSlug: sourceSystem,
+      organizationId,
+      correlationId: integrationId,
+    });
   }
 }
 

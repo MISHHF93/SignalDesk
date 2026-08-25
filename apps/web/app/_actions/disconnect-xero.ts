@@ -12,6 +12,7 @@ import {
 } from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
+import { logger } from "../_lib/logger";
 import { getCurrentOrganization } from "../_lib/session";
 import { getXeroClientCredentials } from "../_lib/xero-config";
 
@@ -68,8 +69,15 @@ export async function disconnectXeroAction(
       const revoked = await revokeXeroRefreshToken(config, tokens.refreshToken);
 
       if (!revoked) {
-        console.error(
-          `Xero remote token revocation failed for integration ${integration.id}; proceeding with local disconnect anyway`,
+        logger.log(
+          "warn",
+          "Xero remote token revocation failed; proceeding with local disconnect anyway",
+          {
+            operation: "xero_disconnect.revoke_token",
+            connectorSlug: "xero",
+            organizationId: session.organizationId,
+            correlationId: integration.id,
+          },
         );
       }
     }

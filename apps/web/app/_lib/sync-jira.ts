@@ -17,7 +17,9 @@ import {
 } from "@signaldesk/persistence";
 import { parseSourceTaskRecord } from "@signaldesk/schemas";
 
+import { errorReporter } from "./error-reporter";
 import { getJiraClientCredentials } from "./jira-config";
+import { logger } from "./logger";
 
 // Mirrors the Asana sync's own stopgap (see that file's doc comment) —
 // bounds a single synchronous sync run, not the site's real issue count.
@@ -135,10 +137,12 @@ export async function syncJiraIssues(
             integrationId,
           });
         } catch (validationError) {
-          console.error(
-            `Skipping Jira issue ${rawIssue.key}: failed validation`,
-            validationError,
-          );
+          errorReporter.captureException(validationError, {
+            operation: "sync_jira.issue_validation",
+            connectorSlug: "jira",
+            organizationId,
+            correlationId: integrationId,
+          });
           skipped += 1;
           continue;
         }
@@ -188,8 +192,15 @@ export async function syncJiraIssues(
   });
 
   if (skipped > 0) {
-    console.error(
-      `Jira sync: skipped ${skipped} issue(s) that failed validation for integration ${integrationId}.`,
+    logger.log(
+      "warn",
+      `Jira sync: skipped ${skipped} issue(s) that failed validation.`,
+      {
+        operation: "sync_jira.issue_summary",
+        connectorSlug: "jira",
+        organizationId,
+        correlationId: integrationId,
+      },
     );
   }
 

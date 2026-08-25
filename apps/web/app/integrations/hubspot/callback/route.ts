@@ -10,6 +10,7 @@ import {
   storeHubSpotTokens,
 } from "@signaldesk/persistence";
 
+import { errorReporter } from "../../../_lib/error-reporter";
 import { getHubSpotOAuthConfig } from "../../../_lib/hubspot-config";
 import { consumeOAuthState } from "../../../_lib/oauth-state";
 import { checkRateLimit, getClientIp } from "../../../_lib/rate-limit";
@@ -172,7 +173,10 @@ export async function GET(request: Request) {
       `${origin}/integrations/hubspot?hubspot=connected&synced=${ingested}`,
     );
   } catch (error) {
-    console.error("HubSpot OAuth callback failed", error);
+    errorReporter.captureException(error, {
+      operation: "hubspot_oauth_callback.callback",
+      connectorSlug: "hubspot",
+    });
     return redirectTo("error");
   }
 }

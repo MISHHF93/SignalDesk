@@ -9,6 +9,7 @@ import {
   storeGmailTokens,
 } from "@signaldesk/persistence";
 
+import { errorReporter } from "../../../_lib/error-reporter";
 import { getGoogleOAuthConfig } from "../../../_lib/google-config";
 import {
   consumeOAuthState,
@@ -186,7 +187,10 @@ export async function GET(request: Request) {
       `${origin}/integrations/gmail?gmail=connected&synced=${ingested}`,
     );
   } catch (error) {
-    console.error("Gmail OAuth callback failed", error);
+    errorReporter.captureException(error, {
+      operation: "gmail_oauth_callback.callback",
+      connectorSlug: "gmail",
+    });
     return redirectTo("error");
   }
 }

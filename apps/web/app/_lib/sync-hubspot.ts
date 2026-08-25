@@ -20,7 +20,9 @@ import {
 } from "@signaldesk/persistence";
 import { parseSourceLeadRecord } from "@signaldesk/schemas";
 
+import { errorReporter } from "./error-reporter";
 import { getHubSpotOAuthConfig } from "./hubspot-config";
+import { logger } from "./logger";
 
 // Mirrors the OAuth callback's own stopgap (see that route's doc comment)
 // — bounds a single synchronous sync run, not the account's real deal
@@ -159,10 +161,12 @@ export async function syncHubSpotDeals(
             { organizationId, integrationId },
           );
         } catch (validationError) {
-          console.error(
-            `Skipping HubSpot deal ${deal.id}: failed validation`,
-            validationError,
-          );
+          errorReporter.captureException(validationError, {
+            operation: "sync_hubspot.deal_validation",
+            connectorSlug: "hubspot",
+            organizationId,
+            correlationId: integrationId,
+          });
           skipped += 1;
           continue;
         }
@@ -221,14 +225,28 @@ export async function syncHubSpotDeals(
   });
 
   if (skipped > 0) {
-    console.error(
-      `HubSpot sync: skipped ${skipped} deal(s) that failed validation for integration ${integrationId}.`,
+    logger.log(
+      "warn",
+      `HubSpot sync: skipped ${skipped} deal(s) that failed validation.`,
+      {
+        operation: "sync_hubspot.deal_summary",
+        connectorSlug: "hubspot",
+        organizationId,
+        correlationId: integrationId,
+      },
     );
   }
 
   if (defaultedNameCount > 0) {
-    console.error(
-      `HubSpot sync: ${defaultedNameCount} deal(s) had no usable dealname and fell back to a placeholder for integration ${integrationId}.`,
+    logger.log(
+      "warn",
+      `HubSpot sync: ${defaultedNameCount} deal(s) had no usable dealname and fell back to a placeholder.`,
+      {
+        operation: "sync_hubspot.deal_defaulted_name",
+        connectorSlug: "hubspot",
+        organizationId,
+        correlationId: integrationId,
+      },
     );
   }
 

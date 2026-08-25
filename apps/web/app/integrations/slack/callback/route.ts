@@ -9,6 +9,7 @@ import {
   storeSlackTokens,
 } from "@signaldesk/persistence";
 
+import { errorReporter } from "../../../_lib/error-reporter";
 import { getSlackOAuthConfig } from "../../../_lib/slack-config";
 import { consumeOAuthState } from "../../../_lib/oauth-state";
 import { checkRateLimit, getClientIp } from "../../../_lib/rate-limit";
@@ -114,7 +115,10 @@ export async function GET(request: Request) {
       `${origin}/integrations/slack?slack=connected`,
     );
   } catch (error) {
-    console.error("Slack OAuth callback failed", error);
+    errorReporter.captureException(error, {
+      operation: "slack_oauth_callback.callback",
+      connectorSlug: "slack",
+    });
     return redirectTo("error");
   }
 }

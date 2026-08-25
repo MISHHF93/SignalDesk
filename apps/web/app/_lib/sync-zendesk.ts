@@ -18,6 +18,8 @@ import {
 } from "@signaldesk/persistence";
 import { parseSourceSupportTicketRecord } from "@signaldesk/schemas";
 
+import { errorReporter } from "./error-reporter";
+import { logger } from "./logger";
 import { getZendeskClientCredentials } from "./zendesk-config";
 
 // Mirrors the Jira/Asana sync's own stopgap — bounds a single synchronous
@@ -151,10 +153,12 @@ export async function syncZendeskTickets(
             integrationId,
           });
         } catch (validationError) {
-          console.error(
-            `Skipping Zendesk ticket ${rawTicket.id}: failed validation`,
-            validationError,
-          );
+          errorReporter.captureException(validationError, {
+            operation: "sync_zendesk.ticket_validation",
+            connectorSlug: "zendesk",
+            organizationId,
+            correlationId: integrationId,
+          });
           skipped += 1;
           continue;
         }
@@ -207,14 +211,28 @@ export async function syncZendeskTickets(
   });
 
   if (skipped > 0) {
-    console.error(
-      `Zendesk sync: skipped ${skipped} ticket(s) that failed validation for integration ${integrationId}.`,
+    logger.log(
+      "warn",
+      `Zendesk sync: skipped ${skipped} ticket(s) that failed validation.`,
+      {
+        operation: "sync_zendesk.ticket_summary",
+        connectorSlug: "zendesk",
+        organizationId,
+        correlationId: integrationId,
+      },
     );
   }
 
   if (defaultedNameCount > 0) {
-    console.error(
-      `Zendesk sync: ${defaultedNameCount} ticket(s) had an unresolvable requester/assignee and fell back to a placeholder for integration ${integrationId}.`,
+    logger.log(
+      "warn",
+      `Zendesk sync: ${defaultedNameCount} ticket(s) had an unresolvable requester/assignee and fell back to a placeholder.`,
+      {
+        operation: "sync_zendesk.ticket_defaulted_name",
+        connectorSlug: "zendesk",
+        organizationId,
+        correlationId: integrationId,
+      },
     );
   }
 

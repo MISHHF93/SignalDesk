@@ -10,6 +10,7 @@ import {
 } from "@signaldesk/persistence";
 
 import { getAsanaOAuthConfig } from "../../../_lib/asana-config";
+import { errorReporter } from "../../../_lib/error-reporter";
 import {
   consumeOAuthState,
   consumePkceVerifier,
@@ -168,7 +169,10 @@ export async function GET(request: Request) {
       `${origin}/integrations/asana?asana=connected&synced=${ingested}`,
     );
   } catch (error) {
-    console.error("Asana OAuth callback failed", error);
+    errorReporter.captureException(error, {
+      operation: "asana_oauth_callback.callback",
+      connectorSlug: "asana",
+    });
     return redirectTo("error");
   }
 }

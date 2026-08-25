@@ -28,6 +28,8 @@ import {
   parseSourcePaymentRecord,
 } from "@signaldesk/schemas";
 
+import { errorReporter } from "./error-reporter";
+import { logger } from "./logger";
 import { getQuickBooksClientCredentials } from "./quickbooks-config";
 
 // Mirrors the OAuth callback's own stopgap.
@@ -200,10 +202,12 @@ export async function syncQuickBooksInvoices(
             integrationId,
           });
         } catch (validationError) {
-          console.error(
-            `Skipping QuickBooks invoice ${rawInvoice.Id}: failed validation`,
-            validationError,
-          );
+          errorReporter.captureException(validationError, {
+            operation: "sync_quickbooks.invoice_validation",
+            connectorSlug: "quickbooks",
+            organizationId,
+            correlationId: integrationId,
+          });
           skipped += 1;
           continue;
         }
@@ -287,14 +291,28 @@ export async function syncQuickBooksInvoices(
   });
 
   if (skipped > 0) {
-    console.error(
-      `QuickBooks sync: skipped ${skipped} invoice(s) that failed validation for integration ${integrationId}.`,
+    logger.log(
+      "warn",
+      `QuickBooks sync: skipped ${skipped} invoice(s) that failed validation.`,
+      {
+        operation: "sync_quickbooks.invoice_summary",
+        connectorSlug: "quickbooks",
+        organizationId,
+        correlationId: integrationId,
+      },
     );
   }
 
   if (defaultedNameCount > 0) {
-    console.error(
-      `QuickBooks sync: ${defaultedNameCount} invoice(s) had no usable CustomerRef.name and fell back to a placeholder for integration ${integrationId}.`,
+    logger.log(
+      "warn",
+      `QuickBooks sync: ${defaultedNameCount} invoice(s) had no usable CustomerRef.name and fell back to a placeholder.`,
+      {
+        operation: "sync_quickbooks.invoice_defaulted_name",
+        connectorSlug: "quickbooks",
+        organizationId,
+        correlationId: integrationId,
+      },
     );
   }
 
@@ -373,10 +391,12 @@ export async function syncQuickBooksPayments(
             integrationId,
           });
         } catch (validationError) {
-          console.error(
-            `Skipping QuickBooks payment ${rawPayment.Id}: failed validation`,
-            validationError,
-          );
+          errorReporter.captureException(validationError, {
+            operation: "sync_quickbooks.payment_validation",
+            connectorSlug: "quickbooks",
+            organizationId,
+            correlationId: integrationId,
+          });
           skipped += 1;
           continue;
         }
@@ -425,14 +445,28 @@ export async function syncQuickBooksPayments(
   });
 
   if (skipped > 0) {
-    console.error(
-      `QuickBooks sync: skipped ${skipped} payment(s) that failed validation for integration ${integrationId}.`,
+    logger.log(
+      "warn",
+      `QuickBooks sync: skipped ${skipped} payment(s) that failed validation.`,
+      {
+        operation: "sync_quickbooks.payment_summary",
+        connectorSlug: "quickbooks",
+        organizationId,
+        correlationId: integrationId,
+      },
     );
   }
 
   if (defaultedNameCount > 0) {
-    console.error(
-      `QuickBooks sync: ${defaultedNameCount} payment(s) had no usable CustomerRef.name and fell back to a placeholder for integration ${integrationId}.`,
+    logger.log(
+      "warn",
+      `QuickBooks sync: ${defaultedNameCount} payment(s) had no usable CustomerRef.name and fell back to a placeholder.`,
+      {
+        operation: "sync_quickbooks.payment_defaulted_name",
+        connectorSlug: "quickbooks",
+        organizationId,
+        correlationId: integrationId,
+      },
     );
   }
 

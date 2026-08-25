@@ -12,6 +12,7 @@ import {
 } from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
+import { logger } from "../_lib/logger";
 import { getCurrentOrganization } from "../_lib/session";
 
 export interface DisconnectSalesforceState {
@@ -69,8 +70,15 @@ export async function disconnectSalesforceAction(
       );
 
       if (!revoked) {
-        console.error(
-          `Salesforce remote token revocation failed for integration ${integration.id}; proceeding with local disconnect anyway`,
+        logger.log(
+          "warn",
+          "Salesforce remote token revocation failed; proceeding with local disconnect anyway",
+          {
+            operation: "salesforce_disconnect.revoke_token",
+            connectorSlug: "salesforce",
+            organizationId: session.organizationId,
+            correlationId: integration.id,
+          },
         );
       }
     }

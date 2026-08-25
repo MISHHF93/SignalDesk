@@ -12,6 +12,7 @@ import {
 } from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
+import { logger } from "../_lib/logger";
 import { getCurrentOrganization } from "../_lib/session";
 import {
   getStripeOAuthConfig,
@@ -72,8 +73,15 @@ export async function disconnectStripeAction(
       );
 
       if (!revoked) {
-        console.error(
-          `Stripe remote deauthorization failed for integration ${integration.id}; proceeding with local disconnect anyway`,
+        logger.log(
+          "warn",
+          "Stripe remote deauthorization failed; proceeding with local disconnect anyway",
+          {
+            operation: "stripe_disconnect.revoke_token",
+            connectorSlug: "stripe",
+            organizationId: session.organizationId,
+            correlationId: integration.id,
+          },
         );
       }
     }

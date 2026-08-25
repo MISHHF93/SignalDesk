@@ -21,6 +21,8 @@ import {
 } from "@signaldesk/persistence";
 import { parseSourceLeadRecord } from "@signaldesk/schemas";
 
+import { errorReporter } from "./error-reporter";
+import { logger } from "./logger";
 import { getSalesforceOAuthConfig } from "./salesforce-config";
 
 // Mirrors the HubSpot OAuth callback's own stopgap (see that route's doc
@@ -199,10 +201,12 @@ export async function syncSalesforceOpportunities(
             { organizationId, integrationId },
           );
         } catch (validationError) {
-          console.error(
-            `Skipping Salesforce opportunity ${opportunity.Id}: failed validation`,
-            validationError,
-          );
+          errorReporter.captureException(validationError, {
+            operation: "sync_salesforce.opportunity_validation",
+            connectorSlug: "salesforce",
+            organizationId,
+            correlationId: integrationId,
+          });
           skipped += 1;
           continue;
         }
@@ -263,14 +267,28 @@ export async function syncSalesforceOpportunities(
   });
 
   if (skipped > 0) {
-    console.error(
-      `Salesforce sync: skipped ${skipped} opportunity(ies) that failed validation for integration ${integrationId}.`,
+    logger.log(
+      "warn",
+      `Salesforce sync: skipped ${skipped} opportunity(ies) that failed validation.`,
+      {
+        operation: "sync_salesforce.opportunity_summary",
+        connectorSlug: "salesforce",
+        organizationId,
+        correlationId: integrationId,
+      },
     );
   }
 
   if (defaultedNameCount > 0) {
-    console.error(
-      `Salesforce sync: ${defaultedNameCount} opportunity(ies) had no usable Name and fell back to a placeholder for integration ${integrationId}.`,
+    logger.log(
+      "warn",
+      `Salesforce sync: ${defaultedNameCount} opportunity(ies) had no usable Name and fell back to a placeholder.`,
+      {
+        operation: "sync_salesforce.opportunity_defaulted_name",
+        connectorSlug: "salesforce",
+        organizationId,
+        correlationId: integrationId,
+      },
     );
   }
 

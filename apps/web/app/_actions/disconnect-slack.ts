@@ -12,6 +12,7 @@ import {
 } from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
+import { logger } from "../_lib/logger";
 import { getCurrentOrganization } from "../_lib/session";
 
 export interface DisconnectSlackState {
@@ -66,8 +67,15 @@ export async function disconnectSlackAction(
       const revoked = await revokeSlackToken(tokens.accessToken);
 
       if (!revoked) {
-        console.error(
-          `Slack remote token revocation failed for integration ${integration.id}; proceeding with local disconnect anyway`,
+        logger.log(
+          "warn",
+          "Slack remote token revocation failed; proceeding with local disconnect anyway",
+          {
+            operation: "slack_disconnect.revoke_token",
+            connectorSlug: "slack",
+            organizationId: session.organizationId,
+            correlationId: integration.id,
+          },
         );
       }
     }
