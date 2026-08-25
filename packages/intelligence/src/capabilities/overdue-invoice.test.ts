@@ -320,6 +320,125 @@ describe("overdueInvoiceIntelligence", () => {
     expect(findings[0]?.evidence).toHaveLength(1);
   });
 
+  it("real bug found by review: nets the financial context's OUTSTANDING_AMOUNT down by a linked payment, not just narrates it", async () => {
+    const findings = await overdueInvoiceIntelligence.evaluate({
+      leads: [],
+      overdueInvoices: [invoice()],
+      now: NOW,
+      connectedIntegrationSlugs: [],
+      highValueThresholdCents: 1_000_000,
+      overdueTasks: [],
+      recentPayments: [payment()],
+      workingDaysBitmask: 0b1111111,
+      timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
+    });
+
+    // invoice() is 250_000; payment() allocates 100_000 against it — the
+    // true remaining exposure is 150_000, not the invoice's raw 250_000.
+    expect(findings[0]?.financialContext).toEqual({
+      label: "Overdue receivable",
+      exposureType: "OUTSTANDING_AMOUNT",
+      amountCents: 150_000,
+      currency: "USD",
+    });
+  });
+
+  it("regression: downgrades severity to low and reports zero outstanding when a linked payment fully covers the invoice (a real, reachable stale-sync state — updateInvoiceStatusBySourceRecord hasn't caught up yet)", async () => {
+    const findings = await overdueInvoiceIntelligence.evaluate({
+      leads: [],
+      overdueInvoices: [invoice({ amountCents: 100_000 })],
+      now: NOW,
+      connectedIntegrationSlugs: [],
+      highValueThresholdCents: 1_000_000,
+      overdueTasks: [],
+      recentPayments: [
+        payment({
+          amountCents: 100_000,
+          invoiceAllocations: [
+            { externalInvoiceId: "qb_90210", amountCents: 100_000 },
+          ],
+        }),
+      ],
+      workingDaysBitmask: 0b1111111,
+      timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
+    });
+
+    expect(findings[0]?.severity).toBe("low");
+    expect(findings[0]?.financialContext?.amountCents).toBe(0);
+    expect(findings[0]?.summary).toContain("likely a sync lag");
+    expect(findings[0]?.explanation.observedValue).toContain(
+      "balance likely stale",
+    );
+  });
+
+  it("clamps the netted outstanding amount to zero rather than going negative when a linked payment exceeds the invoice's own recorded amount", async () => {
+    const findings = await overdueInvoiceIntelligence.evaluate({
+      leads: [],
+      overdueInvoices: [invoice({ amountCents: 50_000 })],
+      now: NOW,
+      connectedIntegrationSlugs: [],
+      highValueThresholdCents: 1_000_000,
+      overdueTasks: [],
+      recentPayments: [
+        payment({
+          amountCents: 100_000,
+          invoiceAllocations: [
+            { externalInvoiceId: "qb_90210", amountCents: 100_000 },
+          ],
+        }),
+      ],
+      workingDaysBitmask: 0b1111111,
+      timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
+    });
+
+    expect(findings[0]?.financialContext?.amountCents).toBe(0);
+    expect(findings[0]?.severity).toBe("low");
+  });
+
+  it("regression: recomputes severity from the netted outstanding amount, not the invoice's gross amount — a $20,000 invoice with $15,000 already paid is no longer critical", async () => {
+    const findings = await overdueInvoiceIntelligence.evaluate({
+      leads: [],
+      overdueInvoices: [invoice({ amountCents: 2_000_000 })],
+      now: NOW,
+      connectedIntegrationSlugs: [],
+      highValueThresholdCents: 1_000_000,
+      overdueTasks: [],
+      recentPayments: [
+        payment({
+          amountCents: 1_500_000,
+          invoiceAllocations: [
+            { externalInvoiceId: "qb_90210", amountCents: 1_500_000 },
+          ],
+        }),
+      ],
+      workingDaysBitmask: 0b1111111,
+      timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
+    });
+
+    expect(findings[0]?.financialContext?.amountCents).toBe(500_000);
+    expect(findings[0]?.severity).toBe("high");
+  });
+
   it("leaves the finding unchanged when there are no recent payments at all", async () => {
     const findings = await overdueInvoiceIntelligence.evaluate({
       leads: [],
