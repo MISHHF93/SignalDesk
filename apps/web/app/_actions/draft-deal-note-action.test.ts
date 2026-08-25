@@ -76,6 +76,7 @@ describe("draftDealNoteAction wiring", () => {
         valueCents: 250_000,
         currency: "USD",
         lastInteractionAt,
+        source: { system: "hubspot" },
       },
       { id: "finding-1" },
     );
@@ -89,5 +90,32 @@ describe("draftDealNoteAction wiring", () => {
       currency: "USD",
       lastInteractionAt,
     });
+  });
+
+  it("regression: real gap found by review — refuses to draft a note for a deal not sourced from HubSpot, since only HubSpot can actually log it", () => {
+    // leads is a shared table (HubSpot and Salesforce both ingest into
+    // it), but only the HubSpot note-create path exists — a
+    // Salesforce-sourced deal used to be drafted the same as any other and
+    // would only fail (or worse, attach the wrong integration's access
+    // token) once approval tried to actually log it through HubSpot.
+    const buildDraftContext = capturedConfig?.buildDraftContext as (
+      lead: unknown,
+      finding: unknown,
+    ) => Record<string, unknown>;
+
+    expect(() =>
+      buildDraftContext(
+        {
+          contactName: "Jane Doe",
+          companyName: "Acme Co.",
+          stage: "negotiation",
+          valueCents: 250_000,
+          currency: "USD",
+          lastInteractionAt: new Date(),
+          source: { system: "salesforce" },
+        },
+        { id: "finding-1" },
+      ),
+    ).toThrow(/can currently only be logged through HubSpot/);
   });
 });

@@ -31,14 +31,32 @@ const draft = draftEntityContentAction<Task, TaskNudgeDraftContext>({
   draftFailedMessage: "Couldn't draft a nudge right now.",
   fetchEntity: (db, organizationId, taskId) =>
     getTaskById(db, organizationId, taskId),
-  buildDraftContext: (task, finding) => ({
-    capability: "draft_task_nudge",
-    finding,
-    taskName: task.name,
-    assigneeName: task.assigneeName,
-    dueAt: task.dueAt,
-    daysOverdue: daysOverdue(task.dueAt, new Date()),
-  }),
+  buildDraftContext: (task, finding) => {
+    // Real gap found by review: `tasks` is a shared table — Asana and Jira
+    // both ingest into it (ingestAsanaTask/ingestJiraIssue,
+    // @signaldesk/persistence), distinguished only by `task.source.system`.
+    // Only the Asana comment-post path exists today
+    // (createAsanaTaskStory, approve-task-nudge-action.ts) — nothing here
+    // checked that before this fix, so a Jira-sourced overdue task could be
+    // drafted and would only fail (or worse, attach the wrong integration's
+    // access token) once approval tried to actually post it through Asana.
+    // Checked at draft time too, not just approval time, mirroring the
+    // QuickBooks invoice-reminder fix (draft-invoice-reminder-action.ts).
+    if (task.source.system !== "asana") {
+      throw new Error(
+        `Task nudges can currently only be posted through Asana; this task was synced from ${task.source.system}.`,
+      );
+    }
+
+    return {
+      capability: "draft_task_nudge",
+      finding,
+      taskName: task.name,
+      assigneeName: task.assigneeName,
+      dueAt: task.dueAt,
+      daysOverdue: daysOverdue(task.dueAt, new Date()),
+    };
+  },
   collaborationEntityRef: (taskId) => ({ taskId }),
 });
 

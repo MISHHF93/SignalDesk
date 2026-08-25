@@ -88,7 +88,11 @@ const RESUME_COLLABORATION = {
 
 const LEAD = {
   valueCents: 5000,
-  source: { integrationId: "integration-1", externalRecordId: "hs-lead-1" },
+  source: {
+    system: "hubspot",
+    integrationId: "integration-1",
+    externalRecordId: "hs-lead-1",
+  },
 } as unknown as Awaited<ReturnType<typeof getLeadById>>;
 
 const ACTIVE_INTEGRATION = {
@@ -462,5 +466,33 @@ describe("approveDealNoteProposalAction", () => {
       "send-1",
       { status: "failed", failureReason: "HubSpot is not connected." },
     );
+  });
+
+  it("regression: real gap found by review — refuses to log a note for a deal not sourced from HubSpot, since only HubSpot can actually log it", async () => {
+    // leads is a shared table (HubSpot and Salesforce both ingest into
+    // it), but this whole action is HubSpot-specific. A resumed approval
+    // reads the collaboration's already-drafted content directly,
+    // bypassing draft-deal-note-action.ts's own source check entirely, so
+    // attemptSend needs its own defense-in-depth check.
+    mockedGetCurrentOrganization.mockResolvedValue(SESSION);
+    mockedGetAgentCollaboration.mockResolvedValue(RESUME_COLLABORATION);
+    mockedGetLeadById.mockResolvedValue({
+      valueCents: 5000,
+      source: {
+        system: "salesforce",
+        integrationId: "integration-1",
+        externalRecordId: "sf-opp-1",
+      },
+    } as unknown as Awaited<ReturnType<typeof getLeadById>>);
+
+    const result = await approveDealNoteProposalAction("collab-1");
+
+    expect(result).toEqual({
+      ok: false,
+      error:
+        "Deal notes can currently only be logged through HubSpot; this deal was synced from salesforce.",
+    });
+    expect(mockedBeginSend).not.toHaveBeenCalled();
+    expect(mockedCreateDealNote).not.toHaveBeenCalled();
   });
 });

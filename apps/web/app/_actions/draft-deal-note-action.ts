@@ -31,16 +31,35 @@ const draft = draftEntityContentAction<Lead, DealNoteDraftContext>({
   draftFailedMessage: "Couldn't draft a note right now.",
   fetchEntity: (db, organizationId, leadId) =>
     getLeadById(db, organizationId, leadId),
-  buildDraftContext: (lead, finding) => ({
-    capability: "draft_deal_note",
-    finding,
-    contactName: lead.contactName,
-    companyName: lead.companyName,
-    stage: lead.stage,
-    valueCents: lead.valueCents,
-    currency: lead.currency,
-    lastInteractionAt: lead.lastInteractionAt,
-  }),
+  buildDraftContext: (lead, finding) => {
+    // Real gap found by review: `leads` is a shared table — HubSpot and
+    // Salesforce both ingest into it (ingestHubSpotDeal/
+    // ingestSalesforceOpportunity, @signaldesk/persistence), distinguished
+    // only by `lead.source.system`. Only the HubSpot note-create path
+    // exists today (createHubSpotDealNote, approve-deal-note-action.ts) —
+    // nothing here checked that before this fix, so a Salesforce-sourced
+    // at-risk deal could be drafted and would only fail (or worse, attach
+    // the wrong integration's access token) once approval tried to
+    // actually log it through HubSpot. Checked at draft time too, not just
+    // approval time, mirroring the QuickBooks invoice-reminder fix
+    // (draft-invoice-reminder-action.ts).
+    if (lead.source.system !== "hubspot") {
+      throw new Error(
+        `Deal notes can currently only be logged through HubSpot; this deal was synced from ${lead.source.system}.`,
+      );
+    }
+
+    return {
+      capability: "draft_deal_note",
+      finding,
+      contactName: lead.contactName,
+      companyName: lead.companyName,
+      stage: lead.stage,
+      valueCents: lead.valueCents,
+      currency: lead.currency,
+      lastInteractionAt: lead.lastInteractionAt,
+    };
+  },
   collaborationEntityRef: (leadId) => ({ leadId }),
 });
 

@@ -73,6 +73,7 @@ describe("draftTaskNudgeAction wiring", () => {
         name: "Ship the report",
         assigneeName: "Sam",
         dueAt: threeDaysAgo,
+        source: { system: "asana" },
       },
       { id: "finding-1" },
     );
@@ -94,10 +95,39 @@ describe("draftTaskNudgeAction wiring", () => {
     const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     const context = buildDraftContext(
-      { name: "Not actually overdue", assigneeName: "Sam", dueAt: tomorrow },
+      {
+        name: "Not actually overdue",
+        assigneeName: "Sam",
+        dueAt: tomorrow,
+        source: { system: "asana" },
+      },
       { id: "finding-1" },
     );
 
     expect(context).toMatchObject({ daysOverdue: 0 });
+  });
+
+  it("regression: real gap found by review — refuses to draft a nudge for a task not sourced from Asana, since only Asana can actually post it", () => {
+    // tasks is a shared table (Asana and Jira both ingest into it), but
+    // only the Asana comment-post path exists — a Jira-sourced task used
+    // to be drafted the same as any other and would only fail (or worse,
+    // attach the wrong integration's access token) once approval tried to
+    // actually post it through Asana.
+    const buildDraftContext = capturedConfig?.buildDraftContext as (
+      task: unknown,
+      finding: unknown,
+    ) => Record<string, unknown>;
+
+    expect(() =>
+      buildDraftContext(
+        {
+          name: "Ship the report",
+          assigneeName: "Sam",
+          dueAt: new Date(),
+          source: { system: "jira" },
+        },
+        { id: "finding-1" },
+      ),
+    ).toThrow(/can currently only be posted through Asana/);
   });
 });

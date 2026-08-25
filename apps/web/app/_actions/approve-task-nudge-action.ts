@@ -72,6 +72,21 @@ async function attemptSend(
     return { ok: false, error: "This task could not be found." };
   }
 
+  // Real gap found by review: `tasks` is a shared table (Asana and Jira
+  // both ingest into it), but this whole action is Asana-specific.
+  // draft-task-nudge-action.ts now refuses to draft a nudge for anything
+  // but an Asana-sourced task, but this approve half is reached
+  // independently (a resumed approval reads the collaboration's
+  // already-drafted content directly) and had no such check of its own.
+  // Kept here too, defense in depth, before even creating a send-tracking
+  // row — mirrors the QuickBooks invoice-reminder fix exactly.
+  if (task.source.system !== "asana") {
+    return {
+      ok: false,
+      error: `Task nudges can currently only be posted through Asana; this task was synced from ${task.source.system}.`,
+    };
+  }
+
   const begun = await beginAsanaTaskNudgeSend(db, organizationId, {
     userId,
     agentCollaborationId: collaborationId,

@@ -69,6 +69,21 @@ async function attemptSend(
     readonly body: string;
   },
 ): Promise<ApproveDealNoteProposalActionResult> {
+  // Real gap found by review: `leads` is a shared table (HubSpot and
+  // Salesforce both ingest into it), but this whole action is
+  // HubSpot-specific. draft-deal-note-action.ts now refuses to draft a
+  // note for anything but a HubSpot-sourced lead, but this approve half is
+  // reached independently (a resumed approval reads the collaboration's
+  // already-drafted content directly) and had no such check of its own.
+  // Kept here too, defense in depth, before even creating a send-tracking
+  // row — mirrors the QuickBooks invoice-reminder fix exactly.
+  if (lead.source.system !== "hubspot") {
+    return {
+      ok: false,
+      error: `Deal notes can currently only be logged through HubSpot; this deal was synced from ${lead.source.system}.`,
+    };
+  }
+
   const begun = await beginHubSpotDealNoteSend(db, organizationId, {
     userId,
     agentCollaborationId: collaborationId,

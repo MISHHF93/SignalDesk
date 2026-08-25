@@ -82,7 +82,11 @@ const RESUME_COLLABORATION = {
 } as unknown as Awaited<ReturnType<typeof getAgentCollaboration>>;
 
 const TASK = {
-  source: { integrationId: "integration-1", externalRecordId: "asana-task-1" },
+  source: {
+    system: "asana",
+    integrationId: "integration-1",
+    externalRecordId: "asana-task-1",
+  },
 } as unknown as Awaited<ReturnType<typeof getTaskById>>;
 
 const ACTIVE_INTEGRATION = {
@@ -424,5 +428,32 @@ describe("approveTaskNudgeProposalAction", () => {
       "send-1",
       { status: "failed", failureReason: "Asana is not connected." },
     );
+  });
+
+  it("regression: real gap found by review — refuses to send a nudge for a task not sourced from Asana, since only Asana can actually post it", async () => {
+    // tasks is a shared table (Asana and Jira both ingest into it), but
+    // this whole action is Asana-specific. A resumed approval reads the
+    // collaboration's already-drafted content directly, bypassing
+    // draft-task-nudge-action.ts's own source check entirely, so
+    // attemptSend needs its own defense-in-depth check.
+    mockedGetCurrentOrganization.mockResolvedValue(SESSION);
+    mockedGetAgentCollaboration.mockResolvedValue(RESUME_COLLABORATION);
+    mockedGetTaskById.mockResolvedValue({
+      source: {
+        system: "jira",
+        integrationId: "integration-1",
+        externalRecordId: "jira-issue-1",
+      },
+    } as unknown as Awaited<ReturnType<typeof getTaskById>>);
+
+    const result = await approveTaskNudgeProposalAction("collab-1");
+
+    expect(result).toEqual({
+      ok: false,
+      error:
+        "Task nudges can currently only be posted through Asana; this task was synced from jira.",
+    });
+    expect(mockedBeginSend).not.toHaveBeenCalled();
+    expect(mockedCreateTaskStory).not.toHaveBeenCalled();
   });
 });
