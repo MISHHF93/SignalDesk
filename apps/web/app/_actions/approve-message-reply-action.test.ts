@@ -320,6 +320,32 @@ describe("approveMessageReplyProposalAction", () => {
     );
   });
 
+  it("regression: still reports the real successful send even when the post-send audit-event write itself fails", async () => {
+    // Same real bug as the QuickBooks/HubSpot/Asana/Zendesk approve
+    // actions' shared helper, independently reimplemented here since this
+    // file predates that generalization: the audit-event write used to be
+    // wrapped in a try/catch that reset the collaboration's claimed
+    // outcome on any failure, so a transient failure recording *this*
+    // event (after the real Gmail send already succeeded) made this
+    // action report a failure even though the email had genuinely already
+    // been sent.
+    mockedGetCurrentOrganization.mockResolvedValue(SESSION);
+    mockedGetAgentCollaboration.mockResolvedValue(FRESH_COLLABORATION);
+    mockedSendGmailMessage.mockResolvedValue({
+      id: "gmail-msg-1",
+      threadId: "thread-1",
+    } as Awaited<ReturnType<typeof sendGmailMessage>>);
+    mockedRecordAuditEvent.mockRejectedValue(
+      new Error("audit_events insert timed out"),
+    );
+
+    const result = await approveMessageReplyProposalAction("collab-1");
+
+    expect(result).toEqual(
+      expect.objectContaining({ ok: true, alreadySent: false }),
+    );
+  });
+
   it("resumes an already-approved collaboration by re-attempting the send directly, skipping the fresh-path guards", async () => {
     mockedGetCurrentOrganization.mockResolvedValue(SESSION);
     mockedGetAgentCollaboration.mockResolvedValue(RESUME_COLLABORATION);

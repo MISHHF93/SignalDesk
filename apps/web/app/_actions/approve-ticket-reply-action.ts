@@ -12,7 +12,6 @@ import {
   getMostRecentZendeskTicketReplySentAt,
   getSupportTicketById,
   getZendeskIntegrationStatus,
-  recordAuditEvent,
   type CompleteZendeskTicketReplySendOutcome,
   type DatabasePool,
 } from "@signaldesk/persistence";
@@ -22,6 +21,7 @@ import {
   claimApprovalOrFail,
   decideCollaborationApprovalPath,
   isFindingStillLive,
+  recordApprovalAuditEvent,
   recordApprovalBlocked,
   withApprovalRollback,
 } from "../_lib/agent-action-approval";
@@ -366,20 +366,14 @@ export async function approveTicketReplyProposalAction(
         ),
     );
 
-    await withApprovalRollback(
-      db,
-      session.organizationId,
-      collaborationId,
-      () =>
-        recordAuditEvent(db, session.organizationId, {
-          userId: session.userId,
-          eventType: "agent_action_proposal.approved",
-          subjectType: "agent_collaboration",
-          subjectId: collaborationId,
-          outcome: result.ok ? "allowed" : "failed",
-          metadata: { ticketId },
-        }),
-    );
+    await recordApprovalAuditEvent(db, session.organizationId, {
+      userId: session.userId,
+      eventType: "agent_action_proposal.approved",
+      subjectType: "agent_collaboration",
+      subjectId: collaborationId,
+      outcome: result.ok ? "allowed" : "failed",
+      metadata: { ticketId },
+    });
 
     return result;
   } catch (error) {

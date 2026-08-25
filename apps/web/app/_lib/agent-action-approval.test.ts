@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@signaldesk/persistence");
+vi.mock("./error-reporter");
 
 import {
   recordAgentCollaborationOutcome,
@@ -12,9 +13,11 @@ import {
   claimApprovalOrFail,
   decideCollaborationApprovalPath,
   isFindingStillLive,
+  recordApprovalAuditEvent,
   recordApprovalBlocked,
   withApprovalRollback,
 } from "./agent-action-approval";
+import { errorReporter } from "./error-reporter";
 
 const mockedRecordAgentCollaborationOutcome = vi.mocked(
   recordAgentCollaborationOutcome,
@@ -23,6 +26,7 @@ const mockedRecordAuditEvent = vi.mocked(recordAuditEvent);
 const mockedResetAgentCollaborationOutcome = vi.mocked(
   resetAgentCollaborationOutcome,
 );
+const mockedCaptureException = vi.mocked(errorReporter.captureException);
 
 /**
  * These 5 functions are the shared logic every one of the app's 5 real
@@ -34,6 +38,10 @@ const mockedResetAgentCollaborationOutcome = vi.mocked(
  * line versus testing each 400-line connector-specific action file
  * separately for the same shared behavior.
  */
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
 describe("decideCollaborationApprovalPath", () => {
   it("blocks when there is no collaboration at all", () => {
     expect(decideCollaborationApprovalPath(null, "entity-1", true)).toEqual({
@@ -245,6 +253,53 @@ describe("withApprovalRollback", () => {
       undefined,
       "org-1",
       "collab-1",
+    );
+  });
+});
+
+describe("recordApprovalAuditEvent", () => {
+  it("records the audit event on success and never touches the claim", async () => {
+    mockedRecordAuditEvent.mockResolvedValue(undefined);
+
+    await recordApprovalAuditEvent(undefined as never, "org-1", {
+      eventType: "agent_action_proposal.approved",
+      subjectType: "agent_collaboration",
+      subjectId: "collab-1",
+      outcome: "allowed",
+      metadata: {},
+    });
+
+    expect(mockedRecordAuditEvent).toHaveBeenCalledWith(
+      undefined,
+      "org-1",
+      expect.objectContaining({ subjectId: "collab-1", outcome: "allowed" }),
+    );
+    expect(mockedResetAgentCollaborationOutcome).not.toHaveBeenCalled();
+  });
+
+  it("regression: never resets the claim when the audit write itself fails — a transient failure recording this event must not undo a real, already-decided outcome (a successful send or a definite rejection)", async () => {
+    mockedRecordAuditEvent.mockRejectedValue(
+      new Error("audit_events insert timed out"),
+    );
+
+    await expect(
+      recordApprovalAuditEvent(undefined as never, "org-1", {
+        eventType: "agent_action_proposal.approved",
+        subjectType: "agent_collaboration",
+        subjectId: "collab-1",
+        outcome: "allowed",
+        metadata: {},
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(mockedResetAgentCollaborationOutcome).not.toHaveBeenCalled();
+    expect(mockedCaptureException).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({
+        operation: "agent_action_approval.record_audit_event",
+        organizationId: "org-1",
+        correlationId: "collab-1",
+      }),
     );
   });
 });

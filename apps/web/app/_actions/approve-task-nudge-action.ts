@@ -12,7 +12,6 @@ import {
   getAsanaIntegrationStatus,
   getMostRecentAsanaTaskNudgeSentAt,
   getTaskById,
-  recordAuditEvent,
   type CompleteAsanaTaskNudgeSendOutcome,
   type DatabasePool,
 } from "@signaldesk/persistence";
@@ -22,6 +21,7 @@ import {
   claimApprovalOrFail,
   decideCollaborationApprovalPath,
   isFindingStillLive,
+  recordApprovalAuditEvent,
   recordApprovalBlocked,
   withApprovalRollback,
 } from "../_lib/agent-action-approval";
@@ -356,20 +356,14 @@ export async function approveTaskNudgeProposalAction(
         ),
     );
 
-    await withApprovalRollback(
-      db,
-      session.organizationId,
-      collaborationId,
-      () =>
-        recordAuditEvent(db, session.organizationId, {
-          userId: session.userId,
-          eventType: "agent_action_proposal.approved",
-          subjectType: "agent_collaboration",
-          subjectId: collaborationId,
-          outcome: result.ok ? "allowed" : "failed",
-          metadata: { taskId },
-        }),
-    );
+    await recordApprovalAuditEvent(db, session.organizationId, {
+      userId: session.userId,
+      eventType: "agent_action_proposal.approved",
+      subjectType: "agent_collaboration",
+      subjectId: collaborationId,
+      outcome: result.ok ? "allowed" : "failed",
+      metadata: { taskId },
+    });
 
     return result;
   } catch (error) {

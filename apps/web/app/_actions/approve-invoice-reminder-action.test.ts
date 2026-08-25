@@ -305,6 +305,29 @@ describe("approveInvoiceReminderProposalAction", () => {
     );
   });
 
+  it("regression: still reports the real successful send even when the post-send audit-event write itself fails", async () => {
+    // Real bug found by review: the audit-event write used to be wrapped in
+    // withApprovalRollback, so a transient failure recording *this* event
+    // (after the real QuickBooks send already succeeded) reset the
+    // collaboration's claimed outcome back to null and made this whole
+    // action report a failure — even though the invoice reminder had
+    // genuinely already been sent. The fix must report the real result
+    // regardless of whether the trailing audit write succeeds.
+    mockedGetCurrentOrganization.mockResolvedValue(SESSION);
+    mockedGetAgentCollaboration.mockResolvedValue(FRESH_COLLABORATION);
+    mockedBeginSend.mockResolvedValue({ id: "send-1", alreadyResolved: null });
+    mockedSendReminder.mockResolvedValue(undefined);
+    mockedRecordAuditEvent.mockRejectedValue(
+      new Error("audit_events insert timed out"),
+    );
+
+    const result = await approveInvoiceReminderProposalAction("collab-1");
+
+    expect(result).toEqual(
+      expect.objectContaining({ ok: true, alreadySent: false }),
+    );
+  });
+
   it("resumes an already-approved collaboration by re-attempting the send directly, skipping the fresh-path guards", async () => {
     mockedGetCurrentOrganization.mockResolvedValue(SESSION);
     mockedGetAgentCollaboration.mockResolvedValue(RESUME_COLLABORATION);

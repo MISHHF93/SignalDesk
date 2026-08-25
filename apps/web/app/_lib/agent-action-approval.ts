@@ -3,6 +3,7 @@ import {
   recordAuditEvent,
   resetAgentCollaborationOutcome,
   type DatabasePool,
+  type RecordAuditEventInput,
 } from "@signaldesk/persistence";
 import type { EntityReference } from "@signaldesk/schemas";
 
@@ -10,6 +11,8 @@ import type {
   IntelligenceFinding,
   IntelligenceType,
 } from "@signaldesk/intelligence";
+
+import { errorReporter } from "./error-reporter";
 
 /**
  * Shared, low-risk sub-steps for the approve half of every draft-then-
@@ -134,13 +137,16 @@ export async function claimApprovalOrFail(
   return { ok: true };
 }
 
-/** Runs `fn` after a successful claim; on any thrown error, resets the
- * claim back to unreviewed (`resetAgentCollaborationOutcome`) before
- * rethrowing, so a failure after claiming — a send that throws, an audit
- * write that fails — never leaves the collaboration permanently claimed
- * with no real effect and no way to retry. Safe to call unconditionally
- * after a successful claim, matching `resetAgentCollaborationOutcome`'s own
- * documented safety contract. */
+/** Runs `fn` (the real send/post attempt) after a successful claim; on any
+ * thrown error, resets the claim back to unreviewed
+ * (`resetAgentCollaborationOutcome`) before rethrowing, so a send that never
+ * even started (an entity failed to load, a token refresh threw) never
+ * leaves the collaboration permanently claimed with no real effect and no
+ * way to retry. Deliberately used only around the send attempt itself, not
+ * around the audit-event write that follows it — see
+ * `recordApprovalAuditEvent`'s own doc comment for why those two steps need
+ * different failure handling, a real bug this file's own history got wrong
+ * before it was split into two helpers. */
 export async function withApprovalRollback<T>(
   db: DatabasePool,
   organizationId: string,
@@ -152,5 +158,41 @@ export async function withApprovalRollback<T>(
   } catch (error) {
     await resetAgentCollaborationOutcome(db, organizationId, collaborationId);
     throw error;
+  }
+}
+
+/**
+ * Records the final `agent_action_proposal.approved` audit event after the
+ * send attempt has already returned — deliberately NOT wrapped in
+ * `withApprovalRollback`. By this point `attemptSend`'s real result is
+ * already a settled fact: it either genuinely reached the provider (sent or
+ * a definite rejection) or `withApprovalRollback` already reset the claim
+ * for a send that never happened. A transient failure recording *this*
+ * audit event must never also reset the claim — doing so would let a
+ * subsequent approval attempt go through `decideCollaborationApprovalPath`
+ * as `"fresh"` instead of `"resume"`, re-running every gate (rate limit,
+ * evidence sufficiency, the Pre-Flight Policy Audit's duplicate-send-window
+ * check) against a collaboration that, in the successful case, already has
+ * a real external effect on record — at best a confusing "already sent
+ * recently" denial, at worst (were it not for the send-tracking table's own
+ * idempotency key) grounds for a second real send. The collaboration's
+ * claimed state must track "was this reviewed," not "did this specific
+ * audit write also succeed." A failure here is reported so it isn't
+ * silently lost, but the caller's already-real result is still returned to
+ * the user as-is.
+ */
+export async function recordApprovalAuditEvent(
+  db: DatabasePool,
+  organizationId: string,
+  input: RecordAuditEventInput,
+): Promise<void> {
+  try {
+    await recordAuditEvent(db, organizationId, input);
+  } catch (error) {
+    errorReporter.captureException(error, {
+      operation: "agent_action_approval.record_audit_event",
+      organizationId,
+      correlationId: input.subjectId,
+    });
   }
 }

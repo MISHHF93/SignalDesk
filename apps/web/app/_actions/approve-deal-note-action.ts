@@ -12,7 +12,6 @@ import {
   getHubSpotIntegrationStatus,
   getLeadById,
   getMostRecentHubSpotDealNoteSentAt,
-  recordAuditEvent,
   type CompleteHubSpotDealNoteSendOutcome,
   type DatabasePool,
 } from "@signaldesk/persistence";
@@ -22,6 +21,7 @@ import {
   claimApprovalOrFail,
   decideCollaborationApprovalPath,
   isFindingStillLive,
+  recordApprovalAuditEvent,
   recordApprovalBlocked,
   withApprovalRollback,
 } from "../_lib/agent-action-approval";
@@ -353,20 +353,14 @@ export async function approveDealNoteProposalAction(
         ),
     );
 
-    await withApprovalRollback(
-      db,
-      session.organizationId,
-      collaborationId,
-      () =>
-        recordAuditEvent(db, session.organizationId, {
-          userId: session.userId,
-          eventType: "agent_action_proposal.approved",
-          subjectType: "agent_collaboration",
-          subjectId: collaborationId,
-          outcome: result.ok ? "allowed" : "failed",
-          metadata: { leadId },
-        }),
-    );
+    await recordApprovalAuditEvent(db, session.organizationId, {
+      userId: session.userId,
+      eventType: "agent_action_proposal.approved",
+      subjectType: "agent_collaboration",
+      subjectId: collaborationId,
+      outcome: result.ok ? "allowed" : "failed",
+      metadata: { leadId },
+    });
 
     return result;
   } catch (error) {

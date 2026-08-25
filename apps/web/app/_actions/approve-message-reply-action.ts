@@ -21,6 +21,7 @@ import {
 } from "@signaldesk/persistence";
 
 import type { ApproveMessageReplyProposalActionResult } from "../_lib/actions";
+import { recordApprovalAuditEvent } from "../_lib/agent-action-approval";
 import { describeActionError } from "../_lib/describe-action-error";
 import { classifyEvidenceSufficiency } from "../_lib/evidence-sufficiency";
 import { runPreFlightPolicyAudit } from "../_lib/pre-flight-policy-audit";
@@ -422,23 +423,14 @@ export async function approveMessageReplyProposalAction(
       throw error;
     }
 
-    try {
-      await recordAuditEvent(db, session.organizationId, {
-        userId: session.userId,
-        eventType: "agent_action_proposal.approved",
-        subjectType: "agent_collaboration",
-        subjectId: collaborationId,
-        outcome: result.ok ? "allowed" : "failed",
-        metadata: { messageId: collaboration.messageId },
-      });
-    } catch (error) {
-      await resetAgentCollaborationOutcome(
-        db,
-        session.organizationId,
-        collaborationId,
-      );
-      throw error;
-    }
+    await recordApprovalAuditEvent(db, session.organizationId, {
+      userId: session.userId,
+      eventType: "agent_action_proposal.approved",
+      subjectType: "agent_collaboration",
+      subjectId: collaborationId,
+      outcome: result.ok ? "allowed" : "failed",
+      metadata: { messageId: collaboration.messageId },
+    });
 
     return result;
   } catch (error) {

@@ -373,6 +373,72 @@ describe.skipIf(!process.env.DATABASE_URL)(
       ).toEqual(["customer_email_reply.failed", "customer_email_reply.sent"]);
     });
 
+    it("lets only one of two concurrent retries of the same failed idempotency key proceed to send — never both", async () => {
+      const { organizationId, userId, message, collaboration } =
+        await seedFixture("concurrent-retry");
+
+      const begun = await beginCustomerEmailReplySend(pool, organizationId, {
+        userId,
+        agentCollaborationId: collaboration.id,
+        messageId: message.id,
+        toEmail: "jane@example.test",
+        subject: "Re: hi",
+        body: "Thanks.",
+        idempotencyKey: "concurrent-retry:send",
+      });
+      await completeCustomerEmailReplySend(
+        pool,
+        organizationId,
+        userId,
+        begun.id,
+        { status: "failed", failureReason: "Gmail rate limited" },
+      );
+
+      // Two concurrent callers both retry the same failed idempotency key —
+      // e.g. a UI double-click and a background retry, or two server
+      // instances racing the same approval. Regression coverage for a real
+      // bug: beginCustomerEmailReplySend's "failed -> pending" reset used to
+      // UPDATE unconditionally (no `and status = 'failed'` guard), so both
+      // concurrent SELECTs could read 'failed' before either UPDATE
+      // committed, and both would return alreadyResolved: null — telling
+      // both callers it was safe to call the real Gmail API, an actual
+      // duplicate send. The fix guards the UPDATE with `and status =
+      // 'failed'` and re-checks via RETURNING: the race's loser must see
+      // alreadyResolved: 'pending', not null.
+      const [first, second] = await Promise.all([
+        beginCustomerEmailReplySend(pool, organizationId, {
+          userId,
+          agentCollaborationId: collaboration.id,
+          messageId: message.id,
+          toEmail: "jane@example.test",
+          subject: "Re: hi",
+          body: "Thanks.",
+          idempotencyKey: "concurrent-retry:send",
+        }),
+        beginCustomerEmailReplySend(pool, organizationId, {
+          userId,
+          agentCollaborationId: collaboration.id,
+          messageId: message.id,
+          toEmail: "jane@example.test",
+          subject: "Re: hi",
+          body: "Thanks.",
+          idempotencyKey: "concurrent-retry:send",
+        }),
+      ]);
+
+      expect(first.id).toBe(begun.id);
+      expect(second.id).toBe(begun.id);
+
+      const resolvedValues = [first.alreadyResolved, second.alreadyResolved];
+      // Exactly one caller must be told it's safe to send (null); the other
+      // must be told a send is already in flight (pending) — never both
+      // null, which would mean two real Gmail calls for one approval.
+      expect(resolvedValues.filter((value) => value === null)).toHaveLength(1);
+      expect(
+        resolvedValues.filter((value) => value === "pending"),
+      ).toHaveLength(1);
+    });
+
     it("does not let one organization begin a send against another's collaboration/message", async () => {
       const orgA = await seedFixture("cross-tenant-a");
       const orgB = await seedFixture("cross-tenant-b");

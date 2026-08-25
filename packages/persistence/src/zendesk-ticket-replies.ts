@@ -135,15 +135,26 @@ export async function beginZendeskTicketReplySend(
     // status === "failed": Zendesk was never reached successfully, so this
     // row is safe to retry — reset it to 'pending' rather than leaving it
     // stuck, so completeZendeskTicketReplySend's "only transition a
-    // currently-pending row" guard still applies to the retry.
-    await client.query(
+    // currently-pending row" guard still applies to the retry. Guarded by
+    // `and status = 'failed'` and re-checked via RETURNING — see
+    // customer-email-replies.ts's identical fix for why: without this,
+    // two concurrent retries of the same failed idempotency key could both
+    // read 'failed' before either UPDATE commits and both call the real
+    // Zendesk API. If this UPDATE affects zero rows, another concurrent
+    // call already won that race and is now responsible for the real send.
+    const resetResult = await client.query<{ id: string }>(
       `update zendesk_ticket_replies
        set status = 'pending', failure_reason = null, updated_at = now()
-       where organization_id = $1 and id = $2`,
+       where organization_id = $1 and id = $2 and status = 'failed'
+       returning id`,
       [organizationId, existing.id],
     );
 
-    return { id: existing.id, alreadyResolved: null };
+    if (resetResult.rows[0]) {
+      return { id: existing.id, alreadyResolved: null };
+    }
+
+    return { id: existing.id, alreadyResolved: "pending" };
   });
 }
 

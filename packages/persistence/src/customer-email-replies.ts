@@ -134,15 +134,28 @@ export async function beginCustomerEmailReplySend(
     // status === "failed": Gmail was never reached successfully, so this
     // row is safe to retry — reset it to 'pending' rather than leaving it
     // stuck, so completeCustomerEmailReplySend's "only transition a
-    // currently-pending row" guard still applies to the retry.
-    await client.query(
+    // currently-pending row" guard still applies to the retry. Guarded by
+    // `and status = 'failed'` and re-checked via RETURNING — without this,
+    // two concurrent retries of the same failed idempotency key could both
+    // read 'failed' from the SELECT above before either UPDATE commits,
+    // both conclude it's safe to reset, and both callers would
+    // independently call the real Gmail API: an actual duplicate send, not
+    // just a stale read racing a write. If this UPDATE affects zero rows,
+    // another concurrent call already won that race and is now responsible
+    // for the real send — this call must not also proceed.
+    const resetResult = await client.query<{ id: string }>(
       `update customer_email_replies
        set status = 'pending', failure_reason = null, updated_at = now()
-       where organization_id = $1 and id = $2`,
+       where organization_id = $1 and id = $2 and status = 'failed'
+       returning id`,
       [organizationId, existing.id],
     );
 
-    return { id: existing.id, alreadyResolved: null };
+    if (resetResult.rows[0]) {
+      return { id: existing.id, alreadyResolved: null };
+    }
+
+    return { id: existing.id, alreadyResolved: "pending" };
   });
 }
 
