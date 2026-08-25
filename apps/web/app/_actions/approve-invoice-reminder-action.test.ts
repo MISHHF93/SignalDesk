@@ -89,7 +89,11 @@ const RESUME_COLLABORATION = {
 
 const INVOICE = {
   amountCents: 5000,
-  source: { externalRecordId: "qb-invoice-1", integrationId: "integration-1" },
+  source: {
+    system: "quickbooks",
+    externalRecordId: "qb-invoice-1",
+    integrationId: "integration-1",
+  },
 } as unknown as Awaited<ReturnType<typeof getInvoiceById>>;
 
 const ACTIVE_INTEGRATION = {
@@ -195,6 +199,50 @@ describe("approveInvoiceReminderProposalAction", () => {
       "org-1",
       expect.objectContaining({ metadata: { reason: "evidence_stale" } }),
     );
+    expect(mockedBeginSend).not.toHaveBeenCalled();
+  });
+
+  it("regression: real gap found by review — blocks a fresh approval for an invoice not sourced from QuickBooks, since only QuickBooks can actually send it", async () => {
+    // invoices is a shared table (QuickBooks and Xero both ingest into
+    // it), but this whole action is QuickBooks-specific. Checked before
+    // the QuickBooks integration lookup so the error is honest and
+    // specific, not the misleading "Reconnect QuickBooks" message that
+    // lookup would otherwise produce for a Xero-linked integration id.
+    mockedGetCurrentOrganization.mockResolvedValue(SESSION);
+    mockedGetAgentCollaboration.mockResolvedValue(FRESH_COLLABORATION);
+    mockedGetInvoiceById.mockResolvedValue({
+      ...INVOICE,
+      source: { ...INVOICE!.source, system: "xero" },
+    } as never);
+
+    const result = await approveInvoiceReminderProposalAction("collab-1");
+
+    expect(result).toEqual({
+      ok: false,
+      error:
+        "Invoice reminders can currently only be sent through QuickBooks; this invoice was synced from xero.",
+    });
+    expect(mockedBeginSend).not.toHaveBeenCalled();
+  });
+
+  it("regression: attemptSend itself also refuses a non-QuickBooks invoice on resume, independent of the fresh-path check above", async () => {
+    // The resume path calls attemptSend directly, skipping every fresh-
+    // path guard — this is the defense-in-depth check inside attemptSend
+    // itself, not just the one in the main action's fresh-approval flow.
+    mockedGetCurrentOrganization.mockResolvedValue(SESSION);
+    mockedGetAgentCollaboration.mockResolvedValue(RESUME_COLLABORATION);
+    mockedGetInvoiceById.mockResolvedValue({
+      ...INVOICE,
+      source: { ...INVOICE!.source, system: "xero" },
+    } as never);
+
+    const result = await approveInvoiceReminderProposalAction("collab-1");
+
+    expect(result).toEqual({
+      ok: false,
+      error:
+        "Invoice reminders can currently only be sent through QuickBooks; this invoice was synced from xero.",
+    });
     expect(mockedBeginSend).not.toHaveBeenCalled();
   });
 

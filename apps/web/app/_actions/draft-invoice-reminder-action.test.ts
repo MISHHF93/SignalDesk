@@ -76,6 +76,7 @@ describe("draftInvoiceReminderAction wiring", () => {
         amountCents: 50_000,
         currency: "USD",
         dueAt: oneWeekAgo,
+        source: { system: "quickbooks" },
       },
       { id: "finding-1" },
     );
@@ -87,5 +88,30 @@ describe("draftInvoiceReminderAction wiring", () => {
       currency: "USD",
       daysOverdue: 7,
     });
+  });
+
+  it("regression: real gap found by review — refuses to draft a reminder for an invoice not sourced from QuickBooks, since only QuickBooks can actually send it", () => {
+    // invoices is a shared table (QuickBooks and Xero both ingest into
+    // it), but only the QuickBooks send path exists — a Xero-sourced
+    // invoice used to be drafted the same as any other and would only
+    // fail (or worse, target the wrong invoice) once approval tried to
+    // actually send it through QuickBooks.
+    const buildDraftContext = capturedConfig?.buildDraftContext as (
+      invoice: unknown,
+      finding: unknown,
+    ) => Record<string, unknown>;
+
+    expect(() =>
+      buildDraftContext(
+        {
+          customerName: "Acme Co.",
+          amountCents: 50_000,
+          currency: "USD",
+          dueAt: new Date(),
+          source: { system: "xero" },
+        },
+        { id: "finding-1" },
+      ),
+    ).toThrow(/can currently only be sent through QuickBooks/);
   });
 });

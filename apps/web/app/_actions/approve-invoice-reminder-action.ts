@@ -68,6 +68,21 @@ async function attemptSend(
     readonly body: string;
   },
 ): Promise<ApproveInvoiceReminderProposalActionResult> {
+  // Real gap found by review: `invoices` is a shared table (QuickBooks and
+  // Xero both ingest into it), but this whole action is QuickBooks-
+  // specific — draft-invoice-reminder-action.ts now refuses to draft a
+  // reminder for anything but a QuickBooks-sourced invoice, but this
+  // approve half is reached independently (a resumed approval reads the
+  // collaboration's already-drafted content directly) and had no such
+  // check of its own. Kept here too, defense in depth, before even
+  // creating a send-tracking row.
+  if (invoice.source.system !== "quickbooks") {
+    return {
+      ok: false,
+      error: `Invoice reminders can currently only be sent through QuickBooks; this invoice was synced from ${invoice.source.system}.`,
+    };
+  }
+
   const begun = await beginQuickBooksInvoiceReminderSend(db, organizationId, {
     userId,
     agentCollaborationId: collaborationId,
@@ -334,6 +349,21 @@ export async function approveInvoiceReminderProposalAction(
 
     if (!invoiceForAudit) {
       return { ok: false, error: "This invoice could not be found." };
+    }
+
+    // Real gap found by review: `invoices` is a shared table (QuickBooks
+    // and Xero both ingest into it), but this whole action is
+    // QuickBooks-specific. Checked here, before the QuickBooks integration
+    // lookup below, so a Xero-sourced invoice gets an honest, specific
+    // reason rather than the misleading "Reconnect QuickBooks" message
+    // that lookup would otherwise produce (it finds no matching row for a
+    // Xero-linked integration id, which looks identical to a real
+    // disconnected QuickBooks account).
+    if (invoiceForAudit.source.system !== "quickbooks") {
+      return {
+        ok: false,
+        error: `Invoice reminders can currently only be sent through QuickBooks; this invoice was synced from ${invoiceForAudit.source.system}.`,
+      };
     }
 
     const mostRecentSentAt = await getMostRecentQuickBooksInvoiceReminderSentAt(
