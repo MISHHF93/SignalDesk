@@ -141,6 +141,45 @@ describe("evaluateGoal", () => {
     );
 
     expect(variance.status).toBe("OFF_TRACK");
+    // Real bug found by review: computeRatio used to divide by
+    // actualValue for at_least, so an actual of exactly 0 hit the
+    // divide-by-zero guard and reported an unmeasurable (null) variance
+    // instead of the genuinely measurable "100% short of target."
+    expect(variance.variancePercent).toBeCloseTo(100, 5);
+  });
+
+  it("regression: real bug found by review — bands an at_least goal that is 50% short of target the same as the mirrored at_most goal that is 50% over target", () => {
+    // computeRatio used to divide by actualValue for at_least (a fraction
+    // of ACTUAL, not of target), so this identical real-world 50%
+    // deviation reported a 100% variance and OFF_TRACK for at_least, but
+    // a 50% variance and only AT_RISK for the mirrored at_most case.
+    const atLeastShort = evaluateGoal(
+      goal({ comparisonOperator: "at_least", targetValue: 100_000 }),
+      [metricValue({ value: 50_000 })],
+    );
+    const atMostOver = evaluateGoal(
+      goal({ comparisonOperator: "at_most", targetValue: 100_000 }),
+      [metricValue({ value: 150_000 })],
+    );
+
+    expect(atLeastShort.variancePercent).toBeCloseTo(50, 5);
+    expect(atLeastShort.status).toBe("AT_RISK");
+    expect(atLeastShort.variancePercent).toBeCloseTo(
+      atMostOver.variancePercent!,
+      5,
+    );
+    expect(atLeastShort.status).toBe(atMostOver.status);
+  });
+
+  it("bands a small at_least shortfall as WATCH, not AT_RISK, mirroring the at_most banding thresholds", () => {
+    // 5% short of target on an at_least goal.
+    const variance = evaluateGoal(
+      goal({ comparisonOperator: "at_least", targetValue: 1_000_000 }),
+      [metricValue({ value: 950_000 })],
+    );
+
+    expect(variance.status).toBe("WATCH");
+    expect(variance.variancePercent).toBeCloseTo(5, 5);
   });
 
   it("matches a currency-less count metric with no ambiguity", () => {

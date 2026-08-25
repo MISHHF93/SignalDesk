@@ -23,24 +23,27 @@ function bandStatus(ratio: number): GoalStatus {
 
 /**
  * How far `actualValue` is from `targetValue`, as a ratio >= 1 (1 would
- * mean already achieved, which callers check before reaching here).
- * Guards the two real divide-by-zero cases explicitly rather than letting
- * them silently become `Infinity`/`NaN`: an `at_most 0` goal that isn't
- * met, or an `at_least N` goal sitting at exactly 0, are both genuinely
- * maximally off track, not a math error.
+ * mean already achieved, which callers check before reaching here) —
+ * always expressed as a fraction of `targetValue`, so the same real-world
+ * percentage shortfall/overshoot produces the same ratio (and therefore
+ * the same `variancePercent` and `bandStatus`) regardless of which
+ * direction the goal points. Real bug found by review: this used to
+ * divide by `actualValue` for `at_least` (targetValue / actualValue — a
+ * fraction of ACTUAL, not of target), so an `at_least $100,000` goal
+ * sitting 50% short ($50,000) reported a 100% variance and a different
+ * WATCH/AT_RISK boundary than the mirrored `at_most` case for the
+ * identical 50% real-world deviation. `Math.abs` makes this symmetric by
+ * construction, so `operator` no longer affects the result — only whether
+ * `isAchieved` (a genuinely direction-dependent check) let a non-achieved
+ * value reach here at all. Guards the one real divide-by-zero case
+ * explicitly (a 0 `targetValue`, meaningful only for an unmet `at_most 0`
+ * goal — `at_least` with a 0 target is always already `ACHIEVED` and
+ * never reaches here) rather than letting it silently become `NaN`.
  */
-function computeRatio(
-  operator: Goal["comparisonOperator"],
-  actualValue: number,
-  targetValue: number,
-): number {
-  if (operator === "at_most") {
-    return targetValue > 0
-      ? actualValue / targetValue
-      : Number.POSITIVE_INFINITY;
-  }
-
-  return actualValue > 0 ? targetValue / actualValue : Number.POSITIVE_INFINITY;
+function computeRatio(actualValue: number, targetValue: number): number {
+  return targetValue > 0
+    ? 1 + Math.abs(actualValue - targetValue) / targetValue
+    : Number.POSITIVE_INFINITY;
 }
 
 function isAchieved(
@@ -111,9 +114,7 @@ export function evaluateGoal(
     actualValue,
     goal.targetValue,
   );
-  const ratio = achieved
-    ? 1
-    : computeRatio(goal.comparisonOperator, actualValue, goal.targetValue);
+  const ratio = achieved ? 1 : computeRatio(actualValue, goal.targetValue);
 
   return {
     goalId: goal.id,
