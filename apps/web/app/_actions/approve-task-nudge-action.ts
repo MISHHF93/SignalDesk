@@ -92,6 +92,19 @@ async function attemptSend(
     };
   }
 
+  const integration = await getAsanaIntegrationStatus(db, organizationId);
+
+  if (
+    !integration ||
+    (integration.status !== "active" && integration.status !== "degraded")
+  ) {
+    await completeAsanaTaskNudgeSend(db, organizationId, userId, begun.id, {
+      status: "failed",
+      failureReason: "Asana is not connected.",
+    });
+    return { ok: false, error: "Reconnect Asana to post this nudge." };
+  }
+
   let outcome: CompleteAsanaTaskNudgeSendOutcome | null;
   let recoveryClassification: RecoveryClassification | null = null;
   let sendAttempted = false;

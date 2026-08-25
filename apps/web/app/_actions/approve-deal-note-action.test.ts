@@ -398,4 +398,33 @@ describe("approveDealNoteProposalAction", () => {
     expect(result.ok).toBe(false);
     expect(mockedCreateDealNote).not.toHaveBeenCalled();
   });
+
+  it("regression: blocks a resumed send when HubSpot was disconnected since the original approval, instead of attempting a token refresh", async () => {
+    // Real inconsistency found by review: unlike the QuickBooks/Zendesk
+    // approve actions, attemptSend here never re-checked HubSpot's
+    // connection status at all — only the fresh-approval path did, which
+    // the resume path skips entirely. A disconnect between the original
+    // approval and a resumed retry fell through to
+    // ensureFreshHubSpotAccessToken with no clean "reconnect" messaging.
+    mockedGetCurrentOrganization.mockResolvedValue(SESSION);
+    mockedGetAgentCollaboration.mockResolvedValue(RESUME_COLLABORATION);
+    mockedBeginSend.mockResolvedValue({ id: "send-1", alreadyResolved: null });
+    mockedGetHubSpotIntegrationStatus.mockResolvedValue(null);
+
+    const result = await approveDealNoteProposalAction("collab-1");
+
+    expect(result).toEqual({
+      ok: false,
+      error: "Reconnect HubSpot to log this note.",
+    });
+    expect(mockedEnsureFreshAccessToken).not.toHaveBeenCalled();
+    expect(mockedCreateDealNote).not.toHaveBeenCalled();
+    expect(mockedCompleteSend).toHaveBeenCalledWith(
+      undefined,
+      "org-1",
+      "user-1",
+      "send-1",
+      { status: "failed", failureReason: "HubSpot is not connected." },
+    );
+  });
 });

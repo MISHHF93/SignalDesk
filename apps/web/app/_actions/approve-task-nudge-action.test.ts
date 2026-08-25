@@ -396,4 +396,33 @@ describe("approveTaskNudgeProposalAction", () => {
     expect(result.ok).toBe(false);
     expect(mockedCreateTaskStory).not.toHaveBeenCalled();
   });
+
+  it("regression: blocks a resumed send when Asana was disconnected since the original approval, instead of attempting a token refresh", async () => {
+    // Real inconsistency found by review: unlike the QuickBooks/Zendesk
+    // approve actions, attemptSend here never re-checked Asana's connection
+    // status at all — only the fresh-approval path did, which the resume
+    // path skips entirely. A disconnect between the original approval and
+    // a resumed retry fell through to ensureFreshAsanaAccessToken with no
+    // clean "reconnect" messaging.
+    mockedGetCurrentOrganization.mockResolvedValue(SESSION);
+    mockedGetAgentCollaboration.mockResolvedValue(RESUME_COLLABORATION);
+    mockedBeginSend.mockResolvedValue({ id: "send-1", alreadyResolved: null });
+    mockedGetAsanaIntegrationStatus.mockResolvedValue(null);
+
+    const result = await approveTaskNudgeProposalAction("collab-1");
+
+    expect(result).toEqual({
+      ok: false,
+      error: "Reconnect Asana to post this nudge.",
+    });
+    expect(mockedEnsureFreshAccessToken).not.toHaveBeenCalled();
+    expect(mockedCreateTaskStory).not.toHaveBeenCalled();
+    expect(mockedCompleteSend).toHaveBeenCalledWith(
+      undefined,
+      "org-1",
+      "user-1",
+      "send-1",
+      { status: "failed", failureReason: "Asana is not connected." },
+    );
+  });
 });

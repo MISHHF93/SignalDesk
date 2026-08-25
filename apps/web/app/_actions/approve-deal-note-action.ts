@@ -89,6 +89,19 @@ async function attemptSend(
     };
   }
 
+  const integration = await getHubSpotIntegrationStatus(db, organizationId);
+
+  if (
+    !integration ||
+    (integration.status !== "active" && integration.status !== "degraded")
+  ) {
+    await completeHubSpotDealNoteSend(db, organizationId, userId, begun.id, {
+      status: "failed",
+      failureReason: "HubSpot is not connected.",
+    });
+    return { ok: false, error: "Reconnect HubSpot to log this note." };
+  }
+
   const origin = await getRequestOrigin();
 
   let outcome: CompleteHubSpotDealNoteSendOutcome | null;
