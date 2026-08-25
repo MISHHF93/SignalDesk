@@ -98,6 +98,28 @@ describe("mapZendeskTicketToSourceSupportTicketRecord", () => {
     expect(record.assigneeName).toBe("Zendesk user 999");
   });
 
+  it("real bug found by review: falls back to the same placeholder when a side-loaded user resolves but its own name is blank (e.g. a GDPR-redacted end-user), not a blank string", () => {
+    const record = mapZendeskTicketToSourceSupportTicketRecord(
+      ticket({ assignee_id: 55 }),
+      [
+        { id: 55, name: "" },
+        { id: 66, name: "Jane Client" },
+      ],
+      NOW,
+    ) as Record<string, unknown>;
+
+    expect(record.assigneeName).toBe("Zendesk user 55");
+  });
+
+  it("detectZendeskTicketDefaultedFields flags a resolved-but-blank name as defaulted too", () => {
+    expect(
+      detectZendeskTicketDefaultedFields(ticket({ assignee_id: 55 }), [
+        { id: 55, name: "   " },
+        { id: 66, name: "Jane Client" },
+      ]),
+    ).toEqual(["assignee_id"]);
+  });
+
   it("detectZendeskTicketDefaultedFields reports nothing for a real, fully-resolved ticket", () => {
     expect(detectZendeskTicketDefaultedFields(ticket(), USERS)).toEqual([]);
   });

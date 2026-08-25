@@ -27,6 +27,15 @@ import type { ZendeskTicket, ZendeskUser } from "./client";
 // same "keep the id visible rather than let it vanish" pattern this
 // codebase already uses for QuickBooks' `CustomerRef.name`/Asana's task
 // `name`.
+//
+// Real bug found by review: `?? placeholder` only substitutes on
+// `null`/`undefined` — a real, resolved Zendesk user whose own `name` is
+// `""` (a GDPR-redacted end-user is a real, reachable Zendesk case) used
+// to produce a blank `assigneeName`/`requesterName` instead of either the
+// real name or the id-carrying placeholder, a third, unhandled state.
+// `.trim() || placeholder` treats a resolved-but-blank name the same as
+// "unresolvable," matching `isAsanaAssigneeNameUnresolvable`'s identical
+// fix for the same underlying bug class.
 function resolveZendeskUserName(
   userId: number | null,
   userNameById: ReadonlyMap<number, string>,
@@ -35,14 +44,14 @@ function resolveZendeskUserName(
     return null;
   }
 
-  return userNameById.get(userId) ?? `Zendesk user ${userId}`;
+  return userNameById.get(userId)?.trim() || `Zendesk user ${userId}`;
 }
 
 function isZendeskUserUnresolvable(
   userId: number | null,
   userNameById: ReadonlyMap<number, string>,
 ): boolean {
-  return userId !== null && !userNameById.has(userId);
+  return userId !== null && !userNameById.get(userId)?.trim();
 }
 
 /**
