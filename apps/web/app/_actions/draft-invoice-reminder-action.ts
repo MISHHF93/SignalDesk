@@ -1,18 +1,11 @@
 "use server";
 
 import type { InvoiceReminderDraftContext } from "@signaldesk/application";
-import type { Invoice } from "@signaldesk/domain";
+import { daysOverdue, type Invoice } from "@signaldesk/domain";
 import { getInvoiceById } from "@signaldesk/persistence";
 
 import type { DraftInvoiceReminderActionResult } from "../_lib/actions";
 import { draftEntityContentAction } from "../_lib/draft-entity-content-action";
-
-function daysOverdue(dueAt: Date): number {
-  return Math.max(
-    0,
-    Math.floor((Date.now() - dueAt.getTime()) / (24 * 60 * 60 * 1000)),
-  );
-}
 
 /**
  * The drafting half of ADR 0057's QuickBooks invoice-reminder flow — the
@@ -44,7 +37,7 @@ const draft = draftEntityContentAction<Invoice, InvoiceReminderDraftContext>({
     amountCents: invoice.amountCents,
     currency: invoice.currency,
     dueAt: invoice.dueAt,
-    daysOverdue: daysOverdue(invoice.dueAt),
+    daysOverdue: daysOverdue(invoice.dueAt, new Date()),
   }),
   collaborationEntityRef: (invoiceId) => ({ invoiceId }),
 });

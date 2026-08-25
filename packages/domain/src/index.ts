@@ -371,6 +371,24 @@ function isValidDate(value: Date): boolean {
 
 const MILLISECONDS_PER_DAY = 24 * MILLISECONDS_PER_HOUR;
 
+/**
+ * The number of whole days between `dueAt` and `now`, clamped to zero
+ * rather than returning a negative count for a not-yet-due date — the
+ * same raw-calendar-time reasoning `evaluateOverdueInvoice`/
+ * `evaluateOverdueTask` below already use (a day doesn't stop counting on
+ * a weekend). The single shared implementation those two functions and
+ * every draft-time "N days overdue" display value (apps/web's
+ * draft-invoice-reminder-action.ts, draft-task-nudge-action.ts) use,
+ * rather than each independently reimplementing the same floor-division
+ * (found by review).
+ */
+export function daysOverdue(dueAt: Date, now: Date): number {
+  return Math.max(
+    0,
+    Math.floor((now.getTime() - dueAt.getTime()) / MILLISECONDS_PER_DAY),
+  );
+}
+
 function isValidInvoiceForEvaluation(invoice: Invoice, now: Date): boolean {
   return (
     isValidDate(now) &&
@@ -406,13 +424,11 @@ export function evaluateOverdueInvoice(
     return null;
   }
 
-  const elapsedMilliseconds = now.getTime() - invoice.dueAt.getTime();
-
-  if (elapsedMilliseconds < 0) {
+  if (now.getTime() - invoice.dueAt.getTime() < 0) {
     return null;
   }
 
-  const daysOverdue = Math.floor(elapsedMilliseconds / MILLISECONDS_PER_DAY);
+  const overdueDays = daysOverdue(invoice.dueAt, now);
 
   return {
     id: `invoice.overdue:${invoice.organizationId}:${invoice.id}`,
@@ -420,10 +436,10 @@ export function evaluateOverdueInvoice(
     invoiceId: invoice.id,
     organizationId: invoice.organizationId,
     severity: invoice.amountCents >= criticalValueCents ? "critical" : "high",
-    daysOverdue,
+    daysOverdue: overdueDays,
     amountCents: invoice.amountCents,
     currency: invoice.currency,
-    explanation: `Invoice for ${invoice.customerName} is ${daysOverdue} day${daysOverdue === 1 ? "" : "s"} past its due date and still unpaid.`,
+    explanation: `Invoice for ${invoice.customerName} is ${overdueDays} day${overdueDays === 1 ? "" : "s"} past its due date and still unpaid.`,
     recommendedAction: `Follow up with ${invoice.customerName} about the outstanding balance.`,
     evidence: [
       {
@@ -471,22 +487,20 @@ export function evaluateOverdueTask(
     return null;
   }
 
-  const elapsedMilliseconds = now.getTime() - task.dueAt.getTime();
-
-  if (elapsedMilliseconds < 0) {
+  if (now.getTime() - task.dueAt.getTime() < 0) {
     return null;
   }
 
-  const daysOverdue = Math.floor(elapsedMilliseconds / MILLISECONDS_PER_DAY);
+  const overdueDays = daysOverdue(task.dueAt, now);
 
   return {
     id: `task.overdue:${task.organizationId}:${task.id}`,
     type: "task.overdue",
     taskId: task.id,
     organizationId: task.organizationId,
-    severity: daysOverdue >= criticalDaysOverdue ? "critical" : "high",
-    daysOverdue,
-    explanation: `"${task.name}"${task.assigneeName ? ` (assigned to ${task.assigneeName})` : ""} is ${daysOverdue} day${daysOverdue === 1 ? "" : "s"} past its due date and still not complete.`,
+    severity: overdueDays >= criticalDaysOverdue ? "critical" : "high",
+    daysOverdue: overdueDays,
+    explanation: `"${task.name}"${task.assigneeName ? ` (assigned to ${task.assigneeName})` : ""} is ${overdueDays} day${overdueDays === 1 ? "" : "s"} past its due date and still not complete.`,
     recommendedAction: `Follow up on "${task.name}" or update its due date.`,
     evidence: [
       {

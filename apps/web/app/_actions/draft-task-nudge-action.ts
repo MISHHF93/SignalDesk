@@ -1,7 +1,7 @@
 "use server";
 
 import type { TaskNudgeDraftContext } from "@signaldesk/application";
-import type { Task } from "@signaldesk/domain";
+import { daysOverdue, type Task } from "@signaldesk/domain";
 import { getTaskById } from "@signaldesk/persistence";
 
 import type { DraftTaskNudgeActionResult } from "../_lib/actions";
@@ -31,21 +31,14 @@ const draft = draftEntityContentAction<Task, TaskNudgeDraftContext>({
   draftFailedMessage: "Couldn't draft a nudge right now.",
   fetchEntity: (db, organizationId, taskId) =>
     getTaskById(db, organizationId, taskId),
-  buildDraftContext: (task, finding) => {
-    const daysOverdue = Math.max(
-      0,
-      Math.floor((Date.now() - task.dueAt.getTime()) / (24 * 60 * 60 * 1000)),
-    );
-
-    return {
-      capability: "draft_task_nudge",
-      finding,
-      taskName: task.name,
-      assigneeName: task.assigneeName,
-      dueAt: task.dueAt,
-      daysOverdue,
-    };
-  },
+  buildDraftContext: (task, finding) => ({
+    capability: "draft_task_nudge",
+    finding,
+    taskName: task.name,
+    assigneeName: task.assigneeName,
+    dueAt: task.dueAt,
+    daysOverdue: daysOverdue(task.dueAt, new Date()),
+  }),
   collaborationEntityRef: (taskId) => ({ taskId }),
 });
 
