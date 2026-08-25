@@ -43,6 +43,10 @@ export async function disconnectAsanaAction(
     return { error: "Sign in to manage this connection." };
   }
 
+  if (session.role !== "owner" && session.role !== "admin") {
+    return { error: "Only an owner or admin can manage this connection." };
+  }
+
   const integration = await getAsanaIntegrationStatus(
     getPool(),
     session.organizationId,

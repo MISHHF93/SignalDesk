@@ -45,6 +45,13 @@ export async function retryPaymentAction(): Promise<RetryPaymentState> {
     return { error: "Sign in to do this.", clientSecret: null };
   }
 
+  if (session.role !== "owner" && session.role !== "admin") {
+    return {
+      error: "Only an owner or admin can manage this workspace's subscription.",
+      clientSecret: null,
+    };
+  }
+
   const rateLimit = await checkRateLimit(
     getPool(),
     `retry-payment:${session.organizationId}`,

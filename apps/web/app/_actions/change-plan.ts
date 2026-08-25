@@ -43,6 +43,12 @@ async function resolveTargetPrice(db: DatabasePool, newPlanKey: string) {
     return { error: "Sign in to do this." } as const;
   }
 
+  if (session.role !== "owner" && session.role !== "admin") {
+    return {
+      error: "Only an owner or admin can manage this workspace's subscription.",
+    } as const;
+  }
+
   if (!SELF_SERVE_PLAN_KEYS.has(newPlanKey)) {
     return {
       error: "That plan isn't available for self-serve changes.",

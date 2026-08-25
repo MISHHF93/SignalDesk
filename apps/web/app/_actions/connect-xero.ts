@@ -35,6 +35,10 @@ export async function connectXeroAction(
     return { error: "Sign in to connect Xero." };
   }
 
+  if (session.role !== "owner" && session.role !== "admin") {
+    return { error: "Only an owner or admin can connect Xero." };
+  }
+
   const origin = (await headers()).get("origin") ?? "";
   const config = getXeroOAuthConfig(origin);
   const state = await issueOAuthState("xero");

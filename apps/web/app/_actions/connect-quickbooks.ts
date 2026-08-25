@@ -37,6 +37,10 @@ export async function connectQuickBooksAction(
     return { error: "Sign in to connect QuickBooks." };
   }
 
+  if (session.role !== "owner" && session.role !== "admin") {
+    return { error: "Only an owner or admin can connect QuickBooks." };
+  }
+
   const origin = (await headers()).get("origin") ?? "";
   const config = getQuickBooksOAuthConfig(origin);
   const state = await issueOAuthState("quickbooks");

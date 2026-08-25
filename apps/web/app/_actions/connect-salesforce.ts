@@ -45,6 +45,10 @@ export async function connectSalesforceAction(
     return { error: "Sign in to connect Salesforce." };
   }
 
+  if (session.role !== "owner" && session.role !== "admin") {
+    return { error: "Only an owner or admin can connect Salesforce." };
+  }
+
   const origin = (await headers()).get("origin") ?? "";
   const config = getSalesforceOAuthConfig(origin);
   const state = await issueOAuthState("salesforce");

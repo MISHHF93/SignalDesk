@@ -86,6 +86,13 @@ export async function startCheckoutAction(
     );
   }
 
+  if (session.role !== "owner" && session.role !== "admin") {
+    return {
+      error: "Only an owner or admin can manage this workspace's subscription.",
+      clientSecret: null,
+    };
+  }
+
   const email = session.email;
 
   if (session.isAnonymous || !email) {

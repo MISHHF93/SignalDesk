@@ -53,6 +53,10 @@ export async function connectZendeskAction(
     return { error: "Sign in to connect Zendesk." };
   }
 
+  if (session.role !== "owner" && session.role !== "admin") {
+    return { error: "Only an owner or admin can connect Zendesk." };
+  }
+
   const subdomain = String(formData.get("subdomain") ?? "").trim();
 
   if (!subdomain || !isValidZendeskSubdomain(subdomain)) {

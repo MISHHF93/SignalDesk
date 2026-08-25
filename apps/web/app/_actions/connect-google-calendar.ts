@@ -43,6 +43,10 @@ export async function connectGoogleCalendarAction(
     return { error: "Sign in to connect Google Calendar." };
   }
 
+  if (session.role !== "owner" && session.role !== "admin") {
+    return { error: "Only an owner or admin can connect Google Calendar." };
+  }
+
   const origin = (await headers()).get("origin") ?? "";
   const config = getGoogleOAuthConfig(origin, CALLBACK_PATH);
   const state = await issueOAuthState("google-calendar");

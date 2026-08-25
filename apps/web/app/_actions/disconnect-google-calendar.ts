@@ -40,6 +40,10 @@ export async function disconnectGoogleCalendarAction(
     return { error: "Sign in to manage this connection." };
   }
 
+  if (session.role !== "owner" && session.role !== "admin") {
+    return { error: "Only an owner or admin can manage this connection." };
+  }
+
   const integration = await getGoogleCalendarIntegrationStatus(
     getPool(),
     session.organizationId,

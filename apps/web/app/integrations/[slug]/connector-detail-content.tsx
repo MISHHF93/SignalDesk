@@ -66,6 +66,13 @@ export async function ConnectorDetailContent({
       : 0;
 
   const session = adapter ? await getCurrentOrganization() : null;
+  // The real enforcement is server-side, on every connect/disconnect
+  // Server Action itself (each independently re-derives this from its own
+  // session, never trusts a client prop) — this is the matching UI-side
+  // signal so a member sees an honest, explanatory state instead of a
+  // button that would just fail with a permissions error when clicked.
+  const canManageConnections =
+    session !== null && (session.role === "owner" || session.role === "admin");
   const redirectUri = adapter
     ? `${await getRequestOrigin()}${adapter.callbackPath}`
     : "";
@@ -296,7 +303,13 @@ export async function ConnectorDetailContent({
                 ) : null}
                 <div className="connectPanelActions">
                   {adapter.SyncButton ? <adapter.SyncButton /> : null}
-                  <adapter.DisconnectButton />
+                  {canManageConnections ? (
+                    <adapter.DisconnectButton />
+                  ) : (
+                    <p className="connectorRoleNotice">
+                      Only an owner or admin can disconnect this integration.
+                    </p>
+                  )}
                 </div>
               </>
             ) : !adapter.isConfigured() ? (
@@ -355,6 +368,14 @@ export async function ConnectorDetailContent({
                     Sign in
                   </Link>{" "}
                   to connect your {adapter.providerLabel} account.
+                </p>
+              </>
+            ) : !canManageConnections ? (
+              <>
+                <h2 id="connect-heading">Owner or admin required</h2>
+                <p>
+                  Ask an owner or admin on this workspace to connect{" "}
+                  {adapter.providerLabel}.
                 </p>
               </>
             ) : (

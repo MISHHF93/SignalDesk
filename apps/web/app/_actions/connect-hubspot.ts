@@ -41,6 +41,10 @@ export async function connectHubSpotAction(
     return { error: "Sign in to connect HubSpot." };
   }
 
+  if (session.role !== "owner" && session.role !== "admin") {
+    return { error: "Only an owner or admin can connect HubSpot." };
+  }
+
   const origin = (await headers()).get("origin") ?? "";
   const config = getHubSpotOAuthConfig(origin);
   const state = await issueOAuthState("hubspot");

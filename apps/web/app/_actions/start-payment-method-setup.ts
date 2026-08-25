@@ -44,6 +44,13 @@ export async function startPaymentMethodSetupAction(): Promise<StartPaymentMetho
     return { ok: false, error: "Sign in to do this." };
   }
 
+  if (session.role !== "owner" && session.role !== "admin") {
+    return {
+      ok: false,
+      error: "Only an owner or admin can manage this workspace's subscription.",
+    };
+  }
+
   const rateLimit = await checkRateLimit(
     getPool(),
     `payment-method-setup:${session.organizationId}`,

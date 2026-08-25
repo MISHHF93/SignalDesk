@@ -41,6 +41,12 @@ export async function connectMicrosoftCalendarAction(
     return { error: "Sign in to connect Microsoft Calendar." };
   }
 
+  if (session.role !== "owner" && session.role !== "admin") {
+    return {
+      error: "Only an owner or admin can connect Microsoft Calendar.",
+    };
+  }
+
   const origin = (await headers()).get("origin") ?? "";
   const config = getMicrosoftOAuthConfig(origin, CALLBACK_PATH);
   const state = await issueOAuthState("microsoft-calendar");

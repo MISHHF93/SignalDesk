@@ -255,11 +255,21 @@ stripe-billing-config.ts`.
 
 ## P2 — real gaps, safe to launch without
 
-### 9. Role-aware UI
+### 9. ~~Role-aware UI~~ — the two real gaps closed 2026-08-24 (ADR 0062)
 
-Roles (owner/admin/member/viewer) gate actions correctly today but don't
-yet change what's rendered — disclosed as narrow-by-design scope from
-Phase 3, not a regression.
+`/profile` already rendered role-aware (`canManageTeam`/`canEdit` hide or
+disable controls, not just gate server-side) — that part of this entry
+was already inaccurate. Investigating found the two real, unguarded
+surfaces: connector connect/disconnect (already flagged by the
+certification's adversarial pass, left for a deliberate decision) and
+`/billing` (a new finding — no role check on any billing-mutating
+action). Confirmed with the user and closed both: 30 Server Actions
+(28 connector connect/disconnect + 7 billing) now check
+`role === "owner" || role === "admin"`, matching `/profile`'s existing
+pattern; both pages' UI shows an honest read-only state for a
+`member`/`viewer` instead of controls that would just fail server-side.
+Sync ("Sync Now") deliberately stays ungated — a lower-stakes, read-only
+refresh, not what was asked about. See ADR 0062 for the full account.
 
 ### 10. Six connectors have no content sync at all yet — corrected 2026-08-24, this entry previously overstated what exists
 

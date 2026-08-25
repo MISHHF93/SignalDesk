@@ -35,6 +35,10 @@ export async function connectJiraAction(
     return { error: "Sign in to connect Jira." };
   }
 
+  if (session.role !== "owner" && session.role !== "admin") {
+    return { error: "Only an owner or admin can connect Jira." };
+  }
+
   const origin = (await headers()).get("origin") ?? "";
   const config = getJiraOAuthConfig(origin);
   const state = await issueOAuthState("jira");

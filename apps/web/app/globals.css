@@ -3876,6 +3876,13 @@ button.oauthButton:disabled {
   margin-top: 0.4rem;
 }
 
+.connectorRoleNotice {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-style: italic;
+}
+
 .dailyBriefSection {
   display: flex;
   flex-direction: column;

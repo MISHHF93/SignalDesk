@@ -54,6 +54,12 @@ export async function addAddonAction(
     return { error: "Sign in to do this." };
   }
 
+  if (session.role !== "owner" && session.role !== "admin") {
+    return {
+      error: "Only an owner or admin can manage this workspace's subscription.",
+    };
+  }
+
   const rateLimit = await checkRateLimit(
     getPool(),
     `manage-addon:${session.organizationId}`,
@@ -173,6 +179,12 @@ export async function removeAddonAction(
 
   if (!session) {
     return { error: "Sign in to do this." };
+  }
+
+  if (session.role !== "owner" && session.role !== "admin") {
+    return {
+      error: "Only an owner or admin can manage this workspace's subscription.",
+    };
   }
 
   const rateLimit = await checkRateLimit(

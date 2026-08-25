@@ -41,6 +41,10 @@ export async function connectMicrosoftOutlookAction(
     return { error: "Sign in to connect Outlook." };
   }
 
+  if (session.role !== "owner" && session.role !== "admin") {
+    return { error: "Only an owner or admin can connect Outlook." };
+  }
+
   const origin = (await headers()).get("origin") ?? "";
   const config = getMicrosoftOAuthConfig(origin, CALLBACK_PATH);
   const state = await issueOAuthState("microsoft-outlook");

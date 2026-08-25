@@ -37,6 +37,10 @@ export async function connectAsanaAction(
     return { error: "Sign in to connect Asana." };
   }
 
+  if (session.role !== "owner" && session.role !== "admin") {
+    return { error: "Only an owner or admin can connect Asana." };
+  }
+
   const origin = (await headers()).get("origin") ?? "";
   const config = getAsanaOAuthConfig(origin);
   const state = await issueOAuthState("asana");

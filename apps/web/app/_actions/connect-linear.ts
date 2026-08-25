@@ -40,6 +40,10 @@ export async function connectLinearAction(
     return { error: "Sign in to connect Linear." };
   }
 
+  if (session.role !== "owner" && session.role !== "admin") {
+    return { error: "Only an owner or admin can connect Linear." };
+  }
+
   const origin = (await headers()).get("origin") ?? "";
   const config = getLinearOAuthConfig(origin);
   const state = await issueOAuthState("linear");

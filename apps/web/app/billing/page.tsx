@@ -69,6 +69,13 @@ export default async function BillingPage({
     redirect("/login?next=/billing");
   }
 
+  // The real enforcement is server-side, on every billing Server Action
+  // itself (each independently re-derives this from its own session,
+  // never trusts a client prop) — this is the matching UI-side signal so
+  // a member sees an honest, read-only view instead of controls that
+  // would just fail with a permissions error when clicked.
+  const canManageBilling = session.role === "owner" || session.role === "admin";
+
   const db = getPool();
   const subscription = await getOrganizationSubscription(
     db,
@@ -236,66 +243,75 @@ export default async function BillingPage({
             </p>
           ) : null}
 
-          <div className="checkoutForm">
-            {subscription.status === "canceled" ||
-            subscription.status ===
-              "incomplete_expired" ? null : subscription.cancelAtPeriodEnd ? (
-              <ResumeSubscriptionButton />
-            ) : (
-              <CancelSubscriptionButton />
-            )}
-          </div>
+          {canManageBilling ? (
+            <>
+              <div className="checkoutForm">
+                {subscription.status === "canceled" ||
+                subscription.status ===
+                  "incomplete_expired" ? null : subscription.cancelAtPeriodEnd ? (
+                  <ResumeSubscriptionButton />
+                ) : (
+                  <CancelSubscriptionButton />
+                )}
+              </div>
 
-          {subscription.status === "incomplete" ? (
-            <>
-              <p className="dailyBriefMeta">
-                Your subscription was never confirmed — pick up checkout where
-                you left off.
-              </p>
-              <RetryPaymentForm retryAction={retryPaymentAction} />
-            </>
-          ) : subscription.status === "canceled" ||
-            subscription.status === "incomplete_expired" ? null : (
-            <>
-              <p className="dailyBriefMeta">
-                {subscription.status === "trialing"
-                  ? "Add a payment method now so your trial converts automatically instead of cancelling."
-                  : subscription.status === "past_due"
-                    ? "Your last payment failed — add a working card to keep your subscription active."
-                    : "Update the card on file for this subscription."}
-              </p>
-              <PaymentMethodForm
-                startSetupAction={startPaymentMethodSetupAction}
-              />
-            </>
-          )}
+              {subscription.status === "incomplete" ? (
+                <>
+                  <p className="dailyBriefMeta">
+                    Your subscription was never confirmed — pick up checkout
+                    where you left off.
+                  </p>
+                  <RetryPaymentForm retryAction={retryPaymentAction} />
+                </>
+              ) : subscription.status === "canceled" ||
+                subscription.status === "incomplete_expired" ? null : (
+                <>
+                  <p className="dailyBriefMeta">
+                    {subscription.status === "trialing"
+                      ? "Add a payment method now so your trial converts automatically instead of cancelling."
+                      : subscription.status === "past_due"
+                        ? "Your last payment failed — add a working card to keep your subscription active."
+                        : "Update the card on file for this subscription."}
+                  </p>
+                  <PaymentMethodForm
+                    startSetupAction={startPaymentMethodSetupAction}
+                  />
+                </>
+              )}
 
-          {subscription.status === "canceled" ||
-          subscription.status === "incomplete" ||
-          subscription.status === "incomplete_expired" ||
-          availablePlans.length === 0 ? null : (
-            <>
-              <p className="dailyBriefMeta">Change your plan.</p>
-              <ChangePlanForm
-                availablePlans={availablePlans}
-                previewAction={previewPlanChangeAction}
-                changeAction={changePlanAction}
-              />
-            </>
-          )}
+              {subscription.status === "canceled" ||
+              subscription.status === "incomplete" ||
+              subscription.status === "incomplete_expired" ||
+              availablePlans.length === 0 ? null : (
+                <>
+                  <p className="dailyBriefMeta">Change your plan.</p>
+                  <ChangePlanForm
+                    availablePlans={availablePlans}
+                    previewAction={previewPlanChangeAction}
+                    changeAction={changePlanAction}
+                  />
+                </>
+              )}
 
-          {subscription.status === "canceled" ||
-          subscription.status === "incomplete" ||
-          subscription.status === "incomplete_expired" ? null : (
-            <>
-              <p className="dailyBriefMeta">Add extra capacity.</p>
-              <ManageAddonForm
-                addons={addons}
-                purchased={purchasedAddons}
-                addAction={addAddonAction}
-                removeAction={removeAddonAction}
-              />
+              {subscription.status === "canceled" ||
+              subscription.status === "incomplete" ||
+              subscription.status === "incomplete_expired" ? null : (
+                <>
+                  <p className="dailyBriefMeta">Add extra capacity.</p>
+                  <ManageAddonForm
+                    addons={addons}
+                    purchased={purchasedAddons}
+                    addAction={addAddonAction}
+                    removeAction={removeAddonAction}
+                  />
+                </>
+              )}
             </>
+          ) : (
+            <p className="dailyBriefMeta">
+              Only an owner or admin can manage this workspace&rsquo;s
+              subscription.
+            </p>
           )}
         </section>
       )}

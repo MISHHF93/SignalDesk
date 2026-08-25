@@ -43,6 +43,10 @@ export async function connectGmailAction(
     return { error: "Sign in to connect Gmail." };
   }
 
+  if (session.role !== "owner" && session.role !== "admin") {
+    return { error: "Only an owner or admin can connect Gmail." };
+  }
+
   const origin = (await headers()).get("origin") ?? "";
   const config = getGoogleOAuthConfig(origin, CALLBACK_PATH);
   const state = await issueOAuthState("gmail");

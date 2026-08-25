@@ -35,6 +35,10 @@ export async function connectSlackAction(
     return { error: "Sign in to connect Slack." };
   }
 
+  if (session.role !== "owner" && session.role !== "admin") {
+    return { error: "Only an owner or admin can connect Slack." };
+  }
+
   const origin = (await headers()).get("origin") ?? "";
   const config = getSlackOAuthConfig(origin);
   const state = await issueOAuthState("slack");
