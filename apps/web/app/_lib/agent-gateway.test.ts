@@ -224,3 +224,87 @@ describe("createAgentGatewayService — dispatch", () => {
     expect(mockedRecordInternalCostEventWithClient).not.toHaveBeenCalled();
   });
 });
+
+describe("createAgentGatewayService — dispatchContentDraft", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedWithTenantContext.mockImplementation((_pool, _orgId, fn) =>
+      fn(FAKE_CLIENT),
+    );
+    mockedMintCapabilityGrant.mockResolvedValue({
+      id: "grant-1",
+      collaborationId: "collab-1",
+      agentId: AGENT.id,
+      capability: TASK.requestedCapability,
+      canRead: true,
+      canPropose: true,
+      canExecute: false,
+      expiresAt: new Date(Date.now() + 60_000),
+    } as never);
+    mockedAssertGrantActive.mockReturnValue(undefined);
+    mockedInsertAuditEvent.mockResolvedValue(undefined);
+  });
+
+  const DEAL_NOTE_CONTEXT = {
+    capability: "draft_deal_note" as const,
+    finding: { id: "finding-1" } as never,
+    contactName: "Jane Client",
+    companyName: "Acme Co",
+    stage: "negotiation",
+    valueCents: 500_000,
+    currency: "USD",
+    lastInteractionAt: null,
+  };
+
+  function makeDraftService(
+    providerFor: () => Promise<{
+      generateStructured: ReturnType<typeof vi.fn>;
+    }>,
+  ) {
+    return createAgentGatewayService({
+      pool: undefined as never,
+      organizationId: "org-1",
+      collaborationId: "collab-1",
+      providerFor: providerFor as never,
+    });
+  }
+
+  it("dispatches when context.capability matches task.requestedCapability", async () => {
+    const generateStructured = vi.fn().mockResolvedValue({ body: "Note." });
+    const service = makeDraftService(async () => ({ generateStructured }));
+
+    const result = await service.dispatchContentDraft(
+      TASK,
+      AGENT,
+      FINDINGS,
+      DEAL_NOTE_CONTEXT,
+    );
+
+    expect(result.draftedContent).toEqual({ body: "Note." });
+    expect(generateStructured).toHaveBeenCalledWith(
+      expect.objectContaining({ task: "draft_deal_note" }),
+    );
+  });
+
+  it("regression: real gap found by review — refuses to dispatch when context.capability doesn't match task.requestedCapability, rather than silently running the mismatched capability under the authorized/audited name", async () => {
+    const generateStructured = vi.fn();
+    const service = makeDraftService(async () => ({ generateStructured }));
+
+    await expect(
+      service.dispatchContentDraft(TASK, AGENT, FINDINGS, {
+        ...DEAL_NOTE_CONTEXT,
+        capability: "draft_ticket_reply" as never,
+      }),
+    ).rejects.toThrow(/context\.capability.*does not match/);
+
+    // Never even reached authorization/the provider — this is a
+    // caller-contract violation, not a policy question.
+    expect(generateStructured).not.toHaveBeenCalled();
+    expect(mockedMintCapabilityGrant).not.toHaveBeenCalled();
+    expect(mockedInsertAgentTaskResultWithClient).toHaveBeenCalledWith(
+      FAKE_CLIENT,
+      "org-1",
+      expect.objectContaining({ status: "failed" }),
+    );
+  });
+});

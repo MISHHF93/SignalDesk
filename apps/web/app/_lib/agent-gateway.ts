@@ -361,6 +361,27 @@ export function createAgentGatewayService(
       let providerCallAttempted = false;
 
       try {
+        // Real gap found by review: authorizeDispatch/recordOutcome both
+        // key off task.requestedCapability, but the provider call below
+        // runs whatever context.capability names — a separate field on a
+        // separate object, with nothing asserting the two match. Every
+        // real call site today keeps them consistent (each connector's
+        // draft-*-action.ts constructs one of the four exhaustively-typed
+        // context shapes 1:1 with its own capability), so this has never
+        // actually diverged — but this function is the real trust
+        // boundary (see this file's own doc comment), and a future
+        // mismatched task/context pair would otherwise run one
+        // capability's prompt/parse logic while the persisted task result
+        // and audit event falsely claimed a different (authorized)
+        // capability executed. Checked before authorizeDispatch: this is
+        // a caller-contract violation, not something any agent's
+        // declared capabilities could excuse.
+        if (context.capability !== task.requestedCapability) {
+          throw new Error(
+            `dispatchContentDraft: context.capability ("${context.capability}") does not match task.requestedCapability ("${task.requestedCapability}")`,
+          );
+        }
+
         await authorizeDispatch(deps, task, agent);
 
         providerCallAttempted = true;
