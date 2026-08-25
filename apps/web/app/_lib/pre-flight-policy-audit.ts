@@ -64,8 +64,12 @@ const AMOUNT_MISMATCH_TOLERANCE_CENTS = 100;
  * Finds every `$1,234.56`-shaped figure in free text and returns each as
  * integer cents — the same direction every other money field in this
  * codebase already stores in (`Invoice.amountCents`, ...). Text with no
- * dollar figure at all returns `[]`, not a violation by itself — plenty
- * of real drafts (task nudges, deal notes) legitimately mention no amount.
+ * dollar figure at all returns `[]` — this function itself makes no
+ * judgment about whether that's a problem; `runPreFlightPolicyAudit`'s
+ * caller decides that by whether it passed an `expectedAmountCents` at
+ * all (task nudges/deal notes with no real amount never do, so an empty
+ * result there is correctly a non-issue; an invoice reminder always does,
+ * so an empty result there correctly is one).
  */
 export function extractDollarAmountsCents(text: string): readonly number[] {
   const amounts: number[] = [];
@@ -116,22 +120,29 @@ export function runPreFlightPolicyAudit(
 
   if (input.expectedAmountCents !== undefined) {
     const draftedAmounts = extractDollarAmountsCents(combinedText);
-    const noAmountMatches =
-      draftedAmounts.length > 0 &&
-      draftedAmounts.every(
-        (cents) =>
-          Math.abs(cents - input.expectedAmountCents!) >
-          AMOUNT_MISMATCH_TOLERANCE_CENTS,
-      );
+    // `[].every(...)` is vacuously true — deliberately relied on, not an
+    // oversight: an amount-bearing entity's draft that mentions zero
+    // dollar figures at all is exactly as much a problem as one that
+    // mentions a wrong figure (the model omitted the one fact this
+    // content exists to state), so it must fail this check the same way.
+    // Found reviewing this file: an earlier `draftedAmounts.length > 0 &&`
+    // guard suppressed that vacuous-true case, silently passing a
+    // reminder that names no amount at all — the review this check was
+    // supposedly built to do, treated as "nothing to check" instead.
+    const noAmountMatches = draftedAmounts.every(
+      (cents) =>
+        Math.abs(cents - input.expectedAmountCents!) >
+        AMOUNT_MISMATCH_TOLERANCE_CENTS,
+    );
 
     if (noAmountMatches) {
+      const expected = (input.expectedAmountCents / 100).toFixed(2);
       violations.push({
         code: "amount_mismatch",
-        message: `The drafted content's dollar figure doesn't match the real amount on record ($${(
-          input.expectedAmountCents / 100
-        ).toFixed(
-          2,
-        )}). Blocked to avoid sending the wrong amount to a customer.`,
+        message:
+          draftedAmounts.length === 0
+            ? `The drafted content doesn't state a dollar amount at all — the real amount on record is $${expected}. Blocked to avoid sending a reminder that never says how much is owed.`
+            : `The drafted content's dollar figure doesn't match the real amount on record ($${expected}). Blocked to avoid sending the wrong amount to a customer.`,
       });
     }
   }

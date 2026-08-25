@@ -117,13 +117,20 @@ describe("runPreFlightPolicyAudit", () => {
     expect(result.passed).toBe(true);
   });
 
-  it("does not flag a draft that mentions no amount when one was expected", () => {
+  it("regression: blocks a draft that mentions no amount at all when one was expected — omitting the figure is exactly as much a problem as stating a wrong one", () => {
     const result = runPreFlightPolicyAudit({
       draftedContent: { body: "Please pay your outstanding balance." },
       expectedAmountCents: 50_000,
     });
 
-    expect(result.passed).toBe(true);
+    expect(result.passed).toBe(false);
+    expect(result.violations).toEqual([
+      {
+        code: "amount_mismatch",
+        message:
+          "The drafted content doesn't state a dollar amount at all — the real amount on record is $500.00. Blocked to avoid sending a reminder that never says how much is owed.",
+      },
+    ]);
   });
 
   it("blocks a send within the last 24 hours", () => {
