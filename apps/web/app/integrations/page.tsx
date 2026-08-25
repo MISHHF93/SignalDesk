@@ -3,7 +3,7 @@ import {
   computeBusinessCoverageByCapability,
   computeIndustryCoverage,
   connectorCatalog,
-  getConnectorBySlug,
+  getSourceSystemLabel,
 } from "@signaldesk/integrations";
 import {
   computeTimeToFirstSync,
@@ -269,7 +269,7 @@ export default async function IntegrationsPage() {
       {session ? (
         <DataQualityPanel
           issues={dataQualityIssues}
-          connectorName={(system) => getConnectorBySlug(system)?.name ?? system}
+          connectorName={getSourceSystemLabel}
         />
       ) : null}
 
