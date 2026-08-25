@@ -282,6 +282,10 @@ export type ImportCsvInvoicesActionResult =
       readonly ok: true;
       readonly imported: number;
       readonly duplicates: number;
+      /** Row numbers `ingestCsvInvoice` treated as already-imported
+       * (same `contentHash` as a prior row) — lets the UI point at exactly
+       * which rows were skipped, not just report a count. */
+      readonly duplicateRows: readonly number[];
       readonly rowErrors: readonly CsvRowIssue[];
     }
   | { readonly ok: false; readonly error: string };

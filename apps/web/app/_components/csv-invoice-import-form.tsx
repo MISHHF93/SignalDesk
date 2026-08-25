@@ -102,6 +102,9 @@ export function CsvInvoiceImportForm({
       <label htmlFor="csv-invoice-file">Invoice CSV file</label>
       <p className="csvImportHeaderHint" id="csv-invoice-file-hint">
         Required columns: <code>{INVOICE_CSV_REQUIRED_HEADERS.join(", ")}</code>
+        . An optional <code>invoice_number</code> column is also recognized —
+        include it if you have it, so two otherwise-identical invoices
+        aren&rsquo;t mistaken for duplicates.
       </p>
 
       <input
@@ -172,6 +175,13 @@ export function CsvInvoiceImportForm({
                 ? ` ${importResult.rowErrors.length} row${importResult.rowErrors.length === 1 ? "" : "s"} skipped for validation errors.`
                 : ""}
             </p>
+            {importResult.duplicateRows.length > 0 ? (
+              <ul className="csvImportErrorList">
+                {importResult.duplicateRows.map((rowNumber) => (
+                  <li key={rowNumber}>Row {rowNumber}: already imported.</li>
+                ))}
+              </ul>
+            ) : null}
             {importResult.rowErrors.length > 0 ? (
               <ul className="csvImportErrorList">
                 {importResult.rowErrors.map((error) => (

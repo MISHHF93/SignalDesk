@@ -91,7 +91,7 @@ export async function importCsvInvoicesAction(
     );
 
     let imported = 0;
-    let duplicates = 0;
+    const duplicateRows: number[] = [];
 
     try {
       for (const row of parsed.validRows) {
@@ -113,13 +113,13 @@ export async function importCsvInvoicesAction(
         if (result.inserted) {
           imported += 1;
         } else {
-          duplicates += 1;
+          duplicateRows.push(row.rowNumber);
         }
       }
     } catch (error) {
       await failSyncJob(db, session.organizationId, job.id, {
         itemsIngested: imported,
-        itemsSkipped: parsed.errors.length + duplicates,
+        itemsSkipped: parsed.errors.length + duplicateRows.length,
         errorMessage: error instanceof Error ? error.message : String(error),
       });
       throw error;
@@ -127,14 +127,15 @@ export async function importCsvInvoicesAction(
 
     await completeSyncJob(db, session.organizationId, job.id, {
       itemsIngested: imported,
-      itemsSkipped: parsed.errors.length + duplicates,
+      itemsSkipped: parsed.errors.length + duplicateRows.length,
       cursorAfter: null,
     });
 
     return {
       ok: true,
       imported,
-      duplicates,
+      duplicates: duplicateRows.length,
+      duplicateRows,
       rowErrors: parsed.errors.map((error) => ({
         rowNumber: error.rowNumber,
         message: error.message,

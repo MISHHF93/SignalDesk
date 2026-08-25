@@ -20,6 +20,12 @@ export const INVOICE_CSV_REQUIRED_HEADERS = [
   "status",
 ] as const;
 
+/** Recognized, but never required — most spreadsheets a business already
+ * has won't include it, so this can't be a hard requirement (see
+ * `contentHashFor`'s own doc comment for why it matters when it *is*
+ * present). */
+const INVOICE_NUMBER_HEADER = "invoice_number";
+
 export interface ParsedInvoiceCsvRow {
   readonly rowNumber: number;
   readonly customerName: string;
@@ -27,6 +33,10 @@ export interface ParsedInvoiceCsvRow {
   readonly currency: string;
   readonly dueAt: Date;
   readonly status: "open" | "paid" | "void";
+  /** `null` when the file has no `invoice_number` column, or this row's
+   * cell in it is blank — an honest "not provided," never a fabricated
+   * placeholder. */
+  readonly invoiceNumber: string | null;
   /** sha256 of the row's own normalized field values — the real
    * idempotency basis: re-uploading the identical row twice (same file
    * re-imported, or the same row appearing twice in one file) produces
@@ -67,18 +77,35 @@ const invoiceCsvRowSchema = z.strictObject({
     .regex(/^[A-Z]{3}$/),
   dueAt: dateInputSchema,
   status: z.enum(["open", "paid", "void"]),
+  invoiceNumber: z.string().trim().min(1).max(200).optional(),
 });
 
+/**
+ * Real gap found by review: without `invoiceNumber` in the hash, two
+ * genuinely distinct invoices to the same customer, for the same amount,
+ * currency, due date, and status (not a rare case — recurring/retainer
+ * invoices, or two identical line items) hash identically. The second
+ * would then silently fail `source_records`' own idempotency check and
+ * be dropped as a "duplicate" — a real invoice lost with no error
+ * surfaced anywhere. Folding in `invoiceNumber` when the file provides
+ * one (the real, business-meaningful identifier an invoice actually has)
+ * closes that for anyone using it. When a file has no `invoice_number`
+ * column at all, content is still the only signal available — an honest,
+ * disclosed residual limitation (surfaced per-row by this package's
+ * caller, `import-csv-invoices.ts`, rather than silently absorbed here),
+ * not one this function can fabricate its way out of.
+ */
 function contentHashFor(row: {
   readonly customerName: string;
   readonly amountCents: number;
   readonly currency: string;
   readonly dueAt: Date;
   readonly status: string;
+  readonly invoiceNumber: string | null;
 }): string {
   return createHash("sha256")
     .update(
-      `${row.customerName}|${row.amountCents}|${row.currency}|${row.dueAt.toISOString()}|${row.status}`,
+      `${row.customerName}|${row.amountCents}|${row.currency}|${row.dueAt.toISOString()}|${row.status}|${row.invoiceNumber ?? ""}`,
     )
     .digest("hex");
 }
@@ -120,6 +147,11 @@ export function parseInvoiceCsvText(text: string): ParseInvoiceCsvResult {
       normalizedHeader.indexOf(required),
     ]),
   );
+  // Unlike the required headers above, -1 (not present at all) is a valid,
+  // expected state for this one — most files won't have it.
+  const invoiceNumberColumnIndex = normalizedHeader.indexOf(
+    INVOICE_NUMBER_HEADER,
+  );
 
   const validRows: ParsedInvoiceCsvRow[] = [];
   const errors: InvoiceCsvRowError[] = [];
@@ -129,12 +161,21 @@ export function parseInvoiceCsvText(text: string): ParseInvoiceCsvResult {
     // matching how a person would count lines in a spreadsheet editor.
     const rowNumber = index + 2;
 
+    const rawInvoiceNumber =
+      invoiceNumberColumnIndex >= 0
+        ? (dataRow[invoiceNumberColumnIndex] ?? "").trim()
+        : "";
+
     const rawValues = {
       customerName: dataRow[columnIndex.get("customer_name")!] ?? "",
       amountCents: dataRow[columnIndex.get("amount_cents")!] ?? "",
       currency: dataRow[columnIndex.get("currency")!] ?? "",
       dueAt: dataRow[columnIndex.get("due_at")!] ?? "",
       status: dataRow[columnIndex.get("status")!] ?? "",
+      // Omitted, never an empty string, when there's no real value — an
+      // empty string would fail invoiceCsvRowSchema's own min(1) and turn
+      // "column absent" or "cell blank" into a spurious validation error.
+      invoiceNumber: rawInvoiceNumber === "" ? undefined : rawInvoiceNumber,
     };
 
     const parsed = invoiceCsvRowSchema.safeParse(rawValues);
@@ -150,12 +191,14 @@ export function parseInvoiceCsvText(text: string): ParseInvoiceCsvResult {
     }
 
     const dueAt = new Date(parsed.data.dueAt);
+    const invoiceNumber = parsed.data.invoiceNumber ?? null;
     const row = {
       customerName: parsed.data.customerName,
       amountCents: parsed.data.amountCents,
       currency: parsed.data.currency,
       dueAt,
       status: parsed.data.status,
+      invoiceNumber,
     };
 
     validRows.push({

@@ -106,4 +106,76 @@ open,2026-08-01,USD,100000,Acme Co`;
     if (!result.ok) throw new Error("expected ok result");
     expect(result.validRows[0]?.customerName).toBe("Acme Co");
   });
+
+  describe("invoice_number (regression: real invoices silently dropped as false-positive duplicates)", () => {
+    it("reports null, not a validation error, when the file has no invoice_number column at all", () => {
+      const result = parseInvoiceCsvText(VALID_CSV);
+
+      if (!result.ok) throw new Error("expected ok result");
+      expect(result.validRows[0]?.invoiceNumber).toBeNull();
+      expect(result.errors).toEqual([]);
+    });
+
+    it("reports null, not a validation error, when the column exists but this row's cell is blank", () => {
+      const csv = `customer_name,amount_cents,currency,due_at,status,invoice_number
+Acme Co,250000,USD,2026-08-01,open,`;
+
+      const result = parseInvoiceCsvText(csv);
+
+      if (!result.ok) throw new Error("expected ok result");
+      expect(result.validRows[0]?.invoiceNumber).toBeNull();
+      expect(result.errors).toEqual([]);
+    });
+
+    it("captures the real value when the column and cell are both present", () => {
+      const csv = `customer_name,amount_cents,currency,due_at,status,invoice_number
+Acme Co,250000,USD,2026-08-01,open,INV-1042`;
+
+      const result = parseInvoiceCsvText(csv);
+
+      if (!result.ok) throw new Error("expected ok result");
+      expect(result.validRows[0]?.invoiceNumber).toBe("INV-1042");
+    });
+
+    it("real bug found by review: without invoice_number, two genuinely distinct invoices with identical customer/amount/currency/due date/status hash identically", () => {
+      const csv = `customer_name,amount_cents,currency,due_at,status
+Acme Co,250000,USD,2026-08-01,open
+Acme Co,250000,USD,2026-08-01,open`;
+
+      const result = parseInvoiceCsvText(csv);
+
+      if (!result.ok) throw new Error("expected ok result");
+      const [first, second] = result.validRows;
+      // Documented, disclosed residual limitation: with no invoice_number
+      // column at all, content is the only signal available, so this pair
+      // still collides — the second would be silently dropped by
+      // ingestCsvInvoice's own idempotency check further downstream.
+      expect(first?.contentHash).toBe(second?.contentHash);
+    });
+
+    it("fix: the same two otherwise-identical rows hash differently once each has its own invoice_number", () => {
+      const csv = `customer_name,amount_cents,currency,due_at,status,invoice_number
+Acme Co,250000,USD,2026-08-01,open,INV-1001
+Acme Co,250000,USD,2026-08-01,open,INV-1002`;
+
+      const result = parseInvoiceCsvText(csv);
+
+      if (!result.ok) throw new Error("expected ok result");
+      const [first, second] = result.validRows;
+      expect(first?.contentHash).not.toBe(second?.contentHash);
+    });
+
+    it("a genuine re-upload of the same row (same invoice_number too) still hashes identically, preserving real idempotency", () => {
+      const csv = `customer_name,amount_cents,currency,due_at,status,invoice_number
+Acme Co,250000,USD,2026-08-01,open,INV-1001`;
+
+      const first = parseInvoiceCsvText(csv);
+      const second = parseInvoiceCsvText(csv);
+      if (!first.ok || !second.ok) throw new Error("expected ok result");
+
+      expect(first.validRows[0]?.contentHash).toBe(
+        second.validRows[0]?.contentHash,
+      );
+    });
+  });
 });

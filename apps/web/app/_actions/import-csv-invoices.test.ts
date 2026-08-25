@@ -42,6 +42,7 @@ const VALID_ROW = {
   currency: "USD",
   dueAt: new Date("2026-08-01T00:00:00Z"),
   status: "open" as const,
+  invoiceNumber: null,
   contentHash: "hash-1",
 };
 
@@ -144,6 +145,7 @@ describe("importCsvInvoicesAction", () => {
       ok: true,
       imported: 1,
       duplicates: 1,
+      duplicateRows: [3],
       rowErrors: [{ rowNumber: 4, message: "invalid amount_cents" }],
     });
     expect(mockedIngestCsvInvoice).toHaveBeenCalledTimes(2);
