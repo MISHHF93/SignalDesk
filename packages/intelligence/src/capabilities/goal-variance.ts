@@ -10,6 +10,27 @@ import type { IntelligenceFinding } from "../finding";
 import { freshnessStatus } from "../format";
 
 /**
+ * `Goal.targetValue`/`GoalVariance.actualValue` are stored/computed in
+ * cents for a currency-unit metric (the same convention `amountCents`
+ * uses everywhere else in this codebase) — never divided by 100 before
+ * this fix, so a card previously showed a raw figure like "200000 USD"
+ * instead of "$2,000.00". Count-unit metrics (e.g. open_task_backlog)
+ * have no such scaling and are rendered as a plain number.
+ */
+function formatMetricValue(
+  value: number,
+  unit: "currency" | "count",
+  currency: string | null,
+): string {
+  if (unit === "count") {
+    return String(value);
+  }
+
+  const formatted = (value / 100).toFixed(2);
+  return currency ? `${formatted} ${currency}` : formatted;
+}
+
+/**
  * The Goal Intelligence Engine's one real Signal-equivalent (Prompt 22,
  * docs/product-vision-backlog.md, ADR 0035): evaluates every real goal
  * against the current `@signaldesk/semantics` metric values and produces a
@@ -71,7 +92,7 @@ export const goalVarianceIntelligence: IntelligenceCapability = {
         type: "goal.at_risk",
         entity: { kind: "goal", id: goal.id },
         title: `"${goal.name}" is ${variance.status === "OFF_TRACK" ? "off track" : "at risk"}`,
-        summary: `${metricName} is currently ${variancePercentLabel} away from its target, ${goal.comparisonOperator === "at_most" ? "at most" : "at least"} ${goal.targetValue}${matchedMetric.unit === "count" ? "" : ` ${matchedMetric.currency ?? ""}`.trimEnd()}.`,
+        summary: `${metricName} is currently ${variancePercentLabel} away from its target, ${goal.comparisonOperator === "at_most" ? "at most" : "at least"} ${formatMetricValue(goal.targetValue, matchedMetric.unit, matchedMetric.currency ?? null)}.`,
         severity: variance.status === "OFF_TRACK" ? "high" : "medium",
         confidence: CONFIDENCE_DETERMINISTIC_RULE,
         // exposureType comes from the metric's own real classification
@@ -110,8 +131,8 @@ export const goalVarianceIntelligence: IntelligenceCapability = {
         },
         explanation: {
           trigger: `Current value moved far enough from this goal's target to count as ${variance.status === "OFF_TRACK" ? "off track" : "at risk"}.`,
-          observedValue: `${metricName}: ${variance.actualValue}${matchedMetric.unit === "currency" ? ` ${matchedMetric.currency}` : ""}`,
-          expectedBaseline: `${goal.comparisonOperator === "at_most" ? "At most" : "At least"} ${goal.targetValue}`,
+          observedValue: `${metricName}: ${formatMetricValue(variance.actualValue ?? 0, matchedMetric.unit, matchedMetric.currency ?? null)}`,
+          expectedBaseline: `${goal.comparisonOperator === "at_most" ? "At most" : "At least"} ${formatMetricValue(goal.targetValue, matchedMetric.unit, matchedMetric.currency ?? null)}`,
           confidence: "high",
         },
         detectedAt: now,

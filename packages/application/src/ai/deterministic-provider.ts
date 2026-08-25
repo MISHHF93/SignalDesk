@@ -5,7 +5,13 @@ import type {
   AgentInterpretationContext,
   AIProvider,
   DashboardCommandContext,
+  DealNoteDraftContext,
   GenerateStructuredInput,
+  InvoiceReminderDraftContext,
+  MessageReplyDraftContext,
+  StructuredGenerationTask,
+  TaskNudgeDraftContext,
+  TicketReplyDraftContext,
 } from "./ai-provider";
 
 const STOP_WORDS = new Set([
@@ -228,6 +234,150 @@ function interpretFindingsDeterministically(
 }
 
 /**
+ * Templates a generic, non-committal acknowledgement — never echoes
+ * `inboundBodyText` back (it is untrusted customer text; reflecting it into
+ * an outbound reply this provider fully controls would be a real, if low-
+ * severity, injection surface) and never invents a substantive answer to
+ * the customer's actual question. This is what keeps `draft_customer_reply`
+ * a genuine, always-available capability (see AGENT_REGISTRY) rather than a
+ * stub gated on ANTHROPIC_API_KEY.
+ */
+function draftMessageReplyDeterministically(
+  context: MessageReplyDraftContext | undefined,
+): unknown {
+  const subject = context?.subject ?? "";
+  const greeting = context?.counterpartyName
+    ? `Hi ${context.counterpartyName},`
+    : "Hi,";
+
+  return {
+    subject: /^re:/i.test(subject) ? subject : `Re: ${subject}`,
+    body: `${greeting}\n\nThanks for your message. We're looking into this and will follow up shortly.\n\nBest regards`,
+  };
+}
+
+/**
+ * Templates a generic reminder from already-verified structured figures
+ * only (amount/due date/days overdue) — these are this app's own computed
+ * numbers, not untrusted free text, so referencing them directly (unlike
+ * `inboundBodyText`) carries no injection risk.
+ */
+function draftInvoiceReminderDeterministically(
+  context: InvoiceReminderDraftContext | undefined,
+): unknown {
+  const greeting = context?.customerName
+    ? `Hi ${context.customerName},`
+    : "Hi,";
+  const amount =
+    context !== undefined
+      ? (context.amountCents / 100).toLocaleString("en-CA", {
+          style: "currency",
+          currency: context.currency,
+          maximumFractionDigits: 2,
+        })
+      : "the outstanding amount";
+  const daysOverdue = context?.daysOverdue ?? 0;
+
+  return {
+    subject: `Payment reminder: invoice ${daysOverdue} day${daysOverdue === 1 ? "" : "s"} overdue`,
+    body: `${greeting}\n\nThis is a friendly reminder that an invoice for ${amount} is now ${daysOverdue} day${daysOverdue === 1 ? "" : "s"} past due. Please let us know if you have any questions or if payment is already in progress.\n\nBest regards`,
+  };
+}
+
+/** Body-only (no subject) — never echoes untrusted task/assignee text back
+ * beyond a plain name reference, mirroring `draftMessageReplyDeterministically`. */
+function draftTaskNudgeDeterministically(
+  context: TaskNudgeDraftContext | undefined,
+): unknown {
+  const who = context?.assigneeName ? ` ${context.assigneeName}` : "";
+  const daysOverdue = context?.daysOverdue ?? 0;
+
+  return {
+    body: `Checking in${who} — this task is now ${daysOverdue} day${daysOverdue === 1 ? "" : "s"} past its due date. Could you share a quick status update?`,
+  };
+}
+
+/** Body-only — templates from already-verified structured deal fields only. */
+function draftDealNoteDeterministically(
+  context: DealNoteDraftContext | undefined,
+): unknown {
+  const contactName = context?.contactName ?? "this contact";
+  const stage = context?.stage ?? "its current stage";
+  const lastInteraction = context?.lastInteractionAt
+    ? context.lastInteractionAt.toISOString().slice(0, 10)
+    : "no recorded date";
+
+  return {
+    body: `No recent activity logged for ${contactName} (currently in ${stage}). Last interaction: ${lastInteraction}. Recommend a follow-up to confirm status.`,
+  };
+}
+
+/**
+ * Templates a generic, non-committal acknowledgement — never echoes
+ * `recentComments` back (real customer-authored text, the same injection
+ * surface `inboundBodyText` is for Gmail replies) and never invents a
+ * substantive answer to the customer's actual question.
+ */
+function draftTicketReplyDeterministically(
+  context: TicketReplyDraftContext | undefined,
+): unknown {
+  const greeting = context?.requesterName
+    ? `Hi ${context.requesterName},`
+    : "Hi,";
+
+  return {
+    body: `${greeting}\n\nThanks for the update. We're looking into this and will follow up shortly.\n\nBest regards`,
+  };
+}
+
+interface DeterministicTaskConfig {
+  readonly draft: (context: unknown) => unknown;
+}
+
+/**
+ * One entry per deterministic draft task — replaces what would otherwise be
+ * a growing `if` chain, mirroring claude-provider.ts's `TASK_PROMPTS` lookup
+ * table for the same reason. `interpret_findings` and
+ * `parse_dashboard_command` keep their own dedicated branches below since
+ * their shapes (and `parse_dashboard_command`'s prompt-based matching) don't
+ * fit this same "draft from a context object" shape.
+ */
+const DETERMINISTIC_DRAFT_TASKS: Partial<
+  Record<StructuredGenerationTask, DeterministicTaskConfig>
+> = {
+  draft_message_reply: {
+    draft: (context) =>
+      draftMessageReplyDeterministically(
+        context as MessageReplyDraftContext | undefined,
+      ),
+  },
+  draft_invoice_reminder: {
+    draft: (context) =>
+      draftInvoiceReminderDeterministically(
+        context as InvoiceReminderDraftContext | undefined,
+      ),
+  },
+  draft_task_nudge: {
+    draft: (context) =>
+      draftTaskNudgeDeterministically(
+        context as TaskNudgeDraftContext | undefined,
+      ),
+  },
+  draft_deal_note: {
+    draft: (context) =>
+      draftDealNoteDeterministically(
+        context as DealNoteDraftContext | undefined,
+      ),
+  },
+  draft_ticket_reply: {
+    draft: (context) =>
+      draftTicketReplyDeterministically(
+        context as TicketReplyDraftContext | undefined,
+      ),
+  },
+};
+
+/**
  * A rule-based `AIProvider`: no external model call, no API key, no cost,
  * fully deterministic. This is the first-slice implementation behind the
  * `AIProvider` interface; a model-backed provider (Claude) sits behind the
@@ -247,6 +397,14 @@ export function createDeterministicProvider(): AIProvider {
         const raw = interpretFindingsDeterministically(
           input.context as AgentInterpretationContext | undefined,
         );
+
+        return input.parse(raw);
+      }
+
+      const draftTask = DETERMINISTIC_DRAFT_TASKS[input.task];
+
+      if (draftTask) {
+        const raw = draftTask.draft(input.context);
 
         return input.parse(raw);
       }

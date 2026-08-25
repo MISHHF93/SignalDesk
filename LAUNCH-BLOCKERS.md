@@ -1,5 +1,14 @@
 # Launch blockers
 
+- **Update (2026-08-24)**: `SIGNALDESK_SYSTEM_CERTIFICATION.md`'s full
+  6-phase certification + adversarial red-team pass (Passes 1-7,
+  including a later continuation session that added five real connector
+  writes, a Pre-Flight Policy Audit, deterministic recovery
+  classification, and Matter grouping/batch-draft) found **zero new
+  P0/P1 blockers** beyond what's already listed below — every item here
+  is still genuinely open, none is stale, and nothing new was added.
+  Every one of #1-#5 below is still `OWNER_ACTION_REQUIRED` — see
+  `OWNER-ACTIONS.md` for the concrete external steps.
 - Snapshot date: 2026-08-21. Only genuine, currently-open blockers — see
   `docs/launch-readiness.md` for the full classification matrix this list
   is drawn from, and for everything that's already `VERIFIED` and not

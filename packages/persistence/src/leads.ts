@@ -138,6 +138,66 @@ export async function listLeadsForAttention(
   });
 }
 
+/**
+ * One real lead by id, for a single-entity "draft content about one
+ * specific entity" write action (e.g. a HubSpot deal note) — this file
+ * previously had no single-entity lookup at all, only `listLeadsForAttention`
+ * and `listAllLeads`; this mirrors `listAllLeads`'s join shape (`leads` ⋈
+ * `source_records`, left-joined to `memberships`/`users` for owner
+ * attribution) and its `toLead` row mapper, since that's the list query
+ * that already populates `Lead.source` without also carrying
+ * `listLeadsForAttention`'s active/degraded-integration filter or
+ * attention-threshold ordering — a direct single-entity-by-id lookup
+ * should honestly return the lead's current real state regardless of
+ * whether it's still "worth attention," matching `getSupportTicketById`'s
+ * same behavior (`support-tickets.ts`). Returns `null` for a lead that
+ * doesn't exist or doesn't belong to the caller's own tenant (RLS reduces
+ * the query to zero rows rather than raising, so this is a real, honest
+ * "not found," not a leaked existence check).
+ */
+export async function getLeadById(
+  pool: DatabasePool,
+  organizationId: string,
+  leadId: string,
+): Promise<Lead | null> {
+  return withTenantContext(pool, organizationId, async (client) => {
+    const result = await client.query<LeadWithSourceRow>(
+      `select
+         l.id as id,
+         l.organization_id as organization_id,
+         l.contact_name as contact_name,
+         l.company_name as company_name,
+         l.value_cents as value_cents,
+         l.currency as currency,
+         l.stage as stage,
+         l.source_created_at as source_created_at,
+         l.last_interaction_at as last_interaction_at,
+         l.expected_response_hours as expected_response_hours,
+         l.owner_membership_id as owner_membership_id,
+         u.display_name as owner_display_name,
+         sr.integration_id as integration_id,
+         sr.source_system as source_system,
+         sr.external_record_id as external_record_id,
+         sr.source_version as source_version,
+         sr.raw_payload_sha256 as record_digest_sha256,
+         sr.ingested_at as last_synced_at
+       from leads l
+       join source_records sr
+         on sr.organization_id = l.organization_id and sr.id = l.source_record_id
+       left join memberships m
+         on m.organization_id = l.organization_id and m.id = l.owner_membership_id
+       left join users u on u.id = m.user_id
+       where l.organization_id = $1
+         and l.id = $2`,
+      [organizationId, leadId],
+    );
+
+    const row = result.rows[0];
+
+    return row ? toLead(row) : null;
+  });
+}
+
 const MAX_EXPORTED_LEADS = 1000;
 
 /**

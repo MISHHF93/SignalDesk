@@ -1,7 +1,14 @@
+"use client";
+
+import { useState, useTransition } from "react";
+
+import { Button } from "../_components/button";
 import { CardActions } from "./card-actions";
 import { CardFeedbackButtons } from "./card-feedback-buttons";
 import { CardBadges, WhyDisclosure } from "./card-shell";
 import type { CardComponentProps } from "./card-types";
+
+type DraftStatus = "idle" | "pending" | "error";
 
 /**
  * Mirrors `TaskRiskCard` exactly — no financial context, no owner
@@ -15,12 +22,57 @@ import type { CardComponentProps } from "./card-types";
  * counterparty is already named in `card.summary` (see
  * `evaluateMessageAwaitingReply`, `@signaldesk/domain`), so no separate
  * contact line is needed here.
+ *
+ * The "Draft a reply" button (ADR 0056) fires `draftMessageReplyAction`
+ * immediately — no approval gate here, since drafting has no external
+ * effect. Its result is a separate `agent_recommendation` card (not a
+ * change to this one), handed to `onAgentCardProduced` to join the board's
+ * own card list — the actual send is approved from that card, via
+ * `AgentRecommendationCard`.
  */
 export function MessageFollowUpCard({
   card,
   createTaskAction,
   recordCardFeedbackAction,
+  draftMessageReplyAction,
+  onAgentCardProduced,
 }: CardComponentProps) {
+  const [status, setStatus] = useState<DraftStatus>("idle");
+  const [message, setMessage] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  function handleDraftReply() {
+    if (
+      !draftMessageReplyAction ||
+      !card.entity ||
+      card.entity.kind !== "message"
+    ) {
+      return;
+    }
+
+    const messageId = card.entity.id;
+
+    setStatus("pending");
+    setMessage(null);
+
+    startTransition(async () => {
+      const result = await draftMessageReplyAction(messageId);
+
+      if (!result.ok) {
+        setStatus("error");
+        setMessage(`Couldn't draft a reply. ${result.error}`);
+        return;
+      }
+
+      if (result.card) {
+        onAgentCardProduced?.(result.card);
+      }
+
+      setStatus("idle");
+      setMessage(result.message);
+    });
+  }
+
   return (
     <article
       className="attentionCard dynamicCard"
@@ -39,6 +91,26 @@ export function MessageFollowUpCard({
         <div className="attentionFooter">
           <WhyDisclosure card={card} />
           <CardActions card={card} createTaskAction={createTaskAction} />
+          {draftMessageReplyAction ? (
+            <div className="cardActions">
+              <Button
+                variant="ghost"
+                className="cardActionButton"
+                disabled={isPending}
+                onClick={handleDraftReply}
+              >
+                {isPending ? "Drafting…" : "Draft a reply"}
+              </Button>
+              {message ? (
+                <p
+                  className={`cardActionStatus cardActionStatus-${status}`}
+                  role="status"
+                >
+                  {message}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
         {recordCardFeedbackAction ? (
           <CardFeedbackButtons

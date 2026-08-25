@@ -161,6 +161,25 @@ describe("connectorCatalog", () => {
     "zendesk",
   ]);
 
+  // Connectors with a real, executed write action: Gmail (ADR 0056,
+  // message-reply-send — a human-approved agent-drafted reply is actually
+  // sent via sendGmailMessage), Asana (ADR 0057 — a human-approved
+  // agent-drafted task nudge is actually posted via createAsanaTaskStory),
+  // Zendesk (ADR 0057 — a human-approved agent-drafted ticket reply is
+  // actually posted via postZendeskTicketReply), HubSpot (ADR 0057 — a
+  // human-approved agent-drafted deal note is actually logged via
+  // createHubSpotDealNote), and QuickBooks (ADR 0057 — a human-approved
+  // agent-drafted payment reminder is actually sent via
+  // sendQuickBooksInvoiceReminder). Every other connector's declared
+  // "write" capability is still catalog metadata only.
+  const actionsImplementedSlugs: ReadonlySet<ConnectorSlug> = new Set([
+    "gmail",
+    "asana",
+    "zendesk",
+    "hubspot",
+    "quickbooks",
+  ]);
+
   it.each(codeReadySlugs)(
     "reports %s's real, partial readiness honestly — not more, not less",
     (slug) => {
@@ -176,7 +195,7 @@ describe("connectorCatalog", () => {
         syncImplemented: false,
         initialSyncImplemented: initialSyncSlugs.has(slug),
         incrementalSyncImplemented: incrementalSyncSlugs.has(slug),
-        actionsImplemented: false,
+        actionsImplemented: actionsImplementedSlugs.has(slug),
         productionReady: false,
       });
     },

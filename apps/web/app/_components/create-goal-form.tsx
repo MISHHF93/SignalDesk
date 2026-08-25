@@ -1,14 +1,66 @@
 "use client";
 
 import type { CreateGoalInput } from "@signaldesk/schemas";
-import { METRIC_CATALOG } from "@signaldesk/semantics";
+import { METRIC_CATALOG, type MetricValue } from "@signaldesk/semantics";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 
 import type { CreateGoalAction } from "../_lib/actions";
+import { formatCardCurrency } from "../_cards/format";
 import { Button } from "./button";
 
 type FormStatus = "idle" | "pending" | "success" | "error";
+
+/**
+ * A target suggestion is real current data times a fixed, disclosed
+ * factor — never a fabricated or model-guessed number. This app stores no
+ * metric history and no goal deadlines (`@signaldesk/goals`'s own doc
+ * comment), so "what's a reasonable target" can only honestly be
+ * expressed relative to the metric's current value, not a trend or
+ * forecast. 15% is an arbitrary, disclosed placeholder (the same
+ * "state the number plainly rather than pretend precision" approach this
+ * repo already took for its `20/day` rate-limit placeholder) — it moves
+ * the target in whichever direction the operator's own comparison choice
+ * implies (down for "at most", up for "at least"), not a modeled
+ * "desirable direction" per metric.
+ */
+const SUGGESTION_FACTOR_AT_MOST = 0.85;
+const SUGGESTION_FACTOR_AT_LEAST = 1.15;
+
+interface TargetSuggestion {
+  readonly displayValue: string;
+  readonly rawValue: number;
+  readonly currency: string | null;
+}
+
+function computeSuggestion(
+  metric: MetricValue | undefined,
+  comparisonOperator: "at_most" | "at_least",
+): TargetSuggestion | null {
+  if (!metric) {
+    return null;
+  }
+
+  const factor =
+    comparisonOperator === "at_most"
+      ? SUGGESTION_FACTOR_AT_MOST
+      : SUGGESTION_FACTOR_AT_LEAST;
+  const rawCents = Math.max(0, Math.round(metric.value * factor));
+
+  if (metric.unit === "currency") {
+    return {
+      displayValue: formatCardCurrency(rawCents, metric.currency ?? "USD"),
+      rawValue: rawCents / 100,
+      currency: metric.currency,
+    };
+  }
+
+  return {
+    displayValue: new Intl.NumberFormat("en-CA").format(rawCents),
+    rawValue: rawCents,
+    currency: null,
+  };
+}
 
 /**
  * The Goal Intelligence Engine's one real write UI (Prompt 22,
@@ -21,8 +73,10 @@ type FormStatus = "idle" | "pending" | "success" | "error";
  */
 export function CreateGoalForm({
   createGoalAction,
+  metrics,
 }: {
   readonly createGoalAction: CreateGoalAction;
+  readonly metrics: readonly MetricValue[];
 }) {
   const router = useRouter();
   const [metricId, setMetricId] = useState<CreateGoalInput["metricId"]>(
@@ -40,6 +94,24 @@ export function CreateGoalForm({
 
   const definition = METRIC_CATALOG.find((metric) => metric.id === metricId);
   const isCurrencyMetric = definition?.unit === "currency";
+
+  const currentMetric = metrics.find((metric) => metric.metricId === metricId);
+  const suggestion = useMemo(
+    () => computeSuggestion(currentMetric, comparisonOperator),
+    [currentMetric, comparisonOperator],
+  );
+
+  function applySuggestion() {
+    if (!suggestion) {
+      return;
+    }
+
+    setTargetValueInput(String(suggestion.rawValue));
+
+    if (suggestion.currency) {
+      setCurrency(suggestion.currency);
+    }
+  }
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -148,6 +220,24 @@ export function CreateGoalForm({
             placeholder={isCurrencyMetric ? "50000" : "10"}
             required
           />
+          {suggestion ? (
+            <span className="goalFormSuggestion">
+              Suggested: {suggestion.displayValue} (
+              {comparisonOperator === "at_most" ? "15% below" : "15% above"} the
+              current value)
+              <button
+                type="button"
+                className="goalFormSuggestionApply"
+                onClick={applySuggestion}
+              >
+                Use this
+              </button>
+            </span>
+          ) : (
+            <span className="goalFormSuggestion goalFormSuggestion-empty">
+              No current data for this metric yet — no suggestion available.
+            </span>
+          )}
         </label>
         {isCurrencyMetric ? (
           <label>

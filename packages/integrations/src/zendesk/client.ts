@@ -1,9 +1,12 @@
 /**
- * A real Zendesk Support API client — OAuth 2.0 authorization code flow
- * and the cursor-based incremental ticket export endpoint, verified
- * against Zendesk's current developer documentation this session, not
- * assumed from training data. Read-only for v1: no write endpoint is
- * implemented.
+ * A real Zendesk Support API client — OAuth 2.0 authorization code flow,
+ * the cursor-based incremental ticket export endpoint, and (as of this
+ * change) a real ticket-reply write endpoint, all verified against
+ * Zendesk's current developer documentation this session, not assumed
+ * from training data. See `postZendeskTicketReply` and `ZENDESK_SCOPES`'s
+ * own doc comments for exactly which endpoint and scope the write path
+ * requires, and the honest caveat on how far that verification could go
+ * without a real Zendesk app registration in this environment.
  *
  * Real ways this differs from every other connector in this codebase, all
  * confirmed against Zendesk's own docs, not guessed:
@@ -76,7 +79,45 @@ import { generatePkcePair, type PkcePair } from "../shared/pkce";
 
 export { generatePkcePair, type PkcePair };
 
-export const ZENDESK_SCOPES = ["read"] as const;
+// Coarse, whole-account scopes — matching Zendesk's own OAuth scope
+// model, verified this session against
+// developer.zendesk.com/documentation/authentication/oauth-migration/
+// (dated 2026): "If you don't specify a scope, the token defaults to full
+// read and write access across all Zendesk resources," and scopes come in
+// two forms — broad, coarse-grained `read`/`write` (account-wide), or
+// resource-scoped forms like `tickets:read`/`tickets:write` ("For most
+// migrations, explicitly request the narrowest scope your integration
+// actually needs"). This connector already used the broad `read` (not
+// `tickets:read`) for the existing ticket sync, so `write` is added here
+// in the same broad form rather than switching to a resource-scoped grant
+// — staying consistent with that existing choice rather than silently
+// narrowing half the scope list. Needed for `postZendeskTicketReply`
+// below, which is a ticket-scoped write (`PUT /tickets/{id}.json`) and so
+// would be covered equally by a narrower `tickets:write`, but the broad
+// form is what this file already committed to.
+//
+// IMPORTANT — honest caveat: this codebase has no real Zendesk developer
+// app registration in this environment, so `"write"` has been verified
+// only against Zendesk's published docs above, not against a live
+// authorize/token exchange actually granting this exact scope string.
+// Re-verify against a real Zendesk app registration before this ships.
+//
+// Reconnect disclosure: verified this session against
+// developer.zendesk.com/documentation/authentication/using-oauth-to-
+// authenticate-zendesk-api-requests-in-a-web-app/. Unlike Asana (see
+// `asana/client.ts`'s own disclosure comment on `ASANA_SCOPES`, which
+// found no documented guarantee either way and falls back on Asana's
+// authorize screen re-prompting on every fresh request), Zendesk's docs
+// are explicit and give a *stronger* guarantee here: "If the user has
+// previously authorized a token with the same scopes for your app, and
+// that token is still valid and has not been removed from the Zendesk
+// system, they won't need to re-authorize the app" — but if "the app
+// requests different scopes, the user will be prompted to grant access to
+// your app again." Adding `"write"` changes the scope list, so an
+// already-connected tenant's next authorization request (a deliberate
+// reconnect) will naturally re-prompt for consent to the wider grant —
+// no `prompt`-equivalent query parameter is documented or needed.
+export const ZENDESK_SCOPES = ["read", "write"] as const;
 
 /** Zendesk subdomains are DNS labels — letters, digits, and hyphens only,
  * never starting/ending with a hyphen. Validated before ever being
@@ -293,4 +334,137 @@ export async function fetchZendeskTickets(
     afterCursor: payload.after_cursor ?? null,
     endOfStream: payload.end_of_stream ?? true,
   };
+}
+
+export interface ZendeskTicketComment {
+  readonly authorName: string | null;
+  readonly body: string;
+  readonly createdAt: Date;
+}
+
+interface RawZendeskComment {
+  readonly id: number;
+  readonly body: string;
+  readonly html_body?: string;
+  /** Markdown formatting stripped from `body` — see this function's own
+   * doc comment for why it's preferred when present. */
+  readonly plain_body?: string;
+  readonly author_id: number | null;
+  readonly created_at: string;
+}
+
+interface RawZendeskTicketCommentsResponse {
+  readonly comments?: readonly RawZendeskComment[];
+  /** Side-loaded via `?include=users`, the same pattern
+   * `fetchZendeskTickets` uses above. */
+  readonly users?: readonly ZendeskUser[];
+}
+
+/**
+ * A live, non-persisted read of a ticket's existing comment thread — for
+ * an AI to read as context immediately before drafting a reply via
+ * `postZendeskTicketReply` below, not for the Business Graph sync (that
+ * stays `fetchZendeskTickets`'s job; nothing this function returns is
+ * written to storage). `GET /api/v2/tickets/{ticket_id}/comments.json`
+ * (developer.zendesk.com/api-reference/ticketing/tickets/ticket-comments/,
+ * verified this session), side-loaded with `?include=users` so
+ * `author_id` resolves to a real name from the same response, no second
+ * round trip — identical side-loading shape to `fetchZendeskTickets`.
+ *
+ * Prefers `plain_body` (Markdown formatting stripped) over `body` (raw
+ * Markdown) when the response includes it, mirroring this codebase's
+ * existing preference for clean prose over a formatted/marked-up source —
+ * see `gmail/mapper.ts`'s own preference for a message's plain-text MIME
+ * part over its HTML part. An AI drafting a reply should read prose, not
+ * `**bold**`/`_italic_` syntax. Falls back to `body` if `plain_body` is
+ * ever absent from the response.
+ *
+ * Read-only: needs only the existing `read` scope already in
+ * `ZENDESK_SCOPES` — unlike `postZendeskTicketReply`, this required no
+ * scope change.
+ */
+export async function fetchZendeskTicketComments(
+  accessToken: string,
+  subdomain: string,
+  ticketId: number,
+): Promise<readonly ZendeskTicketComment[]> {
+  const url = new URL(
+    `${zendeskBaseUrl(subdomain)}/api/v2/tickets/${ticketId}/comments.json`,
+  );
+  url.searchParams.set("include", "users");
+
+  const response = await fetchWithRetry(url.toString(), {
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    await throwUpstreamError("Zendesk ticket comments fetch", response);
+  }
+
+  const payload = (await response.json()) as RawZendeskTicketCommentsResponse;
+  const userNameById = new Map(
+    (payload.users ?? []).map((user) => [user.id, user.name]),
+  );
+
+  return (payload.comments ?? []).map((comment) => ({
+    authorName:
+      comment.author_id !== null
+        ? (userNameById.get(comment.author_id) ?? null)
+        : null,
+    body: comment.plain_body ?? comment.body,
+    createdAt: new Date(comment.created_at),
+  }));
+}
+
+/**
+ * The first real Zendesk write — posts a reply comment on a ticket via
+ * `PUT /api/v2/tickets/{ticket_id}.json` with a nested `ticket.comment`
+ * body (developer.zendesk.com/api-reference/ticketing/tickets/tickets/,
+ * "Update Ticket," verified this session): Zendesk has no separate
+ * "create comment" endpoint — a new comment is added by updating the
+ * ticket itself and nesting the comment inside it, which is exactly the
+ * non-obvious shape this function sends. `public: true` posts a
+ * customer-visible reply (as opposed to a private/internal note) — the
+ * correct default for `approve-ticket-reply-action.ts` (apps/web)'s real
+ * use case of an actual reply to the requester, not an internal note.
+ *
+ * Requires the `write` scope added to `ZENDESK_SCOPES` above; see that
+ * constant's own doc comment for the reconnect-behavior disclosure and
+ * the honest caveat that this scope string hasn't been verified against a
+ * live Zendesk authorize/token exchange in this environment.
+ *
+ * Mirrors `createAsanaTaskStory`'s write-call shape in this codebase
+ * (`asana/client.ts`) — same `fetchWithRetry` + `throwUpstreamError`
+ * pattern, same accessToken-first parameter order — even though it's a
+ * different provider, a different HTTP method (`PUT`, not `POST`, per
+ * Zendesk's real endpoint shape above), and returns nothing rather than
+ * an id, since a ticket update response doesn't identify the individual
+ * comment just added.
+ */
+export async function postZendeskTicketReply(
+  accessToken: string,
+  subdomain: string,
+  ticketId: number,
+  commentBody: string,
+): Promise<void> {
+  const response = await fetchWithRetry(
+    `${zendeskBaseUrl(subdomain)}/api/v2/tickets/${ticketId}.json`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        ticket: { comment: { body: commentBody, public: true } },
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    await throwUpstreamError("Zendesk ticket reply", response);
+  }
 }

@@ -117,6 +117,9 @@ export async function exchangeSlackAuthorizationCode(
     throw new UpstreamProviderError(
       "Slack token exchange failed. Please try again, or reconnect this integration if the problem continues.",
       payload.error ?? "unknown error",
+      // Slack's Web API always returns HTTP 200 (see the comment above) —
+      // `null` is the honest status here, not a fabricated 200.
+      null,
     );
   }
 

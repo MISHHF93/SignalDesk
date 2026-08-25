@@ -8,7 +8,13 @@ import type { AgentCapability, IntelligenceCard } from "@signaldesk/schemas";
  * with free-form input.
  */
 export type StructuredGenerationTask =
-  "parse_dashboard_command" | "interpret_findings";
+  | "parse_dashboard_command"
+  | "interpret_findings"
+  | "draft_message_reply"
+  | "draft_invoice_reminder"
+  | "draft_task_nudge"
+  | "draft_deal_note"
+  | "draft_ticket_reply";
 
 /**
  * Minimal context an AIProvider may use to resolve a task — for example
@@ -32,10 +38,107 @@ export interface AgentInterpretationContext {
   readonly findings: readonly IntelligenceFinding[];
 }
 
+/**
+ * Context for `"draft_message_reply"`: draft a real reply to one real
+ * inbound message. `inboundBodyText` is the one sanctioned exception to
+ * this codebase's rule that message body content never reaches an AI
+ * prompt (see `getMessageDraftContext`, `@signaldesk/persistence`) — every
+ * field here is untrusted, customer-authored text and must be wrapped the
+ * same way `AgentInterpretationContext` findings already are before
+ * reaching a model.
+ */
+export interface MessageReplyDraftContext {
+  readonly capability: "draft_customer_reply";
+  readonly finding: IntelligenceFinding;
+  readonly subject: string;
+  readonly counterpartyName: string | null;
+  readonly counterpartyEmail: string;
+  readonly inboundBodyText: string;
+  readonly bodyTruncated: boolean;
+}
+
+/**
+ * Context for `"draft_invoice_reminder"`: draft a payment-reminder email for
+ * one real overdue invoice. Unlike `MessageReplyDraftContext`, every field
+ * here already comes from this app's own normalized `invoices` row — no new
+ * ingestion boundary is crossed — but a customer/company name is still
+ * third-party-controlled text, so it gets the same untrusted-data wrapping
+ * defensively before reaching a model (see claude-provider.ts).
+ */
+export interface InvoiceReminderDraftContext {
+  readonly capability: "draft_invoice_reminder";
+  readonly finding: IntelligenceFinding;
+  readonly customerName: string;
+  readonly amountCents: number;
+  readonly currency: string;
+  readonly dueAt: Date;
+  readonly daysOverdue: number;
+}
+
+/**
+ * Context for `"draft_task_nudge"`: draft a follow-up comment for one real
+ * overdue task, to be posted on the task in Asana once approved. Every
+ * field already comes from this app's own normalized `tasks` row.
+ */
+export interface TaskNudgeDraftContext {
+  readonly capability: "draft_task_nudge";
+  readonly finding: IntelligenceFinding;
+  readonly taskName: string;
+  readonly assigneeName: string | null;
+  readonly dueAt: Date;
+  readonly daysOverdue: number;
+}
+
+/**
+ * Context for `"draft_deal_note"`: draft a note for one real stalled deal,
+ * to be logged on the deal in HubSpot once approved. Every field already
+ * comes from this app's own normalized `leads` row.
+ */
+export interface DealNoteDraftContext {
+  readonly capability: "draft_deal_note";
+  readonly finding: IntelligenceFinding;
+  readonly contactName: string;
+  readonly companyName: string | null;
+  readonly stage: string;
+  readonly valueCents: number | null;
+  readonly currency: string | null;
+  readonly lastInteractionAt: Date | null;
+}
+
+/**
+ * Context for `"draft_ticket_reply"`: draft a reply for one real stuck
+ * support ticket. `recentComments` is a sanctioned exception to this
+ * codebase's rule that customer-authored free text never reaches an AI
+ * prompt without explicit scoping (the same class of exception
+ * `MessageReplyDraftContext.inboundBodyText` already is for Gmail) — fetched
+ * live from Zendesk at draft time, never persisted, and every comment body
+ * here is untrusted, customer-authored text that must be wrapped the same
+ * way before reaching a model.
+ */
+export interface TicketReplyDraftContext {
+  readonly capability: "draft_ticket_reply";
+  readonly finding: IntelligenceFinding;
+  readonly subject: string;
+  readonly requesterName: string | null;
+  readonly recentComments: readonly {
+    readonly authorName: string | null;
+    readonly body: string;
+    readonly createdAt: Date;
+  }[];
+  readonly commentsTruncated: boolean;
+}
+
 export interface GenerateStructuredInput<T> {
   readonly task: StructuredGenerationTask;
   readonly prompt: string;
-  readonly context?: DashboardCommandContext | AgentInterpretationContext;
+  readonly context?:
+    | DashboardCommandContext
+    | AgentInterpretationContext
+    | MessageReplyDraftContext
+    | InvoiceReminderDraftContext
+    | TaskNudgeDraftContext
+    | DealNoteDraftContext
+    | TicketReplyDraftContext;
   /** Validates and shapes the provider's raw output; throws on invalid output. */
   readonly parse: (raw: unknown) => T;
   /**

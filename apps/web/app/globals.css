@@ -736,6 +736,34 @@ input {
   color: var(--tech-status-good-ink);
 }
 
+.goalFormSuggestion {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+}
+
+.goalFormSuggestion-empty {
+  font-style: italic;
+}
+
+.goalFormSuggestionApply {
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-size: 0.68rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.goalFormSuggestionApply:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
 .csvImportSection {
   margin-bottom: 2.5rem;
   border-radius: 1rem;
@@ -837,32 +865,63 @@ input {
   overflow: hidden;
   border-radius: 1rem;
   background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--muted) 12%, transparent);
   box-shadow: var(--shadow);
+  transition:
+    box-shadow 0.18s ease,
+    transform 0.18s ease,
+    border-color 0.18s ease;
 }
 
-/* The one card-severity signal that isn't a full-fill treatment — a thin
-   edge rail, colored by the card's real severity (data-severity, set on
-   the article by each card component from IntelligenceCard["severity"]).
+.attentionCard:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--muted) 22%, transparent);
+  box-shadow:
+    var(--shadow),
+    0 14px 30px -20px color-mix(in srgb, var(--ink) 30%, transparent);
+}
+
+/* The one card-severity signal that isn't a full-fill treatment — a soft
+   ambient glow in the card's corner, colored by the card's real severity
+   (data-severity, set on the article by each card component from
+   IntelligenceCard["severity"]). Replaces a flat colored edge rail (a
+   dated, stark treatment) with the same real signal read more quietly.
    Kept separate from .dynamicCard .priorityBadge's own severity styling
    in card-shell.tsx so the two can't silently drift apart. */
 .priorityRail {
   position: absolute;
-  inset: 0 auto 0 0;
-  width: 3px;
-  background: var(--severity-info-ink);
+  inset: 0;
+  background: radial-gradient(
+    140px 90px at 0% 0%,
+    color-mix(in srgb, var(--severity-info-ink) 14%, transparent),
+    transparent 70%
+  );
+  pointer-events: none;
 }
 
 .dynamicCard[data-severity="critical"] .priorityRail,
 .dynamicCard[data-severity="high"] .priorityRail {
-  background: var(--severity-high-ink);
+  background: radial-gradient(
+    140px 90px at 0% 0%,
+    color-mix(in srgb, var(--severity-high-ink) 18%, transparent),
+    transparent 70%
+  );
 }
 
 .dynamicCard[data-severity="medium"] .priorityRail {
-  background: var(--severity-medium-ink);
+  background: radial-gradient(
+    140px 90px at 0% 0%,
+    color-mix(in srgb, var(--severity-medium-ink) 15%, transparent),
+    transparent 70%
+  );
 }
 
 .dynamicCard[data-severity="low"] .priorityRail {
-  background: var(--severity-low-ink);
+  background: radial-gradient(
+    140px 90px at 0% 0%,
+    color-mix(in srgb, var(--severity-low-ink) 13%, transparent),
+    transparent 70%
+  );
 }
 
 .attentionMain {
@@ -1012,6 +1071,32 @@ input {
   font-weight: 800;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+/* An agent-drafted reply awaiting approval (ADR 0056) — shown as a
+   distinct, sunken block so it reads as quoted content to review, not
+   this card's own summary prose. */
+.draftedReply {
+  margin-top: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-radius: 0.65rem;
+  background: var(--surface-sunken);
+  box-shadow: var(--shadow-sm);
+}
+
+.draftedReplySubject {
+  margin: 0 0 0.4rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.draftedReplyBody {
+  margin: 0;
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--faint);
+  color: var(--emphasis);
+  font-size: 0.85rem;
+  white-space: pre-wrap;
 }
 
 .evidencePanel dd {
@@ -3055,6 +3140,45 @@ input {
   gap: 1rem;
 }
 
+/* A real correlated group (relatedFindingIds, correlateFindingsByName) —
+   several independent cards that may describe the same real situation,
+   held together visually. Still N separate cards underneath, never a
+   merge — this is presentation only. */
+.matterGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 0.9rem;
+  border-radius: 1.1rem;
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.matterGroupHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin: 0 0.2rem;
+}
+
+.matterGroupHeader p {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.matterGroupDraftButton {
+  flex-shrink: 0;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.72rem;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
 .dynamicCard .priorityBadge {
   background: var(--severity-high-bg);
   color: var(--severity-high-ink);
@@ -3189,6 +3313,12 @@ input {
 
 .cardActionStatus-error {
   color: var(--ember-ink);
+}
+
+.cardActionStatusLink {
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
 }
 
 /* "What if this gets paid?" (Prompt 14, docs/product-vision-backlog.md,

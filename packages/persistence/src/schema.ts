@@ -1503,12 +1503,28 @@ export const agentCollaborations = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     triggeredByMembershipId: uuid("triggered_by_membership_id").notNull(),
-    // Only value today — see AGENT_REGISTRY/runParallelSpecialists,
-    // @signaldesk/application. Widen the check constraint below, not this
-    // comment, when a second collaboration pattern is real.
+    // 'parallel_specialists' (the business-wide investigate sweep) or
+    // 'single_specialist' (ADR 0056 — draft-message-reply-action.ts's
+    // one-message, one-specialist collaboration). See AGENT_REGISTRY/
+    // runParallelSpecialists/draftMessageReply, @signaldesk/application.
     pattern: text("pattern").notNull(),
     objective: text("objective").notNull(),
     status: text("status").notNull().default("running"),
+    // Set only for a 'single_specialist' collaboration drafting content
+    // about one real entity (ADR 0056 for messageId; ADR 0057 for the four
+    // added alongside it) — exactly one of these five is non-null for a
+    // 'single_specialist' row, all five are null for a 'parallel_specialists'
+    // row (see the widened pattern-consistency check below). Deliberately
+    // five narrow parallel columns, not one generic polymorphic
+    // (entityKind, entityId) pair — each keeps a real, enforced FK to its
+    // own parent table, which a generic pair could not.
+    messageId: uuid("message_id"),
+    invoiceId: uuid("invoice_id"),
+    taskId: uuid("task_id"),
+    leadId: uuid("lead_id"),
+    supportTicketId: uuid("support_ticket_id"),
+    draftedContentSubject: text("drafted_content_subject"),
+    draftedContentBody: text("drafted_content_body"),
     reconciledSummary: text("reconciled_summary"),
     reconciledConfidenceBasisPoints: integer(
       "reconciled_confidence_basis_points",
@@ -1551,6 +1567,41 @@ export const agentCollaborations = pgTable(
     })
       .onUpdate("restrict")
       .onDelete("restrict"),
+    foreignKey({
+      name: "agent_collaborations_org_message_fk",
+      columns: [table.organizationId, table.messageId],
+      foreignColumns: [messages.organizationId, messages.id],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    foreignKey({
+      name: "agent_collaborations_org_invoice_fk",
+      columns: [table.organizationId, table.invoiceId],
+      foreignColumns: [invoices.organizationId, invoices.id],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    foreignKey({
+      name: "agent_collaborations_org_task_fk",
+      columns: [table.organizationId, table.taskId],
+      foreignColumns: [tasks.organizationId, tasks.id],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    foreignKey({
+      name: "agent_collaborations_org_lead_fk",
+      columns: [table.organizationId, table.leadId],
+      foreignColumns: [leads.organizationId, leads.id],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    foreignKey({
+      name: "agent_collaborations_org_support_ticket_fk",
+      columns: [table.organizationId, table.supportTicketId],
+      foreignColumns: [supportTickets.organizationId, supportTickets.id],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
     index("agent_collaborations_org_status_index").on(
       table.organizationId,
       table.status,
@@ -1570,9 +1621,54 @@ export const agentCollaborations = pgTable(
       table.organizationId,
       table.triggeredByMembershipId,
     ),
+    // Covers agent_collaborations_org_message_fk/_invoice_fk/_task_fk/
+    // _lead_fk/_support_ticket_fk — same unindexed-foreign-key precedent as
+    // the actor-membership index above.
+    index("agent_collaborations_org_message_index").on(
+      table.organizationId,
+      table.messageId,
+    ),
+    index("agent_collaborations_org_invoice_index").on(
+      table.organizationId,
+      table.invoiceId,
+    ),
+    index("agent_collaborations_org_task_index").on(
+      table.organizationId,
+      table.taskId,
+    ),
+    index("agent_collaborations_org_lead_index").on(
+      table.organizationId,
+      table.leadId,
+    ),
+    index("agent_collaborations_org_support_ticket_index").on(
+      table.organizationId,
+      table.supportTicketId,
+    ),
     check(
       "agent_collaborations_pattern_allowed",
-      sql`${table.pattern} in ('parallel_specialists')`,
+      sql`${table.pattern} in ('parallel_specialists', 'single_specialist')`,
+    ),
+    // Widened from a single messageId/pattern equality (ADR 0056) to a
+    // count across all five entity-id columns (ADR 0057): a
+    // 'single_specialist' row must set EXACTLY ONE of them, a
+    // 'parallel_specialists' row must set NONE. A naive
+    // `(pattern = 'single_specialist') = (count <> 0)` would wrongly allow
+    // 2+ ids set at once — this counts precisely instead.
+    check(
+      "agent_collaborations_entity_pattern_consistent",
+      sql`(case when ${table.pattern} = 'single_specialist' then 1 else 0 end) =
+          (case when ${table.messageId} is not null then 1 else 0 end +
+           case when ${table.invoiceId} is not null then 1 else 0 end +
+           case when ${table.taskId} is not null then 1 else 0 end +
+           case when ${table.leadId} is not null then 1 else 0 end +
+           case when ${table.supportTicketId} is not null then 1 else 0 end)`,
+    ),
+    check(
+      "agent_collaborations_drafted_content_consistent",
+      // subject implies body, but a body-only draft (Asana/HubSpot/Zendesk
+      // comment or note) is valid on its own — unlike the old Gmail-only
+      // equality check, subject and body are no longer required in lockstep.
+      sql`${table.draftedContentSubject} is null or ${table.draftedContentBody} is not null`,
     ),
     check(
       "agent_collaborations_status_allowed",
@@ -1623,6 +1719,10 @@ export const agentTaskResults = pgTable(
     claims: jsonb("claims").notNull(),
     evidenceIds: jsonb("evidence_ids").notNull(),
     confidenceBasisPoints: integer("confidence_basis_points"),
+    // Set only for a "draft_*" capability's result (ADR 0056, ADR 0057) —
+    // the structured {subject?, body} a human reviews before approving the
+    // send/post. Null for every other capability's result.
+    draftedContent: jsonb("drafted_content"),
     startedAt: timestamp("started_at", {
       mode: "date",
       withTimezone: true,
@@ -1722,6 +1822,482 @@ export const agentDelegationGrants = pgTable(
     check(
       "agent_delegation_grants_expiry_after_creation",
       sql`${table.expiresAt} > ${table.createdAt}`,
+    ),
+  ],
+);
+
+// The Safe Action pattern's second real write path (ADR 0056), alongside
+// internal_tasks — but this one's real side effect happens outside this
+// database, so status is a durable lifecycle ('pending' -> 'sent'/'failed')
+// rather than internal_tasks' single insert-and-done. A row starts
+// 'pending' the moment the Gmail API call is made and is only updated to
+// 'sent'/'failed' after that call returns — if the process crashes in
+// between, the row is left 'pending' with no way to know whether the send
+// actually went out (disclosed limitation: beginCustomerEmailReplySend,
+// @signaldesk/persistence, treats a pre-existing 'pending' row as unsafe to
+// auto-retry, not a bug to silently paper over).
+export const customerEmailReplies = pgTable(
+  "customer_email_replies",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    agentCollaborationId: uuid("agent_collaboration_id").notNull(),
+    messageId: uuid("message_id").notNull(),
+    triggeredByMembershipId: uuid("triggered_by_membership_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    status: text("status").notNull().default("pending"),
+    toEmail: text("to_email").notNull(),
+    subject: text("subject").notNull(),
+    body: text("body").notNull(),
+    gmailMessageId: text("gmail_message_id"),
+    gmailThreadId: text("gmail_thread_id"),
+    failureReason: text("failure_reason"),
+    sentAt: timestamp("sent_at", { mode: "date", withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    unique("customer_email_replies_org_id_id_unique").on(
+      table.organizationId,
+      table.id,
+    ),
+    unique("customer_email_replies_org_idempotency_unique").on(
+      table.organizationId,
+      table.idempotencyKey,
+    ),
+    foreignKey({
+      name: "customer_email_replies_org_collaboration_fk",
+      columns: [table.organizationId, table.agentCollaborationId],
+      foreignColumns: [
+        agentCollaborations.organizationId,
+        agentCollaborations.id,
+      ],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    foreignKey({
+      name: "customer_email_replies_org_message_fk",
+      columns: [table.organizationId, table.messageId],
+      foreignColumns: [messages.organizationId, messages.id],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    foreignKey({
+      name: "customer_email_replies_org_membership_fk",
+      columns: [table.organizationId, table.triggeredByMembershipId],
+      foreignColumns: [memberships.organizationId, memberships.id],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    index("customer_email_replies_org_collaboration_index").on(
+      table.organizationId,
+      table.agentCollaborationId,
+    ),
+    index("customer_email_replies_org_message_index").on(
+      table.organizationId,
+      table.messageId,
+    ),
+    index("customer_email_replies_org_membership_index").on(
+      table.organizationId,
+      table.triggeredByMembershipId,
+    ),
+    check(
+      "customer_email_replies_status_allowed",
+      sql`${table.status} in ('pending', 'sent', 'failed')`,
+    ),
+    check(
+      "customer_email_replies_idempotency_key_not_blank",
+      sql`length(btrim(${table.idempotencyKey})) > 0`,
+    ),
+    check(
+      "customer_email_replies_to_email_not_blank",
+      sql`length(btrim(${table.toEmail})) > 0`,
+    ),
+    check(
+      "customer_email_replies_subject_not_blank",
+      sql`length(btrim(${table.subject})) > 0`,
+    ),
+    check(
+      "customer_email_replies_body_not_blank",
+      sql`length(btrim(${table.body})) > 0`,
+    ),
+    check(
+      "customer_email_replies_sent_consistent",
+      sql`(${table.status} = 'sent' and ${table.gmailMessageId} is not null and ${table.gmailThreadId} is not null and ${table.sentAt} is not null) or (${table.status} != 'sent')`,
+    ),
+    check(
+      "customer_email_replies_failed_consistent",
+      sql`(${table.status} = 'failed' and ${table.failureReason} is not null) or (${table.status} != 'failed')`,
+    ),
+  ],
+);
+
+// The Safe Action pattern's third real write path (ADR 0057), same shape
+// as customer_email_replies: a durable pending/sent/failed lifecycle for a
+// write whose real side effect happens outside this database. No toEmail
+// column — QuickBooks emails the invoice's own on-file customer, this app
+// never needs to know it. No external message id column: QuickBooks'
+// invoice/send endpoint returns no distinct, storable message identifier
+// to record as send evidence (unlike Gmail's message/thread id) — status +
+// sentAt is the real, honest evidence kept here.
+export const quickbooksInvoiceReminders = pgTable(
+  "quickbooks_invoice_reminders",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    agentCollaborationId: uuid("agent_collaboration_id").notNull(),
+    invoiceId: uuid("invoice_id").notNull(),
+    triggeredByMembershipId: uuid("triggered_by_membership_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    status: text("status").notNull().default("pending"),
+    subject: text("subject").notNull(),
+    body: text("body").notNull(),
+    failureReason: text("failure_reason"),
+    sentAt: timestamp("sent_at", { mode: "date", withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    unique("quickbooks_invoice_reminders_org_id_id_unique").on(
+      table.organizationId,
+      table.id,
+    ),
+    unique("quickbooks_invoice_reminders_org_idempotency_unique").on(
+      table.organizationId,
+      table.idempotencyKey,
+    ),
+    foreignKey({
+      name: "quickbooks_invoice_reminders_org_collaboration_fk",
+      columns: [table.organizationId, table.agentCollaborationId],
+      foreignColumns: [
+        agentCollaborations.organizationId,
+        agentCollaborations.id,
+      ],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    foreignKey({
+      name: "quickbooks_invoice_reminders_org_invoice_fk",
+      columns: [table.organizationId, table.invoiceId],
+      foreignColumns: [invoices.organizationId, invoices.id],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    foreignKey({
+      name: "quickbooks_invoice_reminders_org_membership_fk",
+      columns: [table.organizationId, table.triggeredByMembershipId],
+      foreignColumns: [memberships.organizationId, memberships.id],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    index("quickbooks_invoice_reminders_org_collaboration_index").on(
+      table.organizationId,
+      table.agentCollaborationId,
+    ),
+    index("quickbooks_invoice_reminders_org_invoice_index").on(
+      table.organizationId,
+      table.invoiceId,
+    ),
+    index("quickbooks_invoice_reminders_org_membership_index").on(
+      table.organizationId,
+      table.triggeredByMembershipId,
+    ),
+    check(
+      "quickbooks_invoice_reminders_status_allowed",
+      sql`${table.status} in ('pending', 'sent', 'failed')`,
+    ),
+    check(
+      "quickbooks_invoice_reminders_idempotency_key_not_blank",
+      sql`length(btrim(${table.idempotencyKey})) > 0`,
+    ),
+    check(
+      "quickbooks_invoice_reminders_subject_not_blank",
+      sql`length(btrim(${table.subject})) > 0`,
+    ),
+    check(
+      "quickbooks_invoice_reminders_body_not_blank",
+      sql`length(btrim(${table.body})) > 0`,
+    ),
+    check(
+      "quickbooks_invoice_reminders_sent_consistent",
+      sql`(${table.status} = 'sent' and ${table.sentAt} is not null) or (${table.status} != 'sent')`,
+    ),
+    check(
+      "quickbooks_invoice_reminders_failed_consistent",
+      sql`(${table.status} = 'failed' and ${table.failureReason} is not null) or (${table.status} != 'failed')`,
+    ),
+  ],
+);
+
+// Same shape as quickbooksInvoiceReminders (ADR 0057) — a nudge comment
+// posted on an overdue Asana task. Body-only (no subject: an Asana story
+// is a plain comment, not an email). asanaStoryGid is the real send
+// evidence: Asana's story-creation response returns a distinct gid,
+// stored here once the post succeeds.
+export const asanaTaskNudges = pgTable(
+  "asana_task_nudges",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    agentCollaborationId: uuid("agent_collaboration_id").notNull(),
+    taskId: uuid("task_id").notNull(),
+    triggeredByMembershipId: uuid("triggered_by_membership_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    status: text("status").notNull().default("pending"),
+    body: text("body").notNull(),
+    asanaStoryGid: text("asana_story_gid"),
+    failureReason: text("failure_reason"),
+    sentAt: timestamp("sent_at", { mode: "date", withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    unique("asana_task_nudges_org_id_id_unique").on(
+      table.organizationId,
+      table.id,
+    ),
+    unique("asana_task_nudges_org_idempotency_unique").on(
+      table.organizationId,
+      table.idempotencyKey,
+    ),
+    foreignKey({
+      name: "asana_task_nudges_org_collaboration_fk",
+      columns: [table.organizationId, table.agentCollaborationId],
+      foreignColumns: [
+        agentCollaborations.organizationId,
+        agentCollaborations.id,
+      ],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    foreignKey({
+      name: "asana_task_nudges_org_task_fk",
+      columns: [table.organizationId, table.taskId],
+      foreignColumns: [tasks.organizationId, tasks.id],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    foreignKey({
+      name: "asana_task_nudges_org_membership_fk",
+      columns: [table.organizationId, table.triggeredByMembershipId],
+      foreignColumns: [memberships.organizationId, memberships.id],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    index("asana_task_nudges_org_collaboration_index").on(
+      table.organizationId,
+      table.agentCollaborationId,
+    ),
+    index("asana_task_nudges_org_task_index").on(
+      table.organizationId,
+      table.taskId,
+    ),
+    index("asana_task_nudges_org_membership_index").on(
+      table.organizationId,
+      table.triggeredByMembershipId,
+    ),
+    check(
+      "asana_task_nudges_status_allowed",
+      sql`${table.status} in ('pending', 'sent', 'failed')`,
+    ),
+    check(
+      "asana_task_nudges_idempotency_key_not_blank",
+      sql`length(btrim(${table.idempotencyKey})) > 0`,
+    ),
+    check(
+      "asana_task_nudges_body_not_blank",
+      sql`length(btrim(${table.body})) > 0`,
+    ),
+    check(
+      "asana_task_nudges_sent_consistent",
+      sql`(${table.status} = 'sent' and ${table.asanaStoryGid} is not null and ${table.sentAt} is not null) or (${table.status} != 'sent')`,
+    ),
+    check(
+      "asana_task_nudges_failed_consistent",
+      sql`(${table.status} = 'failed' and ${table.failureReason} is not null) or (${table.status} != 'failed')`,
+    ),
+  ],
+);
+
+// Same shape again (ADR 0057) — a note logged on a stalled HubSpot deal.
+// Body-only. hubspotNoteId is the real send evidence: HubSpot's note-create
+// response returns a distinct id, stored here once the post succeeds.
+export const hubspotDealNotes = pgTable(
+  "hubspot_deal_notes",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    agentCollaborationId: uuid("agent_collaboration_id").notNull(),
+    leadId: uuid("lead_id").notNull(),
+    triggeredByMembershipId: uuid("triggered_by_membership_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    status: text("status").notNull().default("pending"),
+    body: text("body").notNull(),
+    hubspotNoteId: text("hubspot_note_id"),
+    failureReason: text("failure_reason"),
+    sentAt: timestamp("sent_at", { mode: "date", withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    unique("hubspot_deal_notes_org_id_id_unique").on(
+      table.organizationId,
+      table.id,
+    ),
+    unique("hubspot_deal_notes_org_idempotency_unique").on(
+      table.organizationId,
+      table.idempotencyKey,
+    ),
+    foreignKey({
+      name: "hubspot_deal_notes_org_collaboration_fk",
+      columns: [table.organizationId, table.agentCollaborationId],
+      foreignColumns: [
+        agentCollaborations.organizationId,
+        agentCollaborations.id,
+      ],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    foreignKey({
+      name: "hubspot_deal_notes_org_lead_fk",
+      columns: [table.organizationId, table.leadId],
+      foreignColumns: [leads.organizationId, leads.id],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    foreignKey({
+      name: "hubspot_deal_notes_org_membership_fk",
+      columns: [table.organizationId, table.triggeredByMembershipId],
+      foreignColumns: [memberships.organizationId, memberships.id],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    index("hubspot_deal_notes_org_collaboration_index").on(
+      table.organizationId,
+      table.agentCollaborationId,
+    ),
+    index("hubspot_deal_notes_org_lead_index").on(
+      table.organizationId,
+      table.leadId,
+    ),
+    index("hubspot_deal_notes_org_membership_index").on(
+      table.organizationId,
+      table.triggeredByMembershipId,
+    ),
+    check(
+      "hubspot_deal_notes_status_allowed",
+      sql`${table.status} in ('pending', 'sent', 'failed')`,
+    ),
+    check(
+      "hubspot_deal_notes_idempotency_key_not_blank",
+      sql`length(btrim(${table.idempotencyKey})) > 0`,
+    ),
+    check(
+      "hubspot_deal_notes_body_not_blank",
+      sql`length(btrim(${table.body})) > 0`,
+    ),
+    check(
+      "hubspot_deal_notes_sent_consistent",
+      sql`(${table.status} = 'sent' and ${table.hubspotNoteId} is not null and ${table.sentAt} is not null) or (${table.status} != 'sent')`,
+    ),
+    check(
+      "hubspot_deal_notes_failed_consistent",
+      sql`(${table.status} = 'failed' and ${table.failureReason} is not null) or (${table.status} != 'failed')`,
+    ),
+  ],
+);
+
+// Same shape again (ADR 0057) — a reply comment posted on a stuck Zendesk
+// ticket. Body-only. No external comment-id column: Zendesk's ticket-update
+// response does not reliably return a distinct, storable comment
+// identifier separate from the ticket itself (verify during this
+// connector's build slice) — status + sentAt is the honest evidence kept
+// here, matching quickbooksInvoiceReminders' same disclosed limitation.
+export const zendeskTicketReplies = pgTable(
+  "zendesk_ticket_replies",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    agentCollaborationId: uuid("agent_collaboration_id").notNull(),
+    supportTicketId: uuid("support_ticket_id").notNull(),
+    triggeredByMembershipId: uuid("triggered_by_membership_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    status: text("status").notNull().default("pending"),
+    body: text("body").notNull(),
+    failureReason: text("failure_reason"),
+    sentAt: timestamp("sent_at", { mode: "date", withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    unique("zendesk_ticket_replies_org_id_id_unique").on(
+      table.organizationId,
+      table.id,
+    ),
+    unique("zendesk_ticket_replies_org_idempotency_unique").on(
+      table.organizationId,
+      table.idempotencyKey,
+    ),
+    foreignKey({
+      name: "zendesk_ticket_replies_org_collaboration_fk",
+      columns: [table.organizationId, table.agentCollaborationId],
+      foreignColumns: [
+        agentCollaborations.organizationId,
+        agentCollaborations.id,
+      ],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    foreignKey({
+      name: "zendesk_ticket_replies_org_support_ticket_fk",
+      columns: [table.organizationId, table.supportTicketId],
+      foreignColumns: [supportTickets.organizationId, supportTickets.id],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    foreignKey({
+      name: "zendesk_ticket_replies_org_membership_fk",
+      columns: [table.organizationId, table.triggeredByMembershipId],
+      foreignColumns: [memberships.organizationId, memberships.id],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    index("zendesk_ticket_replies_org_collaboration_index").on(
+      table.organizationId,
+      table.agentCollaborationId,
+    ),
+    index("zendesk_ticket_replies_org_support_ticket_index").on(
+      table.organizationId,
+      table.supportTicketId,
+    ),
+    index("zendesk_ticket_replies_org_membership_index").on(
+      table.organizationId,
+      table.triggeredByMembershipId,
+    ),
+    check(
+      "zendesk_ticket_replies_status_allowed",
+      sql`${table.status} in ('pending', 'sent', 'failed')`,
+    ),
+    check(
+      "zendesk_ticket_replies_idempotency_key_not_blank",
+      sql`length(btrim(${table.idempotencyKey})) > 0`,
+    ),
+    check(
+      "zendesk_ticket_replies_body_not_blank",
+      sql`length(btrim(${table.body})) > 0`,
+    ),
+    check(
+      "zendesk_ticket_replies_sent_consistent",
+      sql`(${table.status} = 'sent' and ${table.sentAt} is not null) or (${table.status} != 'sent')`,
+    ),
+    check(
+      "zendesk_ticket_replies_failed_consistent",
+      sql`(${table.status} = 'failed' and ${table.failureReason} is not null) or (${table.status} != 'failed')`,
     ),
   ],
 );
@@ -2188,69 +2764,3 @@ export const aiProviderConnections = pgTable(
     ),
   ],
 );
-
-export type OrganizationRow = typeof organizations.$inferSelect;
-export type NewOrganizationRow = typeof organizations.$inferInsert;
-export type UserRow = typeof users.$inferSelect;
-export type NewUserRow = typeof users.$inferInsert;
-export type MembershipRow = typeof memberships.$inferSelect;
-export type NewMembershipRow = typeof memberships.$inferInsert;
-export type IntegrationRow = typeof integrations.$inferSelect;
-export type NewIntegrationRow = typeof integrations.$inferInsert;
-export type SourceRecordRow = typeof sourceRecords.$inferSelect;
-export type NewSourceRecordRow = typeof sourceRecords.$inferInsert;
-export type LeadRow = typeof leads.$inferSelect;
-export type NewLeadRow = typeof leads.$inferInsert;
-export type InvoiceRow = typeof invoices.$inferSelect;
-export type NewInvoiceRow = typeof invoices.$inferInsert;
-
-export type PaymentRow = typeof payments.$inferSelect;
-export type NewPaymentRow = typeof payments.$inferInsert;
-export type TaskRow = typeof tasks.$inferSelect;
-export type NewTaskRow = typeof tasks.$inferInsert;
-export type MessageRow = typeof messages.$inferSelect;
-export type NewMessageRow = typeof messages.$inferInsert;
-export type ArtifactRow = typeof artifacts.$inferSelect;
-export type NewArtifactRow = typeof artifacts.$inferInsert;
-export type SignalRow = typeof signals.$inferSelect;
-export type NewSignalRow = typeof signals.$inferInsert;
-export type RecommendationRow = typeof recommendations.$inferSelect;
-export type NewRecommendationRow = typeof recommendations.$inferInsert;
-export type AuditEventRow = typeof auditEvents.$inferSelect;
-export type NewAuditEventRow = typeof auditEvents.$inferInsert;
-export type InternalTaskRow = typeof internalTasks.$inferSelect;
-export type NewInternalTaskRow = typeof internalTasks.$inferInsert;
-export type GoalRow = typeof goals.$inferSelect;
-export type NewGoalRow = typeof goals.$inferInsert;
-export type AgentCollaborationRow = typeof agentCollaborations.$inferSelect;
-export type NewAgentCollaborationRow = typeof agentCollaborations.$inferInsert;
-export type AgentTaskResultRow = typeof agentTaskResults.$inferSelect;
-export type NewAgentTaskResultRow = typeof agentTaskResults.$inferInsert;
-export type AgentDelegationGrantRow = typeof agentDelegationGrants.$inferSelect;
-export type NewAgentDelegationGrantRow =
-  typeof agentDelegationGrants.$inferInsert;
-export type SyncJobRow = typeof syncJobs.$inferSelect;
-export type NewSyncJobRow = typeof syncJobs.$inferInsert;
-export type PlanRow = typeof plans.$inferSelect;
-export type NewPlanRow = typeof plans.$inferInsert;
-export type PlanPriceRow = typeof planPrices.$inferSelect;
-export type NewPlanPriceRow = typeof planPrices.$inferInsert;
-export type PlanEntitlementRow = typeof planEntitlements.$inferSelect;
-export type NewPlanEntitlementRow = typeof planEntitlements.$inferInsert;
-export type PlanAddonRow = typeof planAddons.$inferSelect;
-export type NewPlanAddonRow = typeof planAddons.$inferInsert;
-export type OrganizationSubscriptionRow =
-  typeof organizationSubscriptions.$inferSelect;
-export type NewOrganizationSubscriptionRow =
-  typeof organizationSubscriptions.$inferInsert;
-export type OrganizationSubscriptionAddonRow =
-  typeof organizationSubscriptionAddons.$inferSelect;
-export type NewOrganizationSubscriptionAddonRow =
-  typeof organizationSubscriptionAddons.$inferInsert;
-export type InternalCostEventRow = typeof internalCostEvents.$inferSelect;
-export type NewInternalCostEventRow = typeof internalCostEvents.$inferInsert;
-export type OrganizationInviteRow = typeof organizationInvites.$inferSelect;
-export type NewOrganizationInviteRow = typeof organizationInvites.$inferInsert;
-export type AIProviderConnectionRow = typeof aiProviderConnections.$inferSelect;
-export type NewAIProviderConnectionRow =
-  typeof aiProviderConnections.$inferInsert;

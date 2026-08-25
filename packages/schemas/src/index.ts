@@ -597,7 +597,14 @@ export type FinancialContext = z.infer<typeof financialContextSchema>;
 export const actionProposalSchema = z
   .strictObject({
     id: nonEmptyIdentifierSchema,
-    actionType: z.enum(["create_internal_task"]),
+    actionType: z.enum([
+      "create_internal_task",
+      "send_customer_email_reply",
+      "send_invoice_reminder",
+      "post_task_nudge",
+      "post_deal_note",
+      "post_ticket_reply",
+    ]),
     // "agent_assisted_internal" is strictly riskier than "low_risk_internal":
     // it's a deterministic capability's proposal vs. one an agent authored
     // from model-interpreted findings, which is exactly why the latter
@@ -624,6 +631,31 @@ export const actionProposalSchema = z
       message:
         "requiresApproval must be false for low_risk_internal and true for agent_assisted_internal.",
     },
+  )
+  // A second, independent guarantee for every actionType with a real
+  // external side effect: no future capability or bug can ever construct
+  // one of these proposals that skips approval, even if the
+  // riskClass/requiresApproval pairing above were satisfied some other way.
+  // This is enforced again, redundantly, at composition time in
+  // buildActionProposals (@signaldesk/application) — belt and suspenders on
+  // every action type that writes to a real external system. Widen this set
+  // only when a new real external-write action type is added, not
+  // speculatively.
+  .refine(
+    (proposal) =>
+      ![
+        "send_customer_email_reply",
+        "send_invoice_reminder",
+        "post_task_nudge",
+        "post_deal_note",
+        "post_ticket_reply",
+      ].includes(proposal.actionType) ||
+      (proposal.riskClass === "agent_assisted_internal" &&
+        proposal.requiresApproval === true),
+    {
+      message:
+        "Every real external-write action type must always be agent_assisted_internal with requiresApproval: true.",
+    },
   );
 
 export type ActionProposal = z.infer<typeof actionProposalSchema>;
@@ -644,6 +676,26 @@ export const entityReferenceSchema = z.strictObject({
 
 export type EntityReference = z.infer<typeof entityReferenceSchema>;
 
+// Structured content an agent has drafted for human review — never free
+// text merged into a prompt, and never sent/posted as-is: each connector's
+// approve-*-action.ts re-reads this exact persisted subject/body at
+// send time rather than trusting anything client-supplied. Shared by every
+// draft-then-approve write action (Gmail reply, QuickBooks invoice
+// reminder, Asana task nudge, HubSpot deal note, Zendesk ticket reply) —
+// `subject` is optional because only an email-shaped draft (Gmail,
+// QuickBooks) needs one; a comment/note-shaped draft (Asana, HubSpot,
+// Zendesk) is body-only.
+export const draftedContentSchema = z.strictObject({
+  subject: z.string().trim().min(1).max(200).optional(),
+  body: z.string().trim().min(1).max(5000),
+});
+
+export type DraftedContent = z.infer<typeof draftedContentSchema>;
+
+export function parseDraftedContent(input: unknown): DraftedContent {
+  return draftedContentSchema.parse(input);
+}
+
 export const intelligenceCardSchema = z.strictObject({
   id: nonEmptyIdentifierSchema,
   type: cardTypeSchema,
@@ -656,6 +708,11 @@ export const intelligenceCardSchema = z.strictObject({
   explanation: cardExplanationSchema,
   sources: z.array(sourceReferenceSchema),
   financialContext: financialContextSchema.optional(),
+  // Present only on a "*.reply_drafted"/"*.reminder_drafted"/
+  // "*.nudge_drafted"/"*.note_drafted" card (see IntelligenceType,
+  // @signaldesk/intelligence) — the agent-drafted content shown for review
+  // before the human approves sending/posting it.
+  draftedContent: draftedContentSchema.optional(),
   recommendedActions: z.array(actionProposalSchema),
   freshness: dataFreshnessSchema,
   /** Other card ids that share this card's real, normalized customer
@@ -678,16 +735,31 @@ export type IntelligenceCard = z.infer<typeof intelligenceCardSchema>;
 // inventing a parallel evidence shape — an agent's "evidence" is the same
 // SourceReference an IntelligenceFinding already carries.
 //
-// Three capabilities exist because three real specialist capabilities exist
-// today (see AGENT_REGISTRY, @signaldesk/application, still exactly two
-// specialist cards — claude/deterministic — each declaring all three) —
-// widen this enum only when a new real capability is added, not
+// These capabilities exist because that many real specialist capabilities
+// exist today (see AGENT_REGISTRY, @signaldesk/application, still exactly
+// two specialist cards — claude/deterministic — each declaring all of
+// them) — widen this enum only when a new real capability is added, not
 // speculatively.
+//
+// "draft_customer_reply" and the four "draft_*" capabilities below it are
+// the odd ones out in this list: each is a capability whose result feeds a
+// real external-system write (send_customer_email_reply/
+// send_invoice_reminder/post_task_nudge/post_deal_note/post_ticket_reply,
+// via draft-content-coordinator.ts and, for Gmail specifically,
+// message-reply-draft-coordinator.ts) once a human approves it, rather
+// than only ever proposing create_internal_task. canExecute below stays
+// hard-false regardless — the agent still only ever drafts; a
+// human-triggered server action does the actual send/post.
 
 export const agentCapabilitySchema = z.enum([
   "interpret_financial_risk",
   "interpret_delivery_risk",
   "interpret_ticket_risk",
+  "draft_customer_reply",
+  "draft_invoice_reminder",
+  "draft_task_nudge",
+  "draft_deal_note",
+  "draft_ticket_reply",
 ]);
 
 export type AgentCapability = z.infer<typeof agentCapabilitySchema>;
@@ -699,7 +771,15 @@ export const agentCardSchema = z.strictObject({
   description: z.string().trim().min(1).max(500),
   capabilities: z.array(agentCapabilitySchema).min(1),
   dataAccess: z
-    .array(z.enum(["invoice_findings", "task_findings", "ticket_findings"]))
+    .array(
+      z.enum([
+        "invoice_findings",
+        "task_findings",
+        "ticket_findings",
+        "message_findings",
+        "lead_findings",
+      ]),
+    )
     .min(1),
   riskLevel: z.enum(["low", "moderate"]),
   canRead: z.literal(true),
@@ -745,6 +825,11 @@ export const agentTaskResultSchema = z.strictObject({
   recommendation: z.string().trim().min(1).max(500).optional(),
   limitations: z.array(z.string().trim().min(1)).max(5).optional(),
   confidence: z.number().min(0).max(1),
+  // Set only for a "draft_customer_reply"/"draft_invoice_reminder"/
+  // "draft_task_nudge"/"draft_deal_note"/"draft_ticket_reply" result — see
+  // message-reply-draft-coordinator.ts / draft-content-coordinator.ts,
+  // @signaldesk/application. Absent for every other capability's result.
+  draftedContent: draftedContentSchema.optional(),
 });
 
 export type AgentTaskResult = z.infer<typeof agentTaskResultSchema>;
@@ -788,56 +873,6 @@ export function parseSpecialistInterpretation(
 ): SpecialistInterpretation {
   return specialistInterpretationSchema.parse(input);
 }
-
-// --- Artifacts -----------------------------------------------------------
-//
-// A real, deterministically-assembled work product built from the
-// Intelligence Core's own findings — not a raw dashboard view, and not
-// fabricated AI prose (this app has no model provider yet; see
-// `@signaldesk/application`'s `deterministic-provider.ts`).
-// `generatedBy` is honestly `"deterministic-assembly"` for every artifact
-// today. Only `daily_brief` exists; the broader artifact taxonomy (Client
-// Brief, Project Brief, Proposal, Risk Report, ...) is architected for via
-// this same shape but deliberately not built until a real one is needed —
-// adding a type means widening `artifactTypeSchema`, not a new contract.
-//
-// The status lifecycle is the full one a real review/approval workflow
-// will eventually need (`draft` through `archived`) even though nothing
-// in this app produces anything but `generated` yet — the same
-// "anticipate honestly, only implement what's real" precedent as
-// `Invoice.status`/`SourceInvoiceRecord.status` including `paid`/`void`
-// before any code could ever observe that transition.
-
-export const artifactTypeSchema = z.enum(["daily_brief"]);
-
-export type ArtifactType = z.infer<typeof artifactTypeSchema>;
-
-export const artifactStatusSchema = z.enum([
-  "draft",
-  "generated",
-  "reviewed",
-  "approved",
-  "published",
-  "superseded",
-  "archived",
-]);
-
-export type ArtifactStatus = z.infer<typeof artifactStatusSchema>;
-
-export const artifactSchema = z.strictObject({
-  id: z.uuid(),
-  organizationId: z.uuid(),
-  type: artifactTypeSchema,
-  title: z.string().trim().min(1).max(200),
-  status: artifactStatusSchema,
-  generatedBy: z.literal("deterministic-assembly"),
-  content: z.string().trim().min(1),
-  structuredData: z.record(z.string(), z.unknown()),
-  sourceFindingIds: z.array(z.string().trim().min(1)),
-  generatedAt: z.date(),
-});
-
-export type Artifact = z.infer<typeof artifactSchema>;
 
 // --- Dashboard intents ---------------------------------------------------
 //

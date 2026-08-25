@@ -350,6 +350,56 @@ export async function listOverdueInvoices(
   });
 }
 
+/**
+ * One real invoice by id, for a single-entity "draft content about one
+ * specific entity" write action (e.g. a QuickBooks invoice reminder) —
+ * reuses `listOverdueInvoices`'s core `invoices` ⋈ `source_records` join
+ * and its `toInvoice` row mapper, but unlike `listOverdueInvoices` applies
+ * none of its filtering conditions (`status = 'open'`, `due_at < now()`,
+ * active/degraded integration only) or its dedup-to-latest-source-record
+ * subquery — a direct single-entity-by-id lookup should honestly return
+ * the invoice's current real state regardless of whether it's still "at
+ * risk," matching `getSupportTicketById`'s same behavior
+ * (`support-tickets.ts`). Returns `null` for an invoice that doesn't
+ * exist or doesn't belong to the caller's own tenant (RLS reduces the
+ * query to zero rows rather than raising, so this is a real, honest "not
+ * found," not a leaked existence check).
+ */
+export async function getInvoiceById(
+  pool: DatabasePool,
+  organizationId: string,
+  invoiceId: string,
+): Promise<Invoice | null> {
+  return withTenantContext(pool, organizationId, async (client) => {
+    const result = await client.query<InvoiceWithSourceRow>(
+      `select
+         i.id as id,
+         i.organization_id as organization_id,
+         i.customer_name as customer_name,
+         i.amount_cents as amount_cents,
+         i.currency as currency,
+         i.due_at as due_at,
+         i.status as status,
+         sr.integration_id as integration_id,
+         sr.source_system as source_system,
+         sr.external_record_id as external_record_id,
+         sr.source_version as source_version,
+         sr.raw_payload_sha256 as record_digest_sha256,
+         sr.ingested_at as last_synced_at
+       from invoices i
+       join source_records sr
+         on sr.organization_id = i.organization_id and sr.id = i.source_record_id
+       where i.organization_id = $1
+         and i.id = $2`,
+      [organizationId, invoiceId],
+    );
+
+    const row = result.rows[0];
+
+    return row ? toInvoice(row) : null;
+  });
+}
+
 const MAX_EXPORTED_INVOICES = 1000;
 
 /**

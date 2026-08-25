@@ -21,7 +21,8 @@
     "./salesforce": "./src/salesforce/index.ts",
     "./xero": "./src/xero/index.ts",
     "./zendesk": "./src/zendesk/index.ts",
-    "./resend": "./src/resend/index.ts"
+    "./resend": "./src/resend/index.ts",
+    "./shared/upstream-error": "./src/shared/upstream-error.ts"
   },
   "scripts": {
     "typecheck": "tsc --project tsconfig.json --noEmit",

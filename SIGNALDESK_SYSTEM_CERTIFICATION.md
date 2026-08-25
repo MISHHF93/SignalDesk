@@ -979,3 +979,121 @@ injection, specialist disagreement) — `OWNER_ACTION_REQUIRED`. The
 connector-connect/disconnect role-gating question Pass 5 surfaced is a
 product decision, not a bug — deliberately left for the user rather
 than decided unilaterally.
+
+### Pass 7 — 2026-08-24 (continuation session): four more real connector writes, two new deterministic safety layers, a Matter-grouping UI, and a full dead-code sweep — re-certifying everything built since Pass 6
+
+Substantial new work landed in a separate, later session on top of Pass
+6's baseline, none of it reflected in this file's inventory until now.
+Re-certifying it against the same bar (typecheck/lint/test/build after
+every change, live browser verification where the dev environment
+allows, honest disclosure of what's still `OWNER_ACTION_REQUIRED`)
+rather than assuming it's covered by the phases above.
+
+**New real capability: four more connectors gained a real write action**
+(ADR 0057), extending Pass 6's baseline of one (Gmail, ADR 0056) to
+five — Asana (task-comment post), Zendesk (ticket reply), HubSpot
+(deal-note create), QuickBooks (invoice-reminder send via a
+SyncToken-sparse-update-then-`/send` sequence, the one genuinely novel
+API shape among the five, verified against Intuit's official SDK
+source rather than assumed). Every one follows the identical
+draft-then-approve pattern Pass 6 already certified for Gmail:
+`canExecute` stays hard-`false`, a human approves the exact drafted
+content, only then does a real external write happen. Live-verified
+end to end against the real dev database for all five (drafting
+succeeds via the deterministic specialist — no `ANTHROPIC_API_KEY`
+needed for that path; the actual send correctly fails closed with an
+honest "reconnect"/"not configured" message, since no real OAuth
+developer app credentials exist in this environment for any of the
+five providers — the same `OWNER_ACTION_REQUIRED` limitation every
+earlier pass already established, not a new gap).
+
+**New real capability: Pre-Flight Policy Audit** (ADR 0058) — a
+deterministic gate (`runPreFlightPolicyAudit`, zero new schema, zero AI
+call) now runs inside all five write actions immediately before the
+send: an injection-boundary-delimiter-leak check, a drafted-dollar-
+figure-vs-real-amount check (QuickBooks/HubSpot), and a duplicate-send-
+within-24-hours check against each connector's own existing
+send-tracking table. A real bug was found and fixed in the same
+session that built it: the dollar-amount regex silently truncated a
+large comma-less figure (`$1234567` parsed as `123`), which would have
+falsely blocked a correct large-dollar draft — fixed
+(`(?:,\d{3})+` instead of `*`), covered by new regression tests. A
+known, disclosed (not fixed) TOCTOU gap: the duplicate-send check is
+read-then-decide, not a lock, so two separate drafts for the same
+entity approved in a tight window could theoretically both pass it —
+assessed as low-severity (a second similar message, never a financial
+mutation or data corruption, since none of these five actions touch
+money) and left as a documented limitation rather than over-built.
+
+**New real capability: deterministic recovery classification** (ADR
+0059/0060) — `UpstreamProviderError` gained real `status`/
+`retryAfterSeconds` fields (previously discarded entirely), feeding
+`classifyRecoveryStrategy`, which turns a failed send into one of five
+specific, honest messages ("reconnect," "rate-limited, try again in
+~N minutes," "may have changed, refresh," "could not be found," or the
+original generic fallback) instead of one generic sentence for every
+failure. Extended same-day to a real "Reconnect now" link
+(`/integrations/[slug]`) on the recommendation card itself, not just
+words — including fixing Gmail's pre-existing insufficient-scope
+message, which had the identical gap. Explicitly, deliberately does not
+auto-retry anything — this app still has no background job runner (the
+same `N/A` finding Phase 1's inventory already recorded), so "self-
+healing" here means a better, actionable message, never an autonomous
+action.
+
+**New real capability: Matter grouping + batch draft** (ADR 0060) — cards
+sharing a real correlated customer/company name (`correlateFindingsByName`,
+pre-existing but previously surfaced only as a small "+N related" badge
+nobody could act on) now visually cluster under a "Possibly the same
+situation" header, with an optional "Draft for all N" button that fires
+each member card's own existing draft action in parallel — still every
+result independently approved, no batch approve, no new write path. A
+real bug was found via live browser verification (not by static
+analysis) and fixed same-day: two different findings on one entity (a
+lead with both `follow_up_risk` and `ownership_gap`) fired the same
+draft action twice, producing duplicate drafts — fixed by deduping the
+dispatch set by real entity (`kind:id`), not by card.
+
+**Dead-code sweep across all 12 workspace packages**: three real,
+verified findings fixed (44 unused Drizzle-inferred `*Row` type aliases
+in `packages/persistence/src/schema.ts`; a fully dead, superseded
+duplicate `Artifact` schema in `packages/schemas` — the real one
+`packages/persistence/src/artifacts.ts` declares independently is what
+production code actually imports; 6 redundant barrel exports in
+`packages/intelligence`/`packages/application` that only ever had
+internal-relative-import consumers). Everything else the sweep
+initially flagged was TypeScript inference noise (a type used only
+implicitly as a function's param/return type, never actually dead) —
+correctly not touched.
+
+**Wiring re-audit**: every `apps/web` route, internal link, the full
+83-function Server Action surface, and all `app/api/**/route.ts`
+handlers independently re-traced this session — zero broken links, zero
+orphaned pages, zero dead/unwired actions, zero orphaned API routes
+found. One false-positive flagged by a sub-agent during this sweep
+(a claim that `apps/web/AGENTS.md`'s Next.js-generated content was a
+prompt-injection attempt) was independently verified and refuted by
+checking the file it cited actually exists in the installed Next.js
+package — recorded here as a reminder to verify a sub-agent's security
+claims before relaying them, not just because the finding sounded
+alarming.
+
+**Verified**: `pnpm -r typecheck`, `pnpm -r test`, and root `pnpm lint`
+all green across every one of the 12 workspace packages after every
+change in this pass, re-confirmed at the end of the pass as a whole, not
+just after each individual edit. A real production build
+(`next build`, not just `tsc --noEmit`) succeeded cleanly across all 63
+routes both mid-pass and at the end. A background live-verification
+agent drove the Matter batch-draft feature against real seeded data in
+the real dev database (Playwright, real browser, real cleanup confirmed
+by re-querying every touched table for zero rows) and found the
+duplicate-draft bug above — the one genuinely new functional bug this
+pass's live testing surfaced, now fixed and covered by a unit test
+reproducing the exact scenario.
+
+**Genuinely remaining, unchanged from prior passes**: real OAuth
+developer app credentials for any connector, a real `ANTHROPIC_API_KEY`,
+a real error-monitoring vendor, live-mode Stripe reconciliation, and
+real legal/support content are all still `OWNER_ACTION_REQUIRED` — see
+`OWNER-ACTIONS.md`. Nothing in this pass closes any of those; this pass
+was explicitly scoped to close everything achievable without them.

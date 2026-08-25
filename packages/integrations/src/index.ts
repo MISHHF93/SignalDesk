@@ -351,13 +351,23 @@ export const connectorCatalog = [
       {
         id: "crm-record-actions",
         label: "CRM record actions",
-        description: "Prepare governed record updates after explicit approval.",
+        description:
+          "Draft and log a note on a stalled deal for explicit human review and approval.",
         operation: "write",
       },
     ],
-    // See ADR 0008: HubSpot's first-real-connector status. OAuth flow and
-    // Vault-backed token storage are real and tested; sync and actions are
-    // not built yet, and no real HubSpot app credentials exist yet.
+    // See ADR 0008: HubSpot's first-real-connector status. OAuth flow,
+    // Vault-backed token storage, and deal sync are real and tested. Real
+    // send action as of ADR 0057 (connector-write-actions-expansion): an
+    // Agent Fabric specialist drafts a note for one stalled deal from
+    // already-known lead data, a human approves it via
+    // AgentRecommendationCard, and approval logs it through
+    // createHubSpotDealNote (hubspot/client.ts) using the tenant's own
+    // connected account and the crm.objects.contacts.write scope (verified
+    // against HubSpot's Notes API docs — not, as might be assumed,
+    // crm.objects.deals.write or a distinct notes-write scope) — an
+    // already-connected org must reconnect once to gain this scope. No
+    // real HubSpot app credentials exist yet in this environment.
     authStrategy: {
       kind: "oauth2",
       label: "OAuth 2.0",
@@ -383,7 +393,7 @@ export const connectorCatalog = [
       // by the stored cursor via HubSpot's Search API
       // (fetchHubSpotDealsModifiedSince), not the plain list endpoint.
       incrementalSyncImplemented: true,
-      actionsImplemented: false,
+      actionsImplemented: true,
       productionReady: false,
     },
     // "contact"/"company" are design intent (the CRM-record-insights
@@ -417,7 +427,8 @@ export const connectorCatalog = [
       {
         id: "email-draft-actions",
         label: "Email draft actions",
-        description: "Prepare drafts for explicit human review and approval.",
+        description:
+          "Draft a reply to an unanswered message for explicit human review, then send it through this connection once approved.",
         operation: "write",
       },
     ],
@@ -426,13 +437,19 @@ export const connectorCatalog = [
     // Google Calendar. Real message sync exists as of Phase 4b
     // (implementation roadmap): bounded to the last 30 days, external
     // correspondence only, both an initial (on connect) and a real
-    // incremental (cursor-based) run via "Sync Now." Actions (drafting
-    // replies) are not built. productionReady stays false: this dev
-    // environment has no real Google Cloud OAuth client configured
-    // (GOOGLE_CLIENT_ID/SECRET are blank), so the real sync path has
-    // been verified by fixture and live-database tests only, not against
-    // a real live Gmail account end-to-end — see docs/adr/0050-gmail-
-    // message-ingestion.md.
+    // incremental (cursor-based) run via "Sync Now." Real send action as
+    // of ADR 0056 (message-reply-send): an Agent Fabric specialist drafts
+    // a reply to one unanswered message, a human approves it via
+    // AgentRecommendationCard, and approval sends it through
+    // sendGmailMessage (gmail/client.ts) using the tenant's own connected
+    // account and the gmail.send scope — the first connector with a real,
+    // executed write action, not just declared capability metadata.
+    // productionReady stays false: this dev environment has no real
+    // Google Cloud OAuth client configured (GOOGLE_CLIENT_ID/SECRET are
+    // blank), so neither the sync path nor the send path has been
+    // verified against a real live Gmail account end-to-end — see
+    // docs/adr/0050-gmail-message-ingestion.md and
+    // docs/adr/0056-message-reply-send.md.
     authStrategy: {
       kind: "oauth2",
       label: "OAuth 2.0",
@@ -447,7 +464,7 @@ export const connectorCatalog = [
       syncImplemented: false,
       initialSyncImplemented: true,
       incrementalSyncImplemented: true,
-      actionsImplemented: false,
+      actionsImplemented: true,
       productionReady: false,
     },
     supportedEntityTypes: ["email", "message", "contact"],
@@ -569,8 +586,8 @@ export const connectorCatalog = [
       "Bring accounting context into cash-flow and financial health views.",
     capabilityClasses: ["accounting"],
     availability: "foundation-preview",
-    direction: "inbound",
-    accessPosture: "read-only",
+    direction: "bidirectional",
+    accessPosture: "read-write",
     capabilities: [
       {
         id: "accounting-insights",
@@ -579,13 +596,30 @@ export const connectorCatalog = [
           "Read summarized accounting activity for business health signals.",
         operation: "read",
       },
+      {
+        id: "invoice-reminder-actions",
+        label: "Invoice reminder actions",
+        description:
+          "Draft and send a payment-reminder email for an overdue invoice for explicit human review and approval.",
+        operation: "write",
+      },
     ],
     // OAuth flow and Vault-backed token storage are real and tested,
     // mirroring HubSpot's connector. QuickBooks Online's OAuth scope is
     // coarse-grained (see client.ts) — there is no read-only scope to
-    // request, so this app enforces read-only by which endpoints it calls,
-    // not by what it asks Intuit for. Actions are not built yet, and no
-    // real Intuit app credentials exist yet.
+    // request, so read-only was previously enforced by which endpoints
+    // this app called, not by what it asked Intuit for. That's no longer
+    // the full picture: real send action as of ADR 0057 (connector-write-
+    // actions-expansion) — an Agent Fabric specialist drafts a payment-
+    // reminder email from already-known invoice data, a human approves it
+    // via AgentRecommendationCard, and approval sends it through
+    // sendQuickBooksInvoiceReminder (client.ts) — a sparse CustomerMemo
+    // update (using the invoice's current SyncToken, read fresh
+    // immediately before the write) followed by the invoice `/send` call,
+    // since Intuit's send endpoint itself accepts no custom body. No
+    // scope change or reconnect needed (QuickBooks' scope is already
+    // coarse enough to cover this). No real Intuit app credentials exist
+    // yet in this environment.
     authStrategy: {
       kind: "oauth2",
       label: "OAuth 2.0",
@@ -607,7 +641,7 @@ export const connectorCatalog = [
       // stored cursor on every non-initial run, for both invoices and
       // payments.
       incrementalSyncImplemented: true,
-      actionsImplemented: false,
+      actionsImplemented: true,
       productionReady: false,
     },
     // Both "invoice" and "payment" have real mappers now (ADR 0022) —
@@ -757,12 +791,20 @@ export const connectorCatalog = [
         id: "work-item-actions",
         label: "Work item actions",
         description:
-          "Prepare task changes for explicit human review and approval.",
+          "Draft and post a follow-up comment on an overdue task for explicit human review and approval.",
         operation: "write",
       },
     ],
     // OAuth flow and Vault-backed token storage are real and tested.
-    // No real Asana app credentials exist yet.
+    // No real Asana app credentials exist yet. Real send action as of ADR
+    // 0057 (connector-write-actions-expansion): an Agent Fabric specialist
+    // drafts a follow-up comment for one overdue task, a human approves it
+    // via AgentRecommendationCard, and approval posts it through
+    // createAsanaTaskStory (asana/client.ts) using the tenant's own
+    // connected account and the tasks:write scope — an already-connected
+    // org must reconnect once to gain this scope (Asana's authorize screen
+    // re-prompts by default on a fresh authorization, no forced-reconsent
+    // parameter needed the way Gmail's prompt=consent is).
     authStrategy: {
       kind: "oauth2",
       label: "OAuth 2.0",
@@ -777,7 +819,7 @@ export const connectorCatalog = [
       syncImplemented: false,
       initialSyncImplemented: true,
       incrementalSyncImplemented: true,
-      actionsImplemented: false,
+      actionsImplemented: true,
       productionReady: false,
     },
     // "task" has a real mapper today (mirroring HubSpot/QuickBooks's own
@@ -1335,7 +1377,8 @@ export const connectorCatalog = [
       {
         id: "support-ticket-actions",
         label: "Support ticket actions",
-        description: "Prepare governed ticket replies after explicit approval.",
+        description:
+          "Draft and post a reply to a stuck support ticket for explicit human review and approval.",
         operation: "write",
       },
     ],
@@ -1346,9 +1389,14 @@ export const connectorCatalog = [
     // `messages` (ADR 0050). Real cursor-filtered incremental sync via
     // Zendesk's own cursor-based incremental export endpoint. No real
     // Zendesk OAuth client credentials exist yet in this environment.
-    // `support-ticket-actions` stays product-intent only, like every
-    // other connector's declared write capability — no write endpoint is
-    // implemented.
+    // Real send action as of ADR 0057 (connector-write-actions-expansion):
+    // an Agent Fabric specialist drafts a reply grounded in a live,
+    // non-persisted read of the ticket's recent comments
+    // (fetchZendeskTicketComments), a human approves it via
+    // AgentRecommendationCard, and approval posts it through
+    // postZendeskTicketReply (zendesk/client.ts) using the tenant's own
+    // connected account and the new `write` scope — an already-connected
+    // org must reconnect once to gain this scope.
     authStrategy: {
       kind: "oauth2",
       label: "OAuth 2.0",
@@ -1365,7 +1413,7 @@ export const connectorCatalog = [
       syncImplemented: false,
       initialSyncImplemented: true,
       incrementalSyncImplemented: true,
-      actionsImplemented: false,
+      actionsImplemented: true,
       productionReady: false,
     },
     supportedEntityTypes: ["support_ticket"],

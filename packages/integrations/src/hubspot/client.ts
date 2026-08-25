@@ -1,9 +1,12 @@
 /**
- * A real HubSpot API client (ADR 0008) — OAuth exchange and the Deals/
- * Owners read endpoints, verified against HubSpot's current developer
- * docs this session rather than assumed from training data. No write
- * endpoints are implemented; ADR 0008 scopes this connector to reading
- * Deals only.
+ * A real HubSpot API client (ADR 0008) — OAuth exchange, the Deals/Owners
+ * read endpoints, and (as of this change) a real deal-note write endpoint
+ * (`createHubSpotDealNote`), all verified against HubSpot's current
+ * developer docs this session rather than assumed from training data. See
+ * `createHubSpotDealNote` and `HUBSPOT_SCOPES`'s own doc comments for
+ * exactly which endpoint, association shape, and scope the write path
+ * requires, and the honest caveat on how far that verification could go
+ * without a real HubSpot app registration in this environment.
  *
  * No PKCE here, unlike `microsoft-oauth.ts`: current IETF guidance (RFC
  * 9700) recommends it for every client type, and this session checked
@@ -31,9 +34,62 @@ const AUTHORIZE_URL = "https://app.hubspot.com/oauth/authorize";
 const TOKEN_URL = "https://api.hubapi.com/oauth/v1/token";
 const API_BASE_URL = "https://api.hubapi.com";
 
+// Scope requirement for the new write path — verified this session against
+// HubSpot's own current Notes API reference docs, not guessed, and cross-
+// checked across two independent HubSpot-authored pages rather than trusted
+// from one:
+//   - developers.hubspot.com/docs/api-reference/crm-notes-v3/guide (current)
+//   - developers.hubspot.com/docs/api-reference/legacy/crm/activities/notes/guide (legacy)
+// Both state, verbatim, that `POST /crm/v3/objects/notes` "requires one of
+// the following scopes": `crm.objects.contacts.read` or
+// `crm.objects.contacts.write`. This is a genuinely surprising result —
+// this connector is logging a note onto a *deal*, not a contact — but it
+// is what HubSpot's Notes/Engagements API actually requires: notes are a
+// legacy engagement type whose write permission is still gated by the
+// Contacts scope, not by `crm.objects.deals.write` and not by a distinct
+// per-object notes scope. `crm.objects.notes.write`/`crm.objects.notes.read`
+// exist as scope *names* in HubSpot's docs, but multiple current HubSpot
+// Community threads (e.g. "crm.objects.notes.read scope not visible /
+// available to add to App oauth scope") report they are not selectable in
+// a public (OAuth) app's scope configuration and return "The scope needed
+// for this API call isn't available for public use" — private-app only,
+// not usable by this connector's OAuth flow. `crm.objects.contacts.write`
+// (not `.read`, since this path performs a real POST/write) is added below
+// as the real, currently-working scope for a public app. Associating the
+// created note to a deal in the same request (see `createHubSpotDealNote`)
+// is not separately gated by `crm.objects.deals.write` per this same
+// documentation — the existing `crm.objects.deals.read` already covers
+// reading the deal this note gets attached to.
+//
+// IMPORTANT — honest caveat: this codebase has no real HubSpot developer
+// app registration in this environment, so this scope requirement has been
+// verified only against HubSpot's published docs (cross-checked across two
+// independent pages) and corroborating HubSpot Community reports, not
+// against a live authorize/token exchange actually granting this exact
+// scope and succeeding on a real note-create call. Re-verify against a real
+// HubSpot app registration before this ships.
+//
+// Reconnect disclosure: HubSpot's own OAuth quickstart docs describe the
+// authorize screen as always showing the user "the requested permissions"
+// to review and grant, and HubSpot's own reauthorization changelog
+// (developers.hubspot.com/changelog/public-app-reauthorization-and-
+// advanced-scope-settings) confirms that when an already-connected user
+// reauthorizes, scopes newly selected in the app's auth settings are added
+// to the resulting refresh token (and scopes no longer selected are
+// dropped) — i.e. a reconnect genuinely picks up an expanded scope list,
+// it does not silently keep reusing the old grant. No `prompt`-equivalent
+// forced-reconsent query parameter is documented for HubSpot's authorize
+// URL (unlike Gmail's forced `prompt=consent` in `gmail/client.ts`), but
+// none is needed: adding `crm.objects.contacts.write` here means an
+// already-connected tenant's next authorization request (a deliberate
+// reconnect) naturally shows the updated scope list and re-prompts for
+// consent to the wider grant, matching the same shape Asana's and
+// Zendesk's own connectors already document (see their `client.ts` files'
+// own scope-constant comments).
 export const HUBSPOT_SCOPES = [
   "crm.objects.deals.read",
   "crm.objects.owners.read",
+  "crm.objects.contacts.write",
 ] as const;
 
 export interface HubSpotOAuthConfig {
@@ -42,6 +98,13 @@ export interface HubSpotOAuthConfig {
   readonly redirectUri: string;
 }
 
+/**
+ * See `HUBSPOT_SCOPES`'s own doc comment above for the verified reconnect/
+ * re-prompt behavior on a scope change (e.g. the `crm.objects.contacts.write`
+ * scope added for `createHubSpotDealNote`) — HubSpot's authorize screen
+ * naturally re-prompts for consent to an expanded scope list on the next
+ * authorization request; no special parameter is added here to force it.
+ */
 export function buildHubSpotAuthorizationUrl(
   config: Pick<HubSpotOAuthConfig, "clientId" | "redirectUri">,
   state: string,
@@ -344,4 +407,87 @@ export async function fetchHubSpotOwners(
   }
 
   return owners;
+}
+
+/**
+ * The first real HubSpot write — logs a Note engagement on a deal via
+ * `POST /crm/v3/objects/notes` (developers.hubspot.com/docs/api-reference/
+ * crm-notes-v3/guide, verified this session, not assumed from training
+ * data). Requires the `crm.objects.contacts.write` scope added to
+ * `HUBSPOT_SCOPES` above — see that constant's own doc comment for the
+ * full verification trail and the honest caveat that it hasn't been
+ * checked against a live HubSpot authorize/token exchange in this
+ * environment.
+ *
+ * **One HTTP call, not two.** Unlike Zendesk's ticket reply (which
+ * genuinely has no "create comment" endpoint and must `PUT` the whole
+ * ticket — see `postZendeskTicketReply` in `../zendesk/client.ts`),
+ * HubSpot's Notes create endpoint really does accept an `associations`
+ * array in the same POST body, verified from HubSpot's own current docs
+ * example showing a note created and associated to an existing record in
+ * one request — no separate association call is needed here.
+ *
+ * Request shape, per that same doc page:
+ * - `properties.hs_timestamp` is the only property HubSpot's docs mark as
+ *   strictly required (Unix milliseconds or a UTC string) — it positions
+ *   the note on the record timeline. This function always sends the
+ *   current time as a millisecond epoch string.
+ * - `properties.hs_note_body` is documented as optional, but this
+ *   function always supplies it (from `body`) — a note with no text
+ *   would defeat the point of `approve-deal-note-action.ts` (apps/web,
+ *   being built in parallel)'s use case.
+ * - `associations[0].to.id` is the deal's id; `associationTypeId: 214`
+ *   with `associationCategory: "HUBSPOT_DEFINED"` is HubSpot's own
+ *   documented, stable default association type id for "note to deal"
+ *   (developers.hubspot.com/docs/guides/api/crm/associations/
+ *   associations-v4's default-associations reference table, verified this
+ *   session and cross-checked against a second independent source —
+ *   not guessed).
+ */
+export async function createHubSpotDealNote(
+  accessToken: string,
+  dealId: string,
+  body: string,
+): Promise<{ readonly noteId: string }> {
+  const response = await fetchWithRetry(
+    `${API_BASE_URL}/crm/v3/objects/notes`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        properties: {
+          hs_note_body: body,
+          hs_timestamp: String(Date.now()),
+        },
+        associations: [
+          {
+            to: { id: dealId },
+            types: [
+              {
+                associationCategory: "HUBSPOT_DEFINED",
+                associationTypeId: 214,
+              },
+            ],
+          },
+        ],
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    await throwUpstreamError("HubSpot deal note create", response);
+  }
+
+  const payload = (await response.json()) as { readonly id?: string };
+
+  if (!payload.id) {
+    throw new Error(
+      "HubSpot deal note create succeeded but returned no note id",
+    );
+  }
+
+  return { noteId: payload.id };
 }

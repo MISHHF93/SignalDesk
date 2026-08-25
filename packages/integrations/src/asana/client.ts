@@ -39,11 +39,28 @@ const REVOKE_URL = "https://app.asana.com/-/oauth_revoke";
 // (developers.asana.com/reference/gettasks, verified this session), and
 // this app queries by assignee — the connected user, from the OAuth
 // response's own `data.gid` — across every workspace they belong to, which
-// needs GET /workspaces to enumerate.
+// needs GET /workspaces to enumerate. `tasks:write` was added alongside
+// `createAsanaTaskStory` (ADR 0057) — posting a comment ("story") on a task
+// is a task-scoped write, so it rides the same granular scope family as
+// `tasks:read` rather than a broader grant.
+//
+// Reconnect disclosure: unlike Google (see `gmail/client.ts`'s
+// `buildGmailAuthorizationUrl`, which forces `prompt=consent` on every
+// authorization request so a silent-skip re-grant is never possible),
+// Asana's OAuth 2.0 `/-/oauth_authorize` endpoint has no documented
+// forced-reconsent parameter (verified against developers.asana.com/docs/oauth
+// this session — no `prompt`-equivalent query parameter exists there). This
+// is not a gap to work around: Asana's authorize screen already re-prompts
+// the user on every fresh authorization request by default, so a tenant
+// that connected before `tasks:write` existed simply needs to disconnect
+// and reconnect Asana once — the resulting authorize request will show the
+// updated scope list and re-prompt for consent with no special parameter
+// needed. Nothing silently upgrades an existing grant in place.
 export const ASANA_SCOPES = [
   "projects:read",
   "tasks:read",
   "workspaces:read",
+  "tasks:write",
 ] as const;
 
 export interface AsanaOAuthConfig {
@@ -277,6 +294,53 @@ export async function fetchAsanaTasks(
     results: payload.data,
     nextOffset: payload.next_page?.offset ?? null,
   };
+}
+
+/**
+ * The first real Asana write (ADR 0057) — posts a comment ("story", in
+ * Asana's own terminology) on a task via `POST /tasks/{task_gid}/stories`
+ * (developers.asana.com/reference/createstoryfortask, verified this
+ * session). Requires the `tasks:write` scope added to `ASANA_SCOPES` above;
+ * an already-connected tenant must disconnect and reconnect Asana once to
+ * be re-prompted for it (see the disclosure comment on `ASANA_SCOPES`).
+ *
+ * Mirrors `sendGmailMessage`'s write-call shape in this codebase (same
+ * `fetchWithRetry` + `throwUpstreamError` pattern) even though it's a
+ * different provider. Asana's response wraps the created story in a
+ * `{"data": {...}}` envelope like every other Asana response in this file;
+ * this throws a clear `Error` if that shape isn't present rather than
+ * returning something malformed.
+ */
+export async function createAsanaTaskStory(
+  accessToken: string,
+  taskGid: string,
+  text: string,
+): Promise<{ readonly storyGid: string }> {
+  const response = await fetchWithRetry(
+    `${API_BASE_URL}/tasks/${encodeURIComponent(taskGid)}/stories`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ data: { text } }),
+    },
+  );
+
+  if (!response.ok) {
+    await throwUpstreamError("Asana task comment", response);
+  }
+
+  const payload = (await response.json()) as {
+    readonly data?: { readonly gid?: string };
+  };
+
+  if (!payload.data?.gid) {
+    throw new Error("Asana task comment succeeded but returned no story gid");
+  }
+
+  return { storyGid: payload.data.gid };
 }
 
 /**

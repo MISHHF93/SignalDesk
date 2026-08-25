@@ -91,6 +91,51 @@ export async function seedSourceRecord(
   return { id, idempotencyKey };
 }
 
+export async function seedMessage(
+  pool: DatabasePool,
+  organizationId: string,
+  sourceRecordId: string,
+  overrides: {
+    externalThreadId?: string;
+    direction?: "inbound" | "outbound";
+    counterpartyEmail?: string;
+    counterpartyName?: string | null;
+    subject?: string;
+    snippet?: string | null;
+    bodyPreview?: string | null;
+    bodyTruncated?: boolean;
+  } = {},
+): Promise<{ id: string }> {
+  const id = randomUUID();
+
+  await withTenantContext(pool, organizationId, async (client) => {
+    await client.query(
+      `insert into messages (
+         id, organization_id, source_record_id, external_thread_id, direction,
+         counterparty_email, counterparty_name, subject, snippet, body_preview,
+         body_truncated, occurred_at, canonical_schema_version, normalization_version
+       ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now(), 1, 'v1')`,
+      [
+        id,
+        organizationId,
+        sourceRecordId,
+        overrides.externalThreadId ?? `thread-${randomUUID()}`,
+        overrides.direction ?? "inbound",
+        overrides.counterpartyEmail ?? "customer@example.test",
+        overrides.counterpartyName ?? "Jane Client",
+        overrides.subject ?? "Question about my order",
+        "snippet" in overrides ? overrides.snippet : "When will my order ship?",
+        "bodyPreview" in overrides
+          ? overrides.bodyPreview
+          : "When will my order ship?",
+        overrides.bodyTruncated ?? false,
+      ],
+    );
+  });
+
+  return { id };
+}
+
 /**
  * Starts a real `sync_jobs` row for tests that need a real `syncJobId` to
  * pass to an ingest function (`ingestQuickBooksInvoice`/`ingestHubSpotDeal`/

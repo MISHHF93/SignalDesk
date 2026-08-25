@@ -9,7 +9,13 @@ import {
   resetAgentCollaborationOutcome,
   startAgentCollaboration,
 } from "../src/agent-collaborations";
-import { getTestPool, seedMembership } from "./support";
+import {
+  getTestPool,
+  seedIntegration,
+  seedMembership,
+  seedMessage,
+  seedSourceRecord,
+} from "./support";
 
 describe.skipIf(!process.env.DATABASE_URL)(
   "agent collaborations (live database)",
@@ -354,6 +360,137 @@ describe.skipIf(!process.env.DATABASE_URL)(
         "dismissed",
       );
       expect(reclaimed?.outcome).toBe("dismissed");
+    });
+
+    describe("single_specialist pattern (ADR 0056 — message reply drafting)", () => {
+      it("starts a single_specialist collaboration carrying a real messageId", async () => {
+        const { organizationId, userId } = await seedMembership(pool);
+        const integration = await seedIntegration(pool, organizationId);
+        const sourceRecord = await seedSourceRecord(
+          pool,
+          organizationId,
+          integration.id,
+          integration.sourceSystem,
+        );
+        const message = await seedMessage(
+          pool,
+          organizationId,
+          sourceRecord.id,
+        );
+
+        const collaboration = await startAgentCollaboration(
+          pool,
+          organizationId,
+          {
+            userId,
+            pattern: "single_specialist",
+            objective: "Draft a reply to this message.",
+            correlationId: "correlation-single-1",
+            idempotencyKey: "message-reply-draft:org-single-1:1",
+            messageId: message.id,
+          },
+        );
+
+        expect(collaboration.pattern).toBe("single_specialist");
+        expect(collaboration.messageId).toBe(message.id);
+        expect(collaboration.draftedContent).toBeNull();
+      });
+
+      it("rejects a single_specialist collaboration with no messageId", async () => {
+        const { organizationId, userId } = await seedMembership(pool);
+
+        await expect(
+          startAgentCollaboration(pool, organizationId, {
+            userId,
+            pattern: "single_specialist",
+            objective: "Draft a reply.",
+            correlationId: "correlation-single-2",
+            idempotencyKey: "message-reply-draft:org-single-2:1",
+          }),
+        ).rejects.toThrow();
+      });
+
+      it("rejects a parallel_specialists collaboration that carries a messageId", async () => {
+        const { organizationId, userId } = await seedMembership(pool);
+        const integration = await seedIntegration(pool, organizationId);
+        const sourceRecord = await seedSourceRecord(
+          pool,
+          organizationId,
+          integration.id,
+          integration.sourceSystem,
+        );
+        const message = await seedMessage(
+          pool,
+          organizationId,
+          sourceRecord.id,
+        );
+
+        await expect(
+          startAgentCollaboration(pool, organizationId, {
+            userId,
+            pattern: "parallel_specialists",
+            objective: "Investigate current risk.",
+            correlationId: "correlation-single-3",
+            idempotencyKey: "agent-investigate:org-single-3:1",
+            messageId: message.id,
+          }),
+        ).rejects.toThrow();
+      });
+
+      it("completes a single_specialist collaboration with a real drafted reply, queryable back", async () => {
+        const { organizationId, userId } = await seedMembership(pool);
+        const integration = await seedIntegration(pool, organizationId);
+        const sourceRecord = await seedSourceRecord(
+          pool,
+          organizationId,
+          integration.id,
+          integration.sourceSystem,
+        );
+        const message = await seedMessage(
+          pool,
+          organizationId,
+          sourceRecord.id,
+        );
+        const started = await startAgentCollaboration(pool, organizationId, {
+          userId,
+          pattern: "single_specialist",
+          objective: "Draft a reply to this message.",
+          correlationId: "correlation-single-4",
+          idempotencyKey: "message-reply-draft:org-single-4:1",
+          messageId: message.id,
+        });
+
+        const completed = await completeAgentCollaboration(
+          pool,
+          organizationId,
+          started.id,
+          {
+            status: "completed",
+            reconciledSummary: null,
+            reconciledConfidenceBasisPoints: null,
+            contradictionsDetected: false,
+            draftedContent: {
+              subject: "Re: Question about my order",
+              body: "Thanks for reaching out — your order ships tomorrow.",
+            },
+          },
+        );
+
+        expect(completed.draftedContent).toEqual({
+          subject: "Re: Question about my order",
+          body: "Thanks for reaching out — your order ships tomorrow.",
+        });
+
+        const fetched = await getAgentCollaboration(
+          pool,
+          organizationId,
+          started.id,
+        );
+        expect(fetched?.draftedContent).toEqual({
+          subject: "Re: Question about my order",
+          body: "Thanks for reaching out — your order ships tomorrow.",
+        });
+      });
     });
   },
 );

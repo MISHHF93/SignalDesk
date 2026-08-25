@@ -388,24 +388,34 @@ workflow beyond the single Safe Action (`create_internal_task`).
 ## 26. Safe Action Gateway — **PARTIAL**
 
 Real precedent, not the full state machine: `create_internal_task` and
-`complete_internal_task` (2026-08-24) are two real, audited,
-tenant-scoped write paths on the same table — every mutating action in
-the app extends this same pattern rather than a second one.
-`complete_internal_task` is naturally idempotent by construction (its
-`UPDATE` only ever matches a currently-`open` row) rather than needing
-a caller-supplied idempotency key the way the create path does. Real
-"done means verified" precedent exists at the highest-stakes call site
-(`billing/checkout/return` refuses the client-side Stripe redirect and
-reads the webhook-synced row as truth) and now also at the ordinary
-one: `TasksPanel` never removes a task from view until the server
-actually confirms completion. This session closed the one real
-idempotency gap found (`start-checkout.ts`'s double-submit race,
-`docs/25-issue-audit.md` issue 19). **Not built**: the formal `PROPOSED→
-POLICY_CHECK→APPROVAL→EXECUTING→VERIFYING→VERIFIED/FAILED` state machine
-as named types — today's real writes are direct audited inserts/updates,
-not a staged pipeline; execution locks/compensation exist only at the one
+`complete_internal_task` are two real, audited, tenant-scoped write paths
+on the same table — every mutating action in the app extends this same
+pattern rather than a second one. `complete_internal_task` is naturally
+idempotent by construction (its `UPDATE` only ever matches a currently-
+`open` row) rather than needing a caller-supplied idempotency key the way
+the create path does. Real "done means verified" precedent exists at the
+highest-stakes call site (`billing/checkout/return` refuses the
+client-side Stripe redirect and reads the webhook-synced row as truth) and
+now also at the ordinary one: `TasksPanel` never removes a task from view
+until the server actually confirms completion. **`send_customer_email_reply` (ADR 0056, 2026-08-24) was the third real
+write path, and the first that executes against a real external system
+(Gmail) instead of only this database; ADR 0057 (same day) extended this to
+four more — `send_invoice_reminder`/`post_task_nudge`/`post_deal_note`/
+`post_ticket_reply` (QuickBooks/Asana/HubSpot/Zendesk) — so five real write
+paths execute against a real external system today, not one.** Each of the
+four new ones extends the same tenant-scoped/idempotent/audited pattern in
+its own table (`quickbooks_invoice_reminders`/`asana_task_nudges`/
+`hubspot_deal_notes`/`zendesk_ticket_replies`), the same real
+`pending`→`sent`/`failed` status lifecycle `customer_email_replies` first
+established, kept as four separate tables rather than one polymorphic table
+so each keeps a real foreign key to its own parent entity.
+**Not built**: the formal `PROPOSED→POLICY_CHECK→APPROVAL→EXECUTING→
+VERIFYING→VERIFIED/FAILED` state machine as named types — today's real
+writes are direct audited inserts/updates (or, for the five external-write
+actions, two tracked states either side of one real external call), not a
+staged pipeline; execution locks/compensation exist only at the one
 in-memory checkout guard, not generalized; no quick action exists yet for
-reassigning an owner or replying inline.
+reassigning an owner.
 
 ## 27. Ownership Engine — **PARTIAL**
 
@@ -445,34 +455,39 @@ metrics/Signals/artifacts/playbooks, any `SignalDeskPack` interface.
 
 ## 31–35. Agent Fabric, Multi-Agent Patterns, A2A, MCP, AI Provider Layer — **PARTIAL**
 
-Real (ADR 0020, extended this session — now 3 real capabilities, not 2):
-`AgentGatewayService` as a real trust boundary minting time-bounded
-capability grants and writing agent-attributed audit events; exactly one
-collaboration pattern, `PARALLEL_SPECIALISTS`; 2 real agents (a
-Claude-backed specialist and a free deterministic one), each now
-declaring `interpret_financial_risk`/`interpret_delivery_risk`/
-`interpret_ticket_risk` — the third, `interpret_ticket_risk` (added
-2026-08-24), covers real stuck-support-ticket findings via the exact
-same dispatch/reconcile/approve pipeline, zero new abstractions, per
-ADR 0020's own named next step ("a second real specialist capability...
-not a bigger type system"); `canExecute: false` hard-enforced
-(schema-level, not just convention); real result reconciliation
-(`reconcileSpecialistResults`, this session fixed a real freshness bug in
-it, and now titles all seven finance/delivery/ticket combinations); real
-containment (kill switch, rate limit, `MAX_FINDINGS_PER_TASK`,
-`MAX_OUTPUT_TOKENS`, 5-minute grant TTL, and — this session — a real
-enforced per-call timeout matching each agent's declared `timeBudgetMs`,
-previously declared but never wired to an actual cutoff). Exactly one
-real AI provider, Claude — no OpenAI/Gemini/internal-model adapters. With
-only 2 real registry entries and 3 capabilities, the third domain in any
-investigation can never get a backend distinct from both others — an
-honest, documented consequence of the existing best-effort exclusion
-doctrine, not a new gap.
+Real (ADR 0020, extended 2026-08-24 three times — now 8 real capabilities,
+not 2): `AgentGatewayService` as a real trust boundary minting time-bounded
+capability grants and writing agent-attributed audit events; two
+collaboration patterns, `PARALLEL_SPECIALISTS` (the business-wide sweep)
+and `single_specialist` (ADR 0056, widened by ADR 0057 — one real entity
+of one of five types — a message, invoice, task, lead, or support ticket —
+one specialist, one drafted result); 2 real agents (a Claude-backed
+specialist and a free deterministic one), each declaring
+`interpret_financial_risk`/`interpret_delivery_risk`/`interpret_ticket_risk`/
+`draft_customer_reply`/`draft_invoice_reminder`/`draft_task_nudge`/
+`draft_deal_note`/`draft_ticket_reply` — the last five each feed a real
+external-system write once a human approves it (Gmail/QuickBooks/Asana/
+HubSpot/Zendesk respectively), not just an internal task proposal;
+`canExecute: false` stays hard-enforced (schema-level) for all eight — the
+agent only ever drafts, a separate human-triggered server action does the
+actual send/post. Real result reconciliation (`reconcileSpecialistResults`)
+for the parallel pattern; real containment (kill switch, rate limit,
+`MAX_FINDINGS_PER_TASK`, `MAX_OUTPUT_TOKENS`, 5-minute grant TTL, per-call
+timeout matching each agent's declared `timeBudgetMs`) plus, for each of
+the five send/post actions, its own per-tenant daily volume cap independent
+of the capability-grant layer. Exactly one real AI provider, Claude — no
+OpenAI/Gemini/internal-model adapters. With only 2 real registry entries
+and 3 parallel-pattern capabilities, the third domain in any investigation
+can never get a backend distinct from both others — an honest, documented
+consequence of the existing best-effort exclusion doctrine, not a new gap.
 **Not built**: `SEQUENTIAL_HANDOFF`/`PRIMARY_PLUS_CRITIC`/
 `COORDINATOR_SPECIALISTS` patterns, an Agent Directory/Router beyond
 static capability matching, literal A2A or MCP wire-protocol compliance
 (explicitly named as out of scope in ADR 0020 itself), a second real
-model vendor.
+model vendor, a sixth connector with a real write action (Gmail, Asana,
+Zendesk, HubSpot, and QuickBooks are the five that exist; Outlook, Slack,
+and every other connector's declared write capability remain catalog
+metadata only).
 
 ## 36. Control Plane — **PARTIAL**
 

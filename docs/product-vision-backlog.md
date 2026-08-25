@@ -39,6 +39,8 @@ A governed multi-agent architecture: a `SignalDeskAgentGateway` as the mandatory
 
 **Built anyway, for real, same day (2026-08-19, ADR 0020)**: the user was shown this reality check directly and chose to build the full fabric now rather than wait. The scoped-down real slice: a real Claude-backed `AIProvider` (`claude-provider.ts`) alongside the existing deterministic one as a second, always-available specialist (`AGENT_REGISTRY`); a capability router, a `PARALLEL_SPECIALISTS` coordinator, and a result reconciler (`packages/application/src/agents/`); a real trust boundary (`AgentGatewayService`) minting time-bounded capability grants and writing agent-attributed audit events; three new tenant tables plus a widened `audit_events.actor_kind`; one real end-to-end trigger ("investigate risk" in the command bar) reconciling real overdue-invoice and overdue-task findings into one approval-gated card; two kill switches. Explicitly not built: literal A2A/MCP wire-protocol compliance, a marketplace, A2UI, OpenTelemetry, or a second real model vendor. See ADR 0020 for the full decision record.
 
+**Update (2026-08-24, ADR 0056)**: the fabric's first real external-system write. A fourth capability (`draft_customer_reply`) and a second collaboration pattern (`single_specialist`, one message/one specialist, distinct from the business-wide `PARALLEL_SPECIALISTS` sweep) let a human approve an AI-drafted reply to one unanswered Gmail message, which SignalDesk then actually sends through the tenant's own Gmail connection — the first time an agent-proposed action executes against a system outside this database. `canExecute` stays hard-`false` throughout: the agent only drafts, a separate human-triggered server action (`approveMessageReplyProposalAction`) does the send, reusing the same capability-grant/audit trust boundary (`AgentGatewayService.dispatchMessageDraft`, sharing an extracted `authorizeDispatch` with the original `dispatch`). Still not built: a second connector with a real write action (Outlook has no API client yet), delivery/bounce tracking beyond "Gmail accepted the send," and everything else this entry's "Explicitly not built" list already named. This is the same real, narrow next step the "AI-executed connector actions" reality check below had already flagged as the one concretely scoped gap — now closed for Gmail specifically.
+
 ## Zero-Prompt AI / continuous investigation architecture (captured 2026-08-20, unscoped)
 
 A much more detailed version of the RAG/proactive-AI direction (`docs/proactive-ai-direction.md`): "zero prompt" means the customer never types, not that the model gets no instructions — SignalDesk's backend watches business events, decides when investigation is warranted, retrieves bounded context, calls OpenAI (Responses/structured outputs), validates a `SignalInvestigation` schema (signalType, severity, headline, facts/observations/inferences, epistemic labels, owner, financial exposure, recommended actions), and updates the UI — the model is "the reasoner, not the database." Proposes a full pipeline (`CONNECTOR EVENT → BUSINESS EVENT → CANONICAL STATE CHANGE → DETERMINISTIC DETECTION → SIGNAL CANDIDATE → MATERIALITY GATE → RETRIEVAL PLAN → AI INVESTIGATION → QUALITY GATE → ATTENTION → ONE-PAGE UI`), an `InvestigationTriggerPolicy` classifying work into COMPUTE_ONLY/LIGHT_INTERPRETATION/DEEP_INVESTIGATION/HIGH_IMPACT_REVIEW so trivial events never reach a model, a `ModelRouterService`, per-tenant cost budgets, and eval/fine-tuning-later discipline.
@@ -1418,6 +1420,11 @@ to already-captured territory, not a new category:
   by design (ADR 0020) — an agent proposes, a human approves, nothing
   in this codebase auto-sends anything today, and loosening that is a
   real, deliberate trust-boundary decision this entry doesn't make.
+  **Update (2026-08-24, ADR 0056)**: this specific gap is now closed
+  for Gmail — `actionsImplemented: true`, a real `gmail.send`-scoped
+  write, still fully gated behind human approval, `canExecute` still
+  hard-`false`. Slack is unaffected; still `actionsImplemented: false`
+  there, and nowhere else.
 - **"Desktop or virtual disk, work from anywhere"** is too undefined to
   scope from this message alone — unclear whether it means a
   browser-based workspace (this app already is one), a literal remote
@@ -1580,6 +1587,106 @@ proposal's own stated order, if this direction is prioritized again — not
 a third hand-written entity-specific drawer, which would just delay facing
 whatever the first two examples reveal about what a real `OverlayRouter`
 interface needs to cover.
+
+## AI Business Operator / "Devin of business" (captured 2026-08-24, unscoped)
+
+A category-level reframe, explicitly modeled on Devin's product paradigm
+(delegate an outcome, not a sequence of instructions; the agent
+understands an environment, plans, uses tools, executes over a long
+horizon, verifies its own work, and reports back) mapped onto business
+operations rather than software engineering. Core new vocabulary this
+proposal introduces: a **Business Mission** (a durable, delegated business
+outcome — "recover the overdue Acme invoice," not a chat message — with
+objective/scope/authority/policy/plan/evidence/approvals/outcome as real
+fields); a **Business Agent** as a first-class entity with identity, role,
+permissions, budget, and a job description ("Revenue Agent: protect and
+grow revenue, authorized to inspect CRM/billing/communication and prepare
+follow-ups, not authorized to issue refunds or change pricing") rather
+than a capability string; a **Business Workspace** (the agent's bounded,
+authorized operating context — Business Graph + evidence + policies +
+active Mission, never the whole tenant blindly); **Playbooks** (reusable
+operational procedures an agent executes intelligently, adapting and
+explaining deviation rather than following a brittle script); **Autopilot**
+(a human sets objective/scope/authority/budget/escalation rules once, the
+agent handles recurring work within it, continuously monitoring rather
+than continuously thinking); and **outcome-based agent evals** (Mission
+completion rate, verified action success, human intervention rate, false-
+action rate — scored against whether the real business outcome happened,
+not whether the model's answer was well-formed). The proposal's own
+research grounding matches what ADR 0020/0056 already independently
+concluded: MCP as a possible external tool/context boundary (not a
+replacement for native services), A2A only if real third-party agent
+interop becomes a requirement (not adopted speculatively), human approval
+as a real control-plane decision outside the model rather than a
+in-conversation pause, and a maturity ladder from OBSERVE through BOUNDED
+AUTONOMY that the proposal itself says must be earned level by level, never
+jumped.
+
+**Reality check.** A large share of this proposal's individual mechanisms
+already exist, independently arrived at, under different names — this is
+mostly a renaming/reframing exercise for those pieces, not new territory:
+`AgentGatewayService` (ADR 0020) already is the "the system decides, not
+the model" authorization boundary the proposal calls for; `AgentCard`
+(`packages/schemas`) already carries capability/risk/budget fields close
+to a "Business Agent" identity, just keyed to a platform-defined specialist
+roster, not an org-configurable one; `ConnectorCapabilityClass` (ADR 0021)
+is already the capability-not-vendor abstraction the proposal's "business
+capabilities, not infrastructure" section asks for; `agent_collaborations`
+and `customer_email_replies` (ADR 0056) together are already a real, if narrow,
+propose→authorize→execute→verify→audit loop with a durable row, audit
+trail, and idempotency — the mechanics of one real "Mission," without the
+name or the multi-step planner. What genuinely does not exist: a Mission
+object as a durable, inspectable, resumable multi-step plan (today's two
+real collaboration patterns are each a single bounded call-or-fan-out, not
+a plan with steps a human can see progress through); any named Business
+Agent role beyond the two platform specialists (`claude-specialist`,
+`deterministic-specialist` — neither has a "job description" distinct from
+its declared capabilities, and there is no org-configurable agent roster);
+a Business Workspace as a real, separately-constructed bounded-context
+object (today each server action hand-assembles exactly what it needs
+inline — `getTodaysAttention`, `getMessageDraftContext` — which is
+arguably _already_ the discipline this concept asks for, just not reified
+as its own named abstraction); Playbooks (nothing reusable/parameterized
+exists — every real flow, including the new message-reply-send one, is a
+hand-written server action, not an instance of a playbook template);
+Autopilot (zero scheduled/continuous agent work exists at all — see the
+Zero-Prompt AI entry above, still blocked on the same missing background-
+job-runner); and outcome-based agent evals (see the Evaluation Laboratory
+section of `docs/feature-dictionary-coverage.md` — `card_feedback` is the
+only real evaluation signal in this codebase, and it measures a
+deterministic card's usefulness, not a Mission's completion).
+
+**What this session actually did, for grounding.** Immediately before this
+entry was captured, the Agent Fabric was extended with its first real
+external-system write (ADR 0056 — a fourth capability, a second
+collaboration pattern, and a real Gmail send behind human approval,
+verified live against the real dev database and a running instance of the
+app). That is the smallest real instance of this proposal's own "first
+real Mission" test (Section 42 of the source proposal: "find the strongest
+existing workflow that can become a true end-to-end Mission... implement
+that completely, then generalize") — it is not itself a Mission object,
+but it is exactly the kind of real, narrow, fully-verified slice this
+proposal's own discipline (Section 41: repository-first, extend don't
+duplicate) and this repo's `CLAUDE.md` both call for before any
+generalization. The honest next step, if this direction is prioritized, is
+naming and building the Mission abstraction _from_ this real case (and the
+existing `PARALLEL_SPECIALISTS` investigation) rather than designing it
+speculatively ahead of a second real instance to generalize from — the same
+sequencing discipline the Agent Fabric entry above already followed once.
+
+**Update (2026-08-24, this session): the same proposal returned, now with a full agent-persona spec.** A much more concrete version of this exact entry arrived: a Devin-vs-SignalDesk comparison table, four architectural pillars (goal-oriented planning loop, sandboxed dry-run simulation, a sub-specialist swarm, a self-healing execution gateway), a "Physical Desk" UI metaphor (Matters Tray / Work Mat / Desk Drawers replacing the current One Page), and eight full agent system-prompts with tool contracts and JSON output schemas: **Chief of Staff** (meta-planner, DAG decomposition), **Revenue Recovery Specialist** (QuickBooks/Stripe/Xero/HubSpot exposure analysis), **Delivery & Project Operations Specialist** (Asana/Jira bottleneck diagnosis), **Executive Communication Assistant** (drafting), **Desk Triage Engine** (groups cross-connector signals sharing a customer into one "Matter," classifies urgency and execution mode), **Active Execution Engine** (runs one DAG step at a time against a persisted plan/step-memory state), **Pre-Flight Compliance & Policy Auditor** (validates an `ActionProposal` before it reaches the human), and a **Resilience & Self-Healing Agent** (deterministic recovery matrix per HTTP error class — reauth/backoff/refetch/escalate). A pipeline diagram chains all eight: Triage → Chief of Staff plan → Work Mat execution loop → Pre-Flight Auditor → (on failure) Self-Healing → render one approval card.
+
+This version is real design work, not hand-waving — it's worth being specific about what it gets right and the one place it still needs to bend to this repo's own settled principles before any of it gets built:
+
+- **It correctly preserves the non-negotiable invariant.** Every step spec keeps `requires_approval: true` on every external mutation and explicitly forbids marking a step complete before human confirmation — including the self-healing agent, which only ever retries an _already-approved_ payload after a transient failure (401/429/409/404), never proposes a new one. This is compatible with `canExecute` staying hard-`false` and does not need to be relitigated.
+- **The one real conflict worth stopping on:** the "Work Mat"'s live tool feed (`Querying Xero...`, `Checking Asana dependency tree...`) and each step's `thought_trace` field expose named, distinct specialist identities directly to the operator, mid-work. ADR 0020 settled this the other way: "customer-facing UX stays one AI, not a visible swarm" — SignalDesk may be complicated underneath, but the surface shows one coherent narrative, never multiple AI personalities transacting in view (this is restated as a hard rule in this repo's root `CLAUDE.md`, not just this backlog). Before any of the Work Mat ships, that transparency goal needs to be re-expressed as one Chief-of-Staff-voiced narration ("Checking Acme's account across billing and delivery…") that happens to be _produced_ by specialist calls underneath, rather than a literal per-agent console log. The investigative value (operator sees real progress, not a spinner) survives that translation; the swarm-visibility does not need to.
+- **What's newly true since this entry was first written**, changing its own "honest next step": at capture time, exactly one real single-specialist propose→approve→execute loop existed (Gmail, ADR 0056). As of this same session (ADR 0057), there are now _five_ — Gmail, Asana, Zendesk, HubSpot, QuickBooks, each its own `single_specialist` collaboration, its own send-tracking table, its own approve action. The "second real instance to generalize a Mission abstraction from" this entry said didn't exist yet, now does, four times over. That materially changes the risk of generalizing now: a `Mission`/`agent_plan` abstraction built today would be induced from five real, live-verified cases instead of designed speculatively ahead of a second one.
+- **Correction, found while writing this update:** the customer/entity correlation layer this paragraph was about to call missing already exists and already ships. `correlateFindingsByName` (`packages/intelligence/src/finding-correlation.ts`) groups findings sharing the same real, normalized `correlationName` — populated today by `overdue-invoice.ts` (customer name), `lead-risk.ts`/`ownership.ts` (company name), `ticket-risk.ts` (requester name), and `message-follow-up.ts` (counterparty name) — and `dashboard-composition.ts` already threads the result into each `IntelligenceCard.relatedFindingIds`, rendered today as a small "+N related" badge (`card-shell.tsx`). Its own doc comment is explicit that this is deliberately "a hint, never a merge" — correlated findings stay fully separate, independently evidenced records, the same anti-auto-merge discipline this repo applies to entity data generally. So the Desk Triage Engine's core grouping rule ("if an overdue invoice, a stalled task, and an unread email share the same customer... group them into ONE Matter") is not a research question — the matching primitive is real, tested, and already live; only `overdue-task.ts` doesn't populate it (Asana tasks carry no customer/company name field to correlate on, which is an honest data gap, not a missed wiring).
+- **Still genuinely missing, load-bearing for the full pipeline:** any persisted multi-step plan state (`agent_plans`/`agent_plan_steps` do not exist — `agent_collaborations` today is one bounded call, not a resumable DAG); any background/async execution (no job runner — see the Zero-Prompt AI entry above, same gap); any UI that presents a correlated group as one collated Matter rather than N separate cards each carrying a small badge (the presentation this session actually built, immediately below); a dry-run/simulation engine (nothing sandboxes a mutation's effect before proposing it — today "safe" means "never auto-executed," not "simulated first"); and the Pre-Flight Auditor's own invariant checks (refund-approval limits, PII-leak scanning, domain-allowlist verification) — real, worth building, but net-new policy logic, not a wrapper around anything that exists.
+- **Real slice built same day, this session:** since the correlation data was already real, the honest next step was presentation, not new detection logic. `command-center-board.tsx` now groups the existing `relatedFindingIds` into visual clusters (`groupCardsIntoClusters`) rendered together under a "Possibly the same situation" header, in place of the old scattered per-card "+N related" badge alone — still N fully independent cards underneath, no merge, no new schema.
+- **Second real slice built same day, this session (ADR 0058):** the Pre-Flight Compliance & Policy Auditor. Given a choice between the Auditor, a persisted Mission/plan schema, and the Work Mat UI, the user picked the Auditor as the smallest, safest real slice — and it turned out to need zero new schema at all. `runPreFlightPolicyAudit` (`apps/web/app/_lib/pre-flight-policy-audit.ts`) now runs inside all five existing draft-then-approve write actions, checking three real things: an injection-boundary delimiter leaking into drafted content, a drafted dollar figure that doesn't match the real amount on record (QuickBooks invoice reminders, HubSpot deal notes with a real deal value), and a duplicate send to the same entity within 24 hours (a new read-only query against each connector's own existing send-tracking table). Refund ceilings and a recipient-domain allowlist stay out of scope — see ADR 0058's own "explicitly out of scope" section for why neither has anything real to check against yet.
+- **Third real slice built same day, this session (ADR 0059):** the Resilience & Self-Healing Agent — its honest, buildable-now half. `UpstreamProviderError` gained a real `status`/`retryAfterSeconds`, previously discarded entirely (every connector failure carried the same generic message no matter what the provider actually returned). `classifyRecoveryStrategy` (`apps/web/app/_lib/recovery-strategy.ts`) now turns that into one of five specific, honest messages ("reconnect," "rate-limited, try again in ~N minutes," "may have changed, refresh," "could not be found," or the original generic fallback) surfaced by all five approve actions on a real failure. What's explicitly not built, per ADR 0059: any automatic retry at all — this app still has no background job runner, so "self-healing" here means a better message, never an autonomous action.
+- **Fourth real slice built same day, this session (ADR 0060):** "Draft for this Matter" — the smallest real instance of "Chief of Staff coordinates sub-specialists" that didn't need a plan schema or a new agent. A Matter group of 2+ related cards now gets one "Draft for all N" button that calls each card's own existing single-entity draft action in parallel, landing every result as its own independently-approved `agent_recommendation` card — pure client-side batching over five already-real actions, no new write path. The clustering/dispatch logic was also extracted out of `command-center-board.tsx` into a tested module (`apps/web/app/_lib/card-clustering.ts`). A live-verification pass (real browser, real seeded data in the dev database) caught a real duplicate-draft bug the same day — two different findings on one entity (a lead with both `follow_up_risk` and `ownership_gap`) fired the same draft action twice — fixed via `dedupeCardsByEntity`/`getBatchDraftableCards`; see ADR 0060's own update for the full account.
 
 ## How to use this file
 

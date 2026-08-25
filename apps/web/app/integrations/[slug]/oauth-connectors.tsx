@@ -156,17 +156,29 @@ export const oauthConnectorAdapters: Record<string, OAuthConnectorAdapter> = {
     ),
     readyToConnectDescription: () => (
       <>
-        Authorizes read access to Deals and Owners. No writes are made to your
-        HubSpot account.
+        Authorizes HubSpot access for reading Deals and Owners and, once you
+        explicitly approve one specific drafted note, logging it on a stalled
+        deal. Nothing is logged automatically, and no deal field (stage, amount,
+        owner) is ever changed.
       </>
     ),
-    securityNoteHeading: "Real, but scoped and read-only.",
+    securityNoteHeading: "Real, bounded, and approval-gated.",
     securityNoteBody: (
       <>
-        This is a real OAuth flow (ADR 0008). Tokens are encrypted at rest via
-        Supabase Vault, scoped to read-only access to Deals and Owners, and
-        never handed to any code outside the functions that store and retrieve
-        them. No write, webhook, or scheduled sync exists yet.
+        This is a real OAuth flow (ADR 0008), scoped to read-only access to
+        Deals and Owners plus <code>crm.objects.contacts.write</code> for
+        logging a note — verified against HubSpot&rsquo;s own Notes API
+        documentation, not the deal-write scope one might expect (HubSpot
+        requires this scope for the Notes object specifically, regardless of
+        which record type the note is attached to). Tokens are encrypted at rest
+        via Supabase Vault and never handed to any code outside the functions
+        that store and retrieve them. Logging is real but strictly bounded: an
+        agent may only draft a note for one specific stalled deal for your
+        review, and nothing is ever logged until you explicitly approve that
+        exact draft. A workspace connected before this write capability shipped
+        needs to reconnect once to grant the new scope — HubSpot&rsquo;s own
+        reauthorization behavior picks up a newly-selected scope automatically
+        on reconnect, so no extra step beyond that is needed.
       </>
     ),
   },
@@ -386,21 +398,28 @@ export const oauthConnectorAdapters: Record<string, OAuthConnectorAdapter> = {
     ),
     readyToConnectDescription: () => (
       <>
-        QuickBooks&rsquo; own OAuth scope grants full API access — this app only
-        ever makes read requests. No invoices, payments, or company settings can
-        be changed.
+        QuickBooks&rsquo; own OAuth scope grants full API access — this app
+        reads invoices and payments, and, once you explicitly approve one
+        specific drafted reminder, sends a payment-reminder email for one
+        overdue invoice. Nothing is sent automatically, and no other invoice
+        field, payment, or company setting is ever changed.
       </>
     ),
-    securityNoteHeading: "Real, but read-only by choice.",
+    securityNoteHeading: "Real, bounded, and approval-gated.",
     securityNoteBody: (
       <>
         This is a real OAuth 2.0 flow. Tokens are encrypted at rest via Supabase
         Vault and never handed to any code outside the functions that store and
         retrieve them. QuickBooks Online has no read-only OAuth scope to
-        request, so read-only is enforced by which endpoints this app calls, not
-        by what it asked Intuit for. No accounting data, webhook, or scheduled
-        sync exists yet — connecting only proves the authorization mechanism and
-        marks this connector genuinely connected in Business Coverage.
+        request, and the same coarse scope already covers this write — no
+        reconnect is needed to gain it. Overdue invoices sync on connect and you
+        can re-sync any time — no webhook or background-polling sync exists yet.
+        Sending is real but strictly bounded: an agent may only draft a reminder
+        for one specific overdue invoice for your review, and nothing is ever
+        sent until you explicitly approve that exact draft. QuickBooks&rsquo;
+        own send endpoint accepts no custom message text, so approving a draft
+        sets it as the invoice&rsquo;s customer- visible memo immediately before
+        sending — the one invoice field this action ever touches.
       </>
     ),
   },
@@ -516,26 +535,33 @@ export const oauthConnectorAdapters: Record<string, OAuthConnectorAdapter> = {
     ),
     readyToConnectDescription: () => (
       <>
-        Authorizes read-only access to Gmail. No messages are sent, and nothing
-        is deleted or modified.
+        Authorizes Gmail access for reading messages and, once you explicitly
+        approve one specific drafted reply, sending it. Nothing is sent
+        automatically, and nothing is deleted or modified.
       </>
     ),
-    securityNoteHeading: "Real, but bounded and read-only.",
+    securityNoteHeading: "Real, bounded, and approval-gated.",
     securityNoteBody: (
       <>
         This is a real OAuth 2.0 flow, requested at the read-only Gmail scope
-        only (plus the minimal identity scope needed to know which Google
-        account connected). Tokens are encrypted at rest via Supabase Vault and
-        never handed to any code outside the functions that store and retrieve
-        them. Sync is deliberately bounded — only recent (last 30 days),
-        genuinely external messages are ingested, each message body is
-        hard-truncated to 5,000 characters, and only a short preview (never the
-        full body) ever appears on a card or reaches an AI interpretation call.
-        No field-level encryption beyond this workspace&rsquo;s ordinary tenant
-        isolation protects stored message content — see
-        docs/adr/0050-gmail-message-ingestion.md for the full, honest accounting
-        of what is and isn&rsquo;t protected. No message sending or scheduled
-        background sync exists yet.
+        plus a send-only scope (never <code>gmail.modify</code>, which would
+        also grant delete/modify access) and the minimal identity scope needed
+        to know which Google account connected. Tokens are encrypted at rest via
+        Supabase Vault and never handed to any code outside the functions that
+        store and retrieve them. Sync is deliberately bounded — only recent
+        (last 30 days), genuinely external messages are ingested, each message
+        body is hard-truncated to 5,000 characters, and only a short preview
+        (never the full body) ever appears on a card or reaches an AI
+        interpretation call. No field-level encryption beyond this
+        workspace&rsquo;s ordinary tenant isolation protects stored message
+        content — see docs/adr/0050-gmail-message-ingestion.md for the full,
+        honest accounting of what is and isn&rsquo;t protected. Sending is real
+        but strictly bounded: an agent may only draft a reply to one specific
+        unanswered message for your review, and nothing is ever sent until you
+        explicitly approve that exact draft — see
+        docs/adr/0056-message-reply-send.md for what&rsquo;s verified and
+        what&rsquo;s still not built (no scheduled or background sending
+        exists).
       </>
     ),
   },
@@ -782,19 +808,29 @@ export const oauthConnectorAdapters: Record<string, OAuthConnectorAdapter> = {
     ),
     readyToConnectDescription: () => (
       <>
-        Authorizes read-only access to projects and tasks. No task changes are
-        made.
+        Authorizes Asana access for reading tasks and, once you explicitly
+        approve one specific drafted nudge, posting it as a comment. Nothing is
+        posted automatically, and no task field (due date, assignee, completion)
+        is ever changed.
       </>
     ),
-    securityNoteHeading: "Real, but read-only.",
+    securityNoteHeading: "Real, bounded, and approval-gated.",
     securityNoteBody: (
       <>
         This is a real OAuth 2.0 flow, requested at the narrowest read scopes
-        that cover projects and tasks. Tokens are encrypted at rest via Supabase
-        Vault and never handed to any code outside the functions that store and
-        retrieve them. No task reading, writing, or scheduled sync exists yet —
-        connecting only proves the authorization mechanism and marks this
-        connector genuinely connected in Business Coverage.
+        that cover projects and tasks, plus a send-only <code>tasks:write</code>{" "}
+        scope for posting one comment — never a scope that would let this app
+        change a task&rsquo;s due date, assignee, or completion state. Tokens
+        are encrypted at rest via Supabase Vault and never handed to any code
+        outside the functions that store and retrieve them. Overdue tasks sync
+        on connect and you can re-sync any time — no webhook or
+        background-polling sync exists yet. Posting is real but strictly
+        bounded: an agent may only draft a follow-up comment for one specific
+        overdue task for your review, and nothing is ever posted until you
+        explicitly approve that exact draft. A workspace connected before this
+        write capability shipped needs to disconnect and reconnect once to grant
+        the new scope — Asana&rsquo;s own authorize screen re-prompts by default
+        on a fresh connection, so no extra step beyond that is needed.
       </>
     ),
   },
@@ -886,7 +922,7 @@ export const oauthConnectorAdapters: Record<string, OAuthConnectorAdapter> = {
           <code className="setupRedirectUri">{redirectUri}</code>
         </li>
         <li>
-          Selected scope must include <code>read</code>.
+          Selected scopes must include <code>read</code> and <code>write</code>.
         </li>
         <li>
           Copy the client&rsquo;s Unique Identifier and Secret into{" "}
@@ -910,24 +946,38 @@ export const oauthConnectorAdapters: Record<string, OAuthConnectorAdapter> = {
     ),
     readyToConnectDescription: () => (
       <>
-        Authorizes read access to tickets. No writes are made to your Zendesk
-        account. Unlike every other connector here, you&rsquo;ll need to enter
-        your Zendesk subdomain before continuing — every Zendesk account lives
-        at its own <code>{"{subdomain}"}.zendesk.com</code> address, and the
-        authorization flow needs it from the start.
+        Authorizes Zendesk access for reading tickets (including recent
+        comments, read live at draft time, never stored) and, once you
+        explicitly approve one specific drafted reply, posting it as a ticket
+        comment. Nothing is posted automatically, and no ticket field (status,
+        priority, assignee) is ever changed. Unlike every other connector here,
+        you&rsquo;ll need to enter your Zendesk subdomain before continuing —
+        every Zendesk account lives at its own{" "}
+        <code>{"{subdomain}"}.zendesk.com</code> address, and the authorization
+        flow needs it from the start.
       </>
     ),
-    securityNoteHeading: "Real, but scoped and read-only.",
+    securityNoteHeading: "Real, bounded, and approval-gated.",
     securityNoteBody: (
       <>
-        This is a real OAuth 2.0 flow, requested at the <code>read</code> scope.
-        Tokens are encrypted at rest via Supabase Vault and never handed to any
-        code outside the functions that store and retrieve them. Unlike Jira,
-        Zendesk has a genuine, working revoke endpoint — disconnecting here both
-        deletes the stored tokens and revokes the grant on Zendesk&rsquo;s side.
-        No write, webhook, or scheduled sync exists yet — connecting only proves
-        the authorization mechanism and marks this connector genuinely connected
-        in Business Coverage.
+        This is a real OAuth 2.0 flow, requested at the <code>read</code> and{" "}
+        <code>write</code> scopes (Zendesk&rsquo;s OAuth model is account-wide,
+        not per-resource — there is no narrower scope that covers only replying
+        to tickets). Tokens are encrypted at rest via Supabase Vault and never
+        handed to any code outside the functions that store and retrieve them.
+        Unlike Jira, Zendesk has a genuine, working revoke endpoint —
+        disconnecting here both deletes the stored tokens and revokes the grant
+        on Zendesk&rsquo;s side. Posting is real but strictly bounded: an agent
+        may only draft a reply to one specific stuck ticket for your review,
+        grounded in a live read of that ticket&rsquo;s own recent comments
+        (never stored, never reaching any other part of this app), and nothing
+        is ever posted until you explicitly approve that exact draft. A
+        workspace connected before this write capability shipped needs to
+        reconnect once to grant the new scope — Zendesk&rsquo;s own OAuth
+        behavior re-prompts automatically whenever a reconnect requests a scope
+        the existing grant doesn&rsquo;t already have, confirmed against
+        Zendesk&rsquo;s current OAuth documentation, so no extra step beyond a
+        plain reconnect is needed.
       </>
     ),
   },

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { DatabasePool } from "./client";
+import type { DraftedContent } from "./agent-collaborations";
 import { withTenantContext } from "./tenant-context";
 
 export type AgentTaskResultStatus = "completed" | "abstained" | "failed";
@@ -15,6 +16,8 @@ export interface InsertAgentTaskResultInput {
   readonly confidenceBasisPoints: number | null;
   readonly startedAt: Date;
   readonly completedAt: Date;
+  /** Set only for a "draft_*" capability's result (ADR 0056, ADR 0057). */
+  readonly draftedContent?: DraftedContent | null;
 }
 
 export interface AgentTaskResultRecord {
@@ -28,6 +31,7 @@ export interface AgentTaskResultRecord {
   readonly confidenceBasisPoints: number | null;
   readonly startedAt: Date;
   readonly completedAt: Date;
+  readonly draftedContent: DraftedContent | null;
 }
 
 interface AgentTaskResultRow {
@@ -41,10 +45,11 @@ interface AgentTaskResultRow {
   readonly confidence_basis_points: number | null;
   readonly started_at: Date;
   readonly completed_at: Date;
+  readonly drafted_content: unknown;
 }
 
 const TASK_RESULT_COLUMNS =
-  "id, collaboration_id, agent_id, capability, status, claims, evidence_ids, confidence_basis_points, started_at, completed_at";
+  "id, collaboration_id, agent_id, capability, status, claims, evidence_ids, confidence_basis_points, started_at, completed_at, drafted_content";
 
 /**
  * `claims`/`evidence_ids` are real jsonb columns — genuinely `unknown` at
@@ -68,6 +73,31 @@ function toStringArray(value: unknown, fieldName: string): readonly string[] {
   return value;
 }
 
+function toDraftedContent(value: unknown): DraftedContent | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  // Only `body` is required now — a body-only comment/note draft (Asana,
+  // HubSpot, Zendesk) has no subject at all, so `subject` is validated only
+  // when present rather than required alongside `body` the way a
+  // Gmail-only "reply" concept did.
+  if (
+    typeof value !== "object" ||
+    typeof (value as { body?: unknown }).body !== "string" ||
+    ((value as { subject?: unknown }).subject !== undefined &&
+      typeof (value as { subject?: unknown }).subject !== "string")
+  ) {
+    throw new Error(
+      `agent_task_results.drafted_content is not a {subject?, body} object: ${JSON.stringify(value)}`,
+    );
+  }
+
+  const { subject, body } = value as { subject?: string; body: string };
+
+  return subject !== undefined ? { subject, body } : { body };
+}
+
 function toRecord(row: AgentTaskResultRow): AgentTaskResultRecord {
   return {
     id: row.id,
@@ -80,6 +110,7 @@ function toRecord(row: AgentTaskResultRow): AgentTaskResultRecord {
     confidenceBasisPoints: row.confidence_basis_points,
     startedAt: row.started_at,
     completedAt: row.completed_at,
+    draftedContent: toDraftedContent(row.drafted_content),
   };
 }
 
@@ -100,8 +131,9 @@ export async function insertAgentTaskResult(
     const result = await client.query<AgentTaskResultRow>(
       `insert into agent_task_results (
          id, organization_id, collaboration_id, agent_id, capability, status,
-         claims, evidence_ids, confidence_basis_points, started_at, completed_at
-       ) values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11)
+         claims, evidence_ids, confidence_basis_points, started_at, completed_at,
+         drafted_content
+       ) values ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12::jsonb)
        returning ${TASK_RESULT_COLUMNS}`,
       [
         randomUUID(),
@@ -115,6 +147,7 @@ export async function insertAgentTaskResult(
         input.confidenceBasisPoints,
         input.startedAt,
         input.completedAt,
+        input.draftedContent ? JSON.stringify(input.draftedContent) : null,
       ],
     );
 

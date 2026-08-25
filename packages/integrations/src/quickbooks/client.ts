@@ -47,6 +47,19 @@ const REVOKE_URL = "https://developer.api.intuit.com/v2/oauth2/tokens/revoke";
 // per-object scopes or Stripe's read_only/read_write choice, there is a
 // single "accounting" scope covering the whole REST API; read-only access
 // is enforced by which endpoints this app calls, not by what it requests.
+//
+// Re-verified this session for the new invoice-reminder write action
+// (`sendQuickBooksInvoiceReminder` below, the first real write this
+// connector makes): Intuit's own official PHP SDK
+// (github.com/intuit/QuickBooks-V3-PHP-SDK) issues reads (Query/FindById),
+// sparse updates (`Update`), and the `SendEmail`/`send` action all through
+// the exact same single OAuth client/scope configuration — nothing in the
+// SDK or in Intuit's coarse-scope model gates a write call behind a
+// different scope string than a read call. So an already-connected org's
+// existing grant already covers this new write; no scope change, and
+// therefore no forced-reconsent parameter or reconnect flow, is needed
+// here — unlike Asana's `tasks:write`/Zendesk's `write` scope additions,
+// which each genuinely added a new scope string and so did need one.
 export const QUICKBOOKS_SCOPES = ["com.intuit.quickbooks.accounting"] as const;
 
 export interface QuickBooksOAuthConfig {
@@ -420,5 +433,156 @@ export async function revokeQuickBooksToken(
     return response.ok;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Sends a payment-reminder email for an overdue invoice, with a drafted
+ * `body` actually visible in what gets sent — not just a resend of Intuit's
+ * own fixed template to a possibly-different address.
+ *
+ * ## Which of the two possible designs this is, and why
+ *
+ * This session used WebFetch/WebSearch to check Intuit's real, current API
+ * behavior before writing any of this (developer.intuit.com itself is a
+ * JS-rendered SPA and stayed unreachable this session — the same limitation
+ * already documented at the top of this file — so this was cross-verified
+ * against several independent, directly-fetchable sources rather than
+ * assumed or taken from one secondary blog):
+ *   - Intuit's own official PHP SDK
+ *     (github.com/intuit/QuickBooks-V3-PHP-SDK, `DataService::SendEmail`,
+ *     read directly from source this session) has the signature
+ *     `SendEmail($entity, $email = null)` and builds the real
+ *     `POST /v3/company/{realmId}/invoice/{invoiceId}/send` request with an
+ *     explicit `null` HTTP body, appending `$email` only as the `sendTo`
+ *     query-string value when given. No subject/body/message parameter
+ *     exists anywhere in that method's signature or the request it
+ *     constructs — this is the same "read the official SDK source directly"
+ *     method already used elsewhere in this file (see the top-of-file
+ *     comment and the `QuickBooksInvoice`/`QuickBooksPayment` field
+ *     comments) for exactly the same reason.
+ *   - Intuit's own QuickBooks Community help threads (read this session)
+ *     confirm the send email's body/message isn't customizable per-send
+ *     even from the QBO UI itself — only a single default template, edited
+ *     once in company-wide Sales settings. The API is a thin wrapper over
+ *     that same mechanism, so it has no more capability here than the UI it
+ *     wraps.
+ * Conclusion: **no real QuickBooks Online endpoint accepts a custom email
+ * body via `/send`.** This implements the task's second design: a sparse
+ * `POST /v3/company/{realmId}/invoice` update that sets the invoice's
+ * `CustomerMemo` — confirmed this session (QuickBooks Community's "Note to
+ * Customer" documentation, and third-party QBO integration references) to
+ * be the real, customer-visible field that prints on the invoice document
+ * itself, distinct from the internal-only `PrivateNote` field a customer
+ * never sees — followed by the same no-custom-content `/send` call above.
+ * `CustomerMemo`'s `{ value: string }` shape, and the sparse-update
+ * requirement to echo back the entity's current `SyncToken` (QuickBooks
+ * Online's optimistic-concurrency contract — a stale token is rejected),
+ * are QuickBooks Online's well-established, ecosystem-wide sparse-update
+ * convention — the same one `QuickBooksInvoice.SyncToken` above already
+ * exists to support, reused here rather than inventing a second shape.
+ *
+ * `params.subject` is accepted only for interface parity with connectors
+ * whose provider genuinely has a subject field (e.g. Gmail's reply-send
+ * action) — it is never transmitted anywhere. QuickBooks Online has no
+ * per-invoice email subject field at all, only the single company-wide
+ * default template confirmed above, so nothing here could honestly carry
+ * it without fabricating a capability Intuit doesn't offer.
+ *
+ * No OAuth scope change or reconnect/re-consent is needed — see the doc
+ * comment on `QUICKBOOKS_SCOPES` above, re-verified this session
+ * specifically for this new write action.
+ */
+export async function sendQuickBooksInvoiceReminder(
+  accessToken: string,
+  realmId: string,
+  invoiceId: string,
+  params: { readonly subject?: string; readonly body: string },
+): Promise<void> {
+  const authHeaders = {
+    Accept: "application/json",
+    Authorization: `Bearer ${accessToken}`,
+  };
+
+  // Step 1: read the invoice's current SyncToken. Required by QuickBooks
+  // Online's sparse-update optimistic-concurrency contract (step 2 below)
+  // — this is the plain GET-by-id read, whose response shape
+  // (`{ "Invoice": {...} }`) differs from the `query` endpoint
+  // `fetchQuickBooksInvoices` above uses (`{ "QueryResponse": { "Invoice":
+  // [...] } }`), so it's parsed separately rather than reusing that type.
+  const readUrl = new URL(
+    `${API_BASE_URL}/company/${encodeURIComponent(realmId)}/invoice/${encodeURIComponent(invoiceId)}`,
+  );
+  readUrl.searchParams.set("minorversion", "65");
+
+  const readResponse = await fetchWithRetry(readUrl.toString(), {
+    method: "GET",
+    headers: authHeaders,
+  });
+
+  if (!readResponse.ok) {
+    await throwUpstreamError(
+      "QuickBooks invoice reminder lookup",
+      readResponse,
+    );
+  }
+
+  const readPayload = (await readResponse.json()) as {
+    readonly Invoice?: QuickBooksInvoice;
+  };
+  const currentSyncToken = readPayload.Invoice?.SyncToken;
+
+  if (currentSyncToken === undefined) {
+    throw new Error(
+      `QuickBooks invoice reminder failed: invoice ${invoiceId} was not found.`,
+    );
+  }
+
+  // Step 2: sparse-update just CustomerMemo. `sparse: true` plus `Id`/
+  // `SyncToken` is QuickBooks Online's documented "change only the given
+  // fields, leave everything else untouched" update shape — this never
+  // touches TotalAmt/Balance/DueDate/CustomerRef or anything else this app
+  // reads and relies on elsewhere.
+  const updateUrl = new URL(
+    `${API_BASE_URL}/company/${encodeURIComponent(realmId)}/invoice`,
+  );
+  updateUrl.searchParams.set("minorversion", "65");
+
+  const updateResponse = await fetchWithRetry(updateUrl.toString(), {
+    method: "POST",
+    headers: {
+      ...authHeaders,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      Id: invoiceId,
+      SyncToken: currentSyncToken,
+      sparse: true,
+      CustomerMemo: { value: params.body },
+    }),
+  });
+
+  if (!updateResponse.ok) {
+    await throwUpstreamError(
+      "QuickBooks invoice reminder memo update",
+      updateResponse,
+    );
+  }
+
+  // Step 3: trigger the real send. Intuit's own PHP SDK posts this with no
+  // request body at all (see this function's doc comment above), so this
+  // does the same rather than guessing at an unsupported payload shape.
+  const sendUrl = new URL(
+    `${API_BASE_URL}/company/${encodeURIComponent(realmId)}/invoice/${encodeURIComponent(invoiceId)}/send`,
+  );
+  sendUrl.searchParams.set("minorversion", "65");
+
+  const sendResponse = await fetchWithRetry(sendUrl.toString(), {
+    method: "POST",
+    headers: authHeaders,
+  });
+
+  if (!sendResponse.ok) {
+    await throwUpstreamError("QuickBooks invoice reminder send", sendResponse);
   }
 }

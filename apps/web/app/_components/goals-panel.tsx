@@ -86,7 +86,7 @@ export function GoalsPanel({
           target.
         </p>
       )}
-      <CreateGoalForm createGoalAction={createGoalAction} />
+      <CreateGoalForm createGoalAction={createGoalAction} metrics={metrics} />
     </section>
   );
 }

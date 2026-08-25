@@ -203,6 +203,54 @@ describe("goalVarianceIntelligence", () => {
     expect(findings[0]?.financialContext).toBeUndefined();
   });
 
+  it("formats a currency-unit goal's target/actual as real dollars, not raw cents", async () => {
+    const findings = await goalVarianceIntelligence.evaluate(
+      baseContext({
+        goals: [goal({ id: "goal_001", targetValue: 200_000 })],
+        // $4,200.00 vs a $2,000.00 target — the exact real-world figures
+        // this bug was found against (a raw "200000 USD"/"420000 USD" on
+        // screen instead of "$2,000.00"/"$4,200.00").
+        businessMetrics: [metricValue({ value: 420_000 })],
+      }),
+    );
+
+    expect(findings).toHaveLength(1);
+    const finding = findings[0]!;
+    expect(finding.summary).toContain("2000.00 USD");
+    expect(finding.summary).not.toContain("200000 USD");
+    expect(finding.explanation.observedValue).toContain("4200.00 USD");
+    expect(finding.explanation.expectedBaseline).toContain("2000.00 USD");
+  });
+
+  it("formats a count-unit goal's target/actual as a plain number, never divided by 100", async () => {
+    const findings = await goalVarianceIntelligence.evaluate(
+      baseContext({
+        goals: [
+          goal({
+            id: "goal_backlog",
+            metricId: "open_task_backlog",
+            currency: null,
+            targetValue: 5,
+          }),
+        ],
+        businessMetrics: [
+          metricValue({
+            metricId: "open_task_backlog",
+            concept: "Backlog",
+            unit: "count",
+            currency: null,
+            value: 20,
+          }),
+        ],
+      }),
+    );
+
+    expect(findings).toHaveLength(1);
+    const finding = findings[0]!;
+    expect(finding.explanation.observedValue).toContain(": 20");
+    expect(finding.explanation.expectedBaseline).toContain("At most 5");
+  });
+
   it("evaluates every real goal independently", async () => {
     const findings = await goalVarianceIntelligence.evaluate(
       baseContext({

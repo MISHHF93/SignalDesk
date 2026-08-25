@@ -400,6 +400,20 @@
       "when": 1787435591253,
       "tag": "0057_payment_invoice_allocations",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1787598324904,
+      "tag": "0059_message_reply_send",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1787694000000,
+      "tag": "0060_connector_write_actions",
+      "breakpoints": true
     }
   ]
 }

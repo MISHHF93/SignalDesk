@@ -29,11 +29,19 @@ playwright-report/
 blob-report/
 playwright/.cache/
 
+# Visual audit skill output (.claude/skills/visual-audit)
+.visual-audit/
+
 # Editors and operating systems
 .idea/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Personal local Claude Code settings (not shared project tooling —
+# .claude/skills/ itself IS tracked, this is just the per-developer
+# permission overrides file)
+.claude/settings.local.json
 
 
 .vercel

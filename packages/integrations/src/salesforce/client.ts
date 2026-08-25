@@ -112,6 +112,7 @@ async function requestSalesforceToken(
     throw new UpstreamProviderError(
       "Salesforce token request failed. Please try again, or reconnect this integration if the problem continues.",
       `${payload.error ?? response.status} ${payload.error_description ?? ""}`.trim(),
+      response.status,
     );
   }
 

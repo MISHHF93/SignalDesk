@@ -3,8 +3,18 @@ import type { ComponentType } from "react";
 
 import type {
   ApproveAgentActionProposalAction,
+  ApproveDealNoteProposalAction,
+  ApproveInvoiceReminderProposalAction,
+  ApproveMessageReplyProposalAction,
+  ApproveTaskNudgeProposalAction,
+  ApproveTicketReplyProposalAction,
   CreateInternalTaskAction,
   DismissAgentActionProposalAction,
+  DraftDealNoteAction,
+  DraftInvoiceReminderAction,
+  DraftMessageReplyAction,
+  DraftTaskNudgeAction,
+  DraftTicketReplyAction,
   RecordCardFeedbackAction,
   SimulateInvoicePaymentAction,
 } from "../_lib/actions";
@@ -51,6 +61,17 @@ export function renderCard(
   dismissAgentActionProposalAction?: DismissAgentActionProposalAction,
   simulateInvoicePaymentAction?: SimulateInvoicePaymentAction,
   recordCardFeedbackAction?: RecordCardFeedbackAction,
+  approveMessageReplyProposalAction?: ApproveMessageReplyProposalAction,
+  draftMessageReplyAction?: DraftMessageReplyAction,
+  onAgentCardProduced?: (card: IntelligenceCard) => void,
+  draftTaskNudgeAction?: DraftTaskNudgeAction,
+  approveTaskNudgeProposalAction?: ApproveTaskNudgeProposalAction,
+  draftTicketReplyAction?: DraftTicketReplyAction,
+  approveTicketReplyProposalAction?: ApproveTicketReplyProposalAction,
+  draftDealNoteAction?: DraftDealNoteAction,
+  approveDealNoteProposalAction?: ApproveDealNoteProposalAction,
+  draftInvoiceReminderAction?: DraftInvoiceReminderAction,
+  approveInvoiceReminderProposalAction?: ApproveInvoiceReminderProposalAction,
 ) {
   const Component = cardRegistry[card.type] ?? UnknownCard;
 
@@ -68,6 +89,27 @@ export function renderCard(
         ? { simulateInvoicePaymentAction }
         : {})}
       {...(recordCardFeedbackAction ? { recordCardFeedbackAction } : {})}
+      {...(approveMessageReplyProposalAction
+        ? { approveMessageReplyProposalAction }
+        : {})}
+      {...(draftMessageReplyAction ? { draftMessageReplyAction } : {})}
+      {...(onAgentCardProduced ? { onAgentCardProduced } : {})}
+      {...(draftTaskNudgeAction ? { draftTaskNudgeAction } : {})}
+      {...(approveTaskNudgeProposalAction
+        ? { approveTaskNudgeProposalAction }
+        : {})}
+      {...(draftTicketReplyAction ? { draftTicketReplyAction } : {})}
+      {...(approveTicketReplyProposalAction
+        ? { approveTicketReplyProposalAction }
+        : {})}
+      {...(draftDealNoteAction ? { draftDealNoteAction } : {})}
+      {...(approveDealNoteProposalAction
+        ? { approveDealNoteProposalAction }
+        : {})}
+      {...(draftInvoiceReminderAction ? { draftInvoiceReminderAction } : {})}
+      {...(approveInvoiceReminderProposalAction
+        ? { approveInvoiceReminderProposalAction }
+        : {})}
       key={card.id}
     />
   );

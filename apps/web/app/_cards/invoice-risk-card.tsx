@@ -2,6 +2,7 @@ import { CardActions } from "./card-actions";
 import { CardFeedbackButtons } from "./card-feedback-buttons";
 import { CardBadges, WhyDisclosure } from "./card-shell";
 import type { CardComponentProps } from "./card-types";
+import { DraftInvoiceReminderButton } from "./draft-invoice-reminder-button";
 import { formatCardCurrency } from "./format";
 import { InvoicePaymentScenarioButton } from "./invoice-payment-scenario-button";
 
@@ -10,6 +11,8 @@ export function InvoiceRiskCard({
   createTaskAction,
   simulateInvoicePaymentAction,
   recordCardFeedbackAction,
+  draftInvoiceReminderAction,
+  onAgentCardProduced,
 }: CardComponentProps) {
   return (
     <article
@@ -46,6 +49,15 @@ export function InvoiceRiskCard({
         <div className="attentionFooter">
           <WhyDisclosure card={card} />
           <CardActions card={card} createTaskAction={createTaskAction} />
+          {draftInvoiceReminderAction &&
+          card.entity &&
+          card.entity.kind === "invoice" ? (
+            <DraftInvoiceReminderButton
+              invoiceId={card.entity.id}
+              draftInvoiceReminderAction={draftInvoiceReminderAction}
+              {...(onAgentCardProduced ? { onAgentCardProduced } : {})}
+            />
+          ) : null}
         </div>
         {recordCardFeedbackAction ? (
           <CardFeedbackButtons

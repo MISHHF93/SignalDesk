@@ -114,6 +114,7 @@ export async function exchangeStripeAuthorizationCode(
     throw new UpstreamProviderError(
       "Stripe token exchange failed. Please try again, or reconnect this integration if the problem continues.",
       `${payload.error ?? response.status} ${payload.error_description ?? ""}`.trim(),
+      response.status,
     );
   }
 

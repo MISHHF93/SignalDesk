@@ -3,6 +3,7 @@ import type {
   CardExplanation,
   CardSeverity,
   DataFreshness,
+  DraftedContent,
   EntityReference,
   FinancialContext,
   OwnerReference,
@@ -27,7 +28,16 @@ export type IntelligenceType =
   | "ticket.stuck"
   // Produced only by agent-result-reconciler.ts (@signaldesk/application),
   // never by a registered IntelligenceCapability — see generatedBy below.
-  | "agent.investigation";
+  | "agent.investigation"
+  // Produced only by each connector's own draft-*-action.ts (apps/web),
+  // when a human explicitly asks to draft content for one deterministic
+  // finding below — never by a registered IntelligenceCapability. Always
+  // carries generatedBy: "agent" and a draftedContent, honestly.
+  | "message.reply_drafted" // draft-message-reply-action.ts, from message.awaiting_reply
+  | "invoice.reminder_drafted" // draft-invoice-reminder-action.ts, from invoice.overdue
+  | "task.nudge_drafted" // draft-task-nudge-action.ts, from task.overdue
+  | "lead.note_drafted" // draft-deal-note-action.ts, from lead.follow_up_risk
+  | "ticket.reply_drafted"; // draft-ticket-reply-action.ts, from ticket.stuck
 
 /**
  * A capability's raw detection result — evidence, not a UI decision. The AI
@@ -49,8 +59,22 @@ export interface IntelligenceFinding {
   readonly evidence: readonly SourceReference[];
   readonly freshness: DataFreshness;
   readonly explanation: CardExplanation;
-  readonly recommendedActionTypes?: readonly "create_internal_task"[];
+  readonly recommendedActionTypes?: readonly (
+    | "create_internal_task"
+    | "send_customer_email_reply"
+    | "send_invoice_reminder"
+    | "post_task_nudge"
+    | "post_deal_note"
+    | "post_ticket_reply"
+  )[];
   readonly detectedAt: Date;
+  /**
+   * Present only on a "*.reply_drafted"/"*.reminder_drafted"/
+   * "*.nudge_drafted"/"*.note_drafted" finding — the agent-drafted content,
+   * carried through to the resulting card for human review. Never set by a
+   * registered IntelligenceCapability.
+   */
+  readonly draftedContent?: DraftedContent;
   /**
    * A real customer/company name this finding is about, normalized
    * (`normalizeEntityName`, `@signaldesk/domain`) — set by capabilities

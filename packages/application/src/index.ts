@@ -40,8 +40,12 @@ export {
 export type {
   AIProvider,
   DashboardCommandContext,
+  DealNoteDraftContext,
   GenerateStructuredInput,
+  InvoiceReminderDraftContext,
   StructuredGenerationTask,
+  TaskNudgeDraftContext,
+  TicketReplyDraftContext,
 } from "./ai/ai-provider";
 export { createDeterministicProvider } from "./ai/deterministic-provider";
 export {
@@ -61,10 +65,6 @@ export type {
   IntelligenceFinding,
   PrioritizedFinding,
 } from "@signaldesk/intelligence";
-export {
-  getLeadAttention,
-  type LeadAttentionResult,
-} from "@signaldesk/intelligence";
 export { AGENT_REGISTRY, getAgentById } from "./agents/agent-card";
 export {
   selectAgent,
@@ -77,6 +77,15 @@ export {
   type SpecialistDispatch,
   type SpecialistInput,
 } from "./agents/parallel-specialist-coordinator";
+export {
+  draftMessageReply,
+  type MessageReplyDispatch,
+  type MessageThreadContext,
+} from "./agents/message-reply-draft-coordinator";
+export {
+  draftContent,
+  type DraftContentDispatch,
+} from "./agents/draft-content-coordinator";
 export {
   reconcileSpecialistResults,
   type ReconciliationOutcome,

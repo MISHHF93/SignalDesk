@@ -35,18 +35,37 @@ const CARD_TYPE_BY_FINDING_TYPE: Partial<Record<IntelligenceType, CardType>> = {
   "goal.at_risk": "goal_variance",
   "message.awaiting_reply": "message_follow_up",
   "ticket.stuck": "ticket_risk",
+  // Renders through the same agent_recommendation card / AgentRecommendationCard
+  // as agent.investigation — a drafted reply/reminder/nudge/note is still
+  // an agent-authored, approval-gated proposal, just triggered per-entity
+  // instead of by the business-wide investigate sweep.
+  "message.reply_drafted": "agent_recommendation",
+  "invoice.reminder_drafted": "agent_recommendation",
+  "task.nudge_drafted": "agent_recommendation",
+  "lead.note_drafted": "agent_recommendation",
+  "ticket.reply_drafted": "agent_recommendation",
+};
+
+const ACTION_LABEL_BY_TYPE: Record<ActionProposal["actionType"], string> = {
+  create_internal_task: "Create follow-up task",
+  send_customer_email_reply: "Send reply",
+  send_invoice_reminder: "Send reminder",
+  post_task_nudge: "Post nudge",
+  post_deal_note: "Post note",
+  post_ticket_reply: "Send reply",
 };
 
 function buildActionProposals(finding: PrioritizedFinding): ActionProposal[] {
   // Every registered deterministic capability (packages/intelligence's
-  // registry.ts — 9 today, a number worth re-checking rather than trusting
-  // this comment, since it has already gone stale once as capabilities were
+  // registry.ts — a number worth re-checking rather than trusting this
+  // comment, since it has already gone stale once as capabilities were
   // added) leaves generatedBy undefined and keeps emitting exactly what
-  // this produced before the Agent Fabric existed. Only a reconciled
-  // agent.investigation finding
-  // (agent-result-reconciler.ts) sets generatedBy: "agent", which is the
-  // one case that must require approval — see actionProposalSchema's
-  // riskClass/requiresApproval pairing invariant, @signaldesk/schemas.
+  // this produced before the Agent Fabric existed. Only an agent-authored
+  // finding (agent.investigation via agent-result-reconciler.ts, or
+  // message.reply_drafted via draft-message-reply-action.ts) sets
+  // generatedBy: "agent", which is the one case that must require approval
+  // — see actionProposalSchema's riskClass/requiresApproval pairing
+  // invariant, @signaldesk/schemas.
   const isAgentAuthored = finding.generatedBy === "agent";
 
   return (finding.recommendedActionTypes ?? []).map((actionType) => ({
@@ -55,7 +74,7 @@ function buildActionProposals(finding: PrioritizedFinding): ActionProposal[] {
     riskClass: isAgentAuthored
       ? "agent_assisted_internal"
       : "low_risk_internal",
-    label: "Create follow-up task",
+    label: ACTION_LABEL_BY_TYPE[actionType],
     requiresApproval: isAgentAuthored,
   }));
 }
@@ -101,6 +120,9 @@ export function composeCards(
       sources: finding.evidence.map((reference) => ({ ...reference })),
       ...(finding.financialContext
         ? { financialContext: finding.financialContext }
+        : {}),
+      ...(finding.draftedContent
+        ? { draftedContent: finding.draftedContent }
         : {}),
       recommendedActions: buildActionProposals(finding),
       freshness: finding.freshness,

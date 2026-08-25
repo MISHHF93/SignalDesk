@@ -13,10 +13,20 @@ import { DailyBriefPanel } from "./_components/daily-brief-panel";
 import { GoalsPanel } from "./_components/goals-panel";
 import { TasksPanel } from "./_components/tasks-panel";
 import { approveAgentActionProposalAction } from "./_actions/approve-agent-action-proposal";
+import { approveMessageReplyProposalAction } from "./_actions/approve-message-reply-action";
+import { approveDealNoteProposalAction } from "./_actions/approve-deal-note-action";
+import { approveInvoiceReminderProposalAction } from "./_actions/approve-invoice-reminder-action";
+import { approveTaskNudgeProposalAction } from "./_actions/approve-task-nudge-action";
+import { approveTicketReplyProposalAction } from "./_actions/approve-ticket-reply-action";
 import { completeInternalTaskAction } from "./_actions/complete-internal-task";
 import { createGoalAction } from "./_actions/create-goal";
 import { createInternalTaskAction } from "./_actions/create-internal-task";
 import { dismissAgentActionProposalAction } from "./_actions/dismiss-agent-action-proposal";
+import { draftDealNoteAction } from "./_actions/draft-deal-note-action";
+import { draftInvoiceReminderAction } from "./_actions/draft-invoice-reminder-action";
+import { draftMessageReplyAction } from "./_actions/draft-message-reply-action";
+import { draftTaskNudgeAction } from "./_actions/draft-task-nudge-action";
+import { draftTicketReplyAction } from "./_actions/draft-ticket-reply-action";
 import { emailDailyBriefAction } from "./_actions/email-daily-brief";
 import { generateDailyBriefAction } from "./_actions/generate-daily-brief";
 import { generateSinceYouLeftBriefAction } from "./_actions/generate-since-you-left-brief";
@@ -159,6 +169,18 @@ export default async function CommandCenterPage() {
           dismissAgentActionProposalAction={dismissAgentActionProposalAction}
           simulateInvoicePaymentAction={simulateInvoicePaymentAction}
           recordCardFeedbackAction={recordCardFeedbackAction}
+          approveMessageReplyProposalAction={approveMessageReplyProposalAction}
+          draftMessageReplyAction={draftMessageReplyAction}
+          draftTaskNudgeAction={draftTaskNudgeAction}
+          approveTaskNudgeProposalAction={approveTaskNudgeProposalAction}
+          draftTicketReplyAction={draftTicketReplyAction}
+          approveTicketReplyProposalAction={approveTicketReplyProposalAction}
+          draftDealNoteAction={draftDealNoteAction}
+          approveDealNoteProposalAction={approveDealNoteProposalAction}
+          draftInvoiceReminderAction={draftInvoiceReminderAction}
+          approveInvoiceReminderProposalAction={
+            approveInvoiceReminderProposalAction
+          }
         />
       </section>
 

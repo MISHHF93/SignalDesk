@@ -298,6 +298,44 @@ export async function listOverdueTasks(
   });
 }
 
+/**
+ * One real task by id, for a single-entity "draft content about one
+ * specific entity" write action (e.g. an Asana task nudge) — reuses
+ * `listOverdueTasks`'s core `tasks` ⋈ `source_records` join (via the
+ * shared `TASK_SELECT_COLUMNS`/`TASK_OWNER_JOIN` fragments) and its
+ * `toTask` row mapper, but unlike `listOverdueTasks` applies none of its
+ * filtering conditions (`completed = false`, `due_at < now()`,
+ * active/degraded integration only) or its dedup-to-latest-source-record
+ * subquery — a direct single-entity-by-id lookup should honestly return
+ * the task's current real state regardless of whether it's still
+ * "overdue," matching `getSupportTicketById`'s same behavior
+ * (`support-tickets.ts`). Returns `null` for a task that doesn't exist or
+ * doesn't belong to the caller's own tenant (RLS reduces the query to
+ * zero rows rather than raising, so this is a real, honest "not found,"
+ * not a leaked existence check).
+ */
+export async function getTaskById(
+  pool: DatabasePool,
+  organizationId: string,
+  taskId: string,
+): Promise<Task | null> {
+  return withTenantContext(pool, organizationId, async (client) => {
+    const result = await client.query<TaskWithSourceRow>(
+      `select${TASK_SELECT_COLUMNS}
+       from tasks t
+       join source_records sr
+         on sr.organization_id = t.organization_id and sr.id = t.source_record_id${TASK_OWNER_JOIN}
+       where t.organization_id = $1
+         and t.id = $2`,
+      [organizationId, taskId],
+    );
+
+    const row = result.rows[0];
+
+    return row ? toTask(row) : null;
+  });
+}
+
 const MAX_EXPORTED_TASKS = 1000;
 
 /**

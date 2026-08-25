@@ -4,9 +4,28 @@ import type { DatabasePool } from "./client";
 import { resolveMembershipId } from "./membership";
 import { withTenantContext } from "./tenant-context";
 
-export type AgentCollaborationPattern = "parallel_specialists";
+// 'single_specialist' (ADR 0056): one message, one specialist, drafting one
+// reply — draft-message-reply-action.ts's collaboration, distinct from the
+// business-wide 'parallel_specialists' sweep.
+export type AgentCollaborationPattern =
+  "parallel_specialists" | "single_specialist";
 export type AgentCollaborationStatus = "running" | "completed" | "failed";
 export type AgentCollaborationOutcome = "approved" | "dismissed";
+
+// `subject` is optional here too, mirroring `draftedContentSchema`
+// (@signaldesk/schemas): only an email-shaped draft (Gmail, QuickBooks)
+// needs one; a comment/note-shaped draft (Asana, HubSpot, Zendesk) is
+// body-only.
+export interface DraftedContent {
+  // Explicitly `| undefined` (not just an optional key) so this stays
+  // assignable from `@signaldesk/schemas`' zod-inferred `DraftedContent`
+  // under this repo's `exactOptionalPropertyTypes: true` — a zod
+  // `.optional()` field infers as `T | undefined`, not merely an omittable
+  // key, and the two must line up for callers assigning a schemas-typed
+  // result straight into a persistence input (see agent-gateway.ts).
+  readonly subject?: string | undefined;
+  readonly body: string;
+}
 
 export interface StartAgentCollaborationInput {
   readonly userId: string;
@@ -14,6 +33,35 @@ export interface StartAgentCollaborationInput {
   readonly objective: string;
   readonly correlationId: string;
   readonly idempotencyKey: string;
+  /** Exactly one of these five is required for, and only meaningful for, a
+   * 'single_specialist' collaboration — see the widened entity/pattern
+   * consistency check in drizzle/0060_connector_write_actions.sql. Each
+   * names which single real entity this one-message/one-specialist
+   * collaboration is about. */
+  readonly messageId?: string;
+  readonly invoiceId?: string;
+  readonly taskId?: string;
+  readonly leadId?: string;
+  readonly supportTicketId?: string;
+}
+
+/** How many of the five entity-id fields on a single_specialist input are
+ * set — used both to build the INSERT and to assert the invariant in app
+ * code before it ever reaches the DB constraint (defense in depth, not a
+ * replacement for it). */
+function countEntityIds(
+  input: Pick<
+    StartAgentCollaborationInput,
+    "messageId" | "invoiceId" | "taskId" | "leadId" | "supportTicketId"
+  >,
+): number {
+  return [
+    input.messageId,
+    input.invoiceId,
+    input.taskId,
+    input.leadId,
+    input.supportTicketId,
+  ].filter((id) => id !== undefined).length;
 }
 
 export interface AgentCollaboration {
@@ -21,6 +69,12 @@ export interface AgentCollaboration {
   readonly status: AgentCollaborationStatus;
   readonly objective: string;
   readonly pattern: AgentCollaborationPattern;
+  readonly messageId: string | null;
+  readonly invoiceId: string | null;
+  readonly taskId: string | null;
+  readonly leadId: string | null;
+  readonly supportTicketId: string | null;
+  readonly draftedContent: DraftedContent | null;
   readonly reconciledSummary: string | null;
   readonly reconciledConfidenceBasisPoints: number | null;
   readonly contradictionsDetected: boolean;
@@ -41,6 +95,10 @@ export interface CompleteAgentCollaborationInput {
   readonly reconciledSummary: string | null;
   readonly reconciledConfidenceBasisPoints: number | null;
   readonly contradictionsDetected: boolean;
+  /** Set only when completing a 'single_specialist' collaboration with real
+   * drafted content; omit (not null-set) for every 'parallel_specialists'
+   * completion. */
+  readonly draftedContent?: DraftedContent | null;
 }
 
 interface AgentCollaborationRow {
@@ -48,6 +106,13 @@ interface AgentCollaborationRow {
   readonly status: string;
   readonly objective: string;
   readonly pattern: string;
+  readonly message_id: string | null;
+  readonly invoice_id: string | null;
+  readonly task_id: string | null;
+  readonly lead_id: string | null;
+  readonly support_ticket_id: string | null;
+  readonly drafted_content_subject: string | null;
+  readonly drafted_content_body: string | null;
   readonly reconciled_summary: string | null;
   readonly reconciled_confidence_basis_points: number | null;
   readonly contradictions_detected: boolean;
@@ -58,7 +123,7 @@ interface AgentCollaborationRow {
 }
 
 const COLLABORATION_COLUMNS =
-  "id, status, objective, pattern, reconciled_summary, reconciled_confidence_basis_points, contradictions_detected, started_at, completed_at, outcome, reviewed_at";
+  "id, status, objective, pattern, message_id, invoice_id, task_id, lead_id, support_ticket_id, drafted_content_subject, drafted_content_body, reconciled_summary, reconciled_confidence_basis_points, contradictions_detected, started_at, completed_at, outcome, reviewed_at";
 
 function toCollaboration(row: AgentCollaborationRow): AgentCollaboration {
   return {
@@ -66,6 +131,24 @@ function toCollaboration(row: AgentCollaborationRow): AgentCollaboration {
     status: row.status as AgentCollaborationStatus,
     objective: row.objective,
     pattern: row.pattern as AgentCollaborationPattern,
+    messageId: row.message_id,
+    invoiceId: row.invoice_id,
+    taskId: row.task_id,
+    leadId: row.lead_id,
+    supportTicketId: row.support_ticket_id,
+    // Only `body` is a required part of a drafted-content row now — a
+    // body-only comment/note draft (Asana, HubSpot, Zendesk) has no subject
+    // at all, honestly reflected here rather than gated on both columns
+    // being non-null the way a Gmail-only "reply" concept required.
+    draftedContent:
+      row.drafted_content_body !== null
+        ? {
+            ...(row.drafted_content_subject !== null
+              ? { subject: row.drafted_content_subject }
+              : {}),
+            body: row.drafted_content_body,
+          }
+        : null,
     reconciledSummary: row.reconciled_summary,
     reconciledConfidenceBasisPoints: row.reconciled_confidence_basis_points,
     contradictionsDetected: row.contradictions_detected,
@@ -88,6 +171,19 @@ export async function startAgentCollaboration(
   organizationId: string,
   input: StartAgentCollaborationInput,
 ): Promise<AgentCollaboration> {
+  const entityIdCount = countEntityIds(input);
+
+  if (input.pattern === "single_specialist" && entityIdCount !== 1) {
+    throw new Error(
+      `single_specialist collaboration must set exactly one entity id (message/invoice/task/lead/support ticket); got ${entityIdCount}.`,
+    );
+  }
+  if (input.pattern === "parallel_specialists" && entityIdCount !== 0) {
+    throw new Error(
+      "parallel_specialists collaboration must not set any single-entity id.",
+    );
+  }
+
   return withTenantContext(pool, organizationId, async (client) => {
     const membershipId = await resolveMembershipId(
       client,
@@ -98,8 +194,9 @@ export async function startAgentCollaboration(
     const result = await client.query<AgentCollaborationRow>(
       `insert into agent_collaborations (
          id, organization_id, triggered_by_membership_id, pattern, objective,
-         correlation_id, idempotency_key
-       ) values ($1, $2, $3, $4, $5, $6, $7)
+         correlation_id, idempotency_key, message_id, invoice_id, task_id,
+         lead_id, support_ticket_id
+       ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        returning ${COLLABORATION_COLUMNS}`,
       [
         randomUUID(),
@@ -109,6 +206,11 @@ export async function startAgentCollaboration(
         input.objective,
         input.correlationId,
         input.idempotencyKey,
+        input.messageId ?? null,
+        input.invoiceId ?? null,
+        input.taskId ?? null,
+        input.leadId ?? null,
+        input.supportTicketId ?? null,
       ],
     );
 
@@ -132,7 +234,8 @@ export async function completeAgentCollaboration(
     const result = await client.query<AgentCollaborationRow>(
       `update agent_collaborations
        set status = $3, reconciled_summary = $4, reconciled_confidence_basis_points = $5,
-           contradictions_detected = $6, completed_at = now(), updated_at = now()
+           contradictions_detected = $6, drafted_content_subject = $7, drafted_content_body = $8,
+           completed_at = now(), updated_at = now()
        where organization_id = $1 and id = $2
        returning ${COLLABORATION_COLUMNS}`,
       [
@@ -142,6 +245,8 @@ export async function completeAgentCollaboration(
         input.reconciledSummary,
         input.reconciledConfidenceBasisPoints,
         input.contradictionsDetected,
+        input.draftedContent?.subject ?? null,
+        input.draftedContent?.body ?? null,
       ],
     );
     const row = result.rows[0];

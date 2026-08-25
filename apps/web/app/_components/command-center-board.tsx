@@ -2,17 +2,34 @@
 
 import type { FilterDefinition, IntelligenceCard } from "@signaldesk/schemas";
 import { useRouter } from "next/navigation";
-import { useMemo, useState, useTransition } from "react";
+import { useCallback, useMemo, useState, useTransition } from "react";
 
 import type {
   ApproveAgentActionProposalAction,
+  ApproveDealNoteProposalAction,
+  ApproveInvoiceReminderProposalAction,
+  ApproveMessageReplyProposalAction,
+  ApproveTaskNudgeProposalAction,
+  ApproveTicketReplyProposalAction,
   CreateInternalTaskAction,
   DismissAgentActionProposalAction,
+  DraftDealNoteAction,
+  DraftInvoiceReminderAction,
+  DraftMessageReplyAction,
+  DraftTaskNudgeAction,
+  DraftTicketReplyAction,
   ParseCommandAction,
   RecordCardFeedbackAction,
   RunAgentInvestigationAction,
   SimulateInvoicePaymentAction,
 } from "../_lib/actions";
+import {
+  dispatchDraftForCard,
+  getBatchDraftableCards,
+  groupCardsIntoClusters,
+  type CardCluster,
+  type DraftActionsByEntityKind,
+} from "../_lib/card-clustering";
 import { buildTaskTitle } from "../_lib/task-title";
 import {
   useBusinessSnapshot,
@@ -177,6 +194,16 @@ export function CommandCenterBoard({
   dismissAgentActionProposalAction,
   simulateInvoicePaymentAction,
   recordCardFeedbackAction,
+  approveMessageReplyProposalAction,
+  draftMessageReplyAction,
+  draftTaskNudgeAction,
+  approveTaskNudgeProposalAction,
+  draftTicketReplyAction,
+  approveTicketReplyProposalAction,
+  draftDealNoteAction,
+  approveDealNoteProposalAction,
+  draftInvoiceReminderAction,
+  approveInvoiceReminderProposalAction,
 }: {
   initialCards: readonly IntelligenceCard[];
   createTaskAction: CreateInternalTaskAction;
@@ -198,6 +225,20 @@ export function CommandCenterBoard({
   dismissAgentActionProposalAction?: DismissAgentActionProposalAction;
   simulateInvoicePaymentAction?: SimulateInvoicePaymentAction;
   recordCardFeedbackAction?: RecordCardFeedbackAction;
+  approveMessageReplyProposalAction?: ApproveMessageReplyProposalAction;
+  draftMessageReplyAction?: DraftMessageReplyAction;
+  /** ADR 0057 — Asana's counterparts to the two props above. */
+  draftTaskNudgeAction?: DraftTaskNudgeAction;
+  approveTaskNudgeProposalAction?: ApproveTaskNudgeProposalAction;
+  /** ADR 0057 — Zendesk's counterparts. */
+  draftTicketReplyAction?: DraftTicketReplyAction;
+  approveTicketReplyProposalAction?: ApproveTicketReplyProposalAction;
+  /** ADR 0057 — HubSpot's counterparts. */
+  draftDealNoteAction?: DraftDealNoteAction;
+  approveDealNoteProposalAction?: ApproveDealNoteProposalAction;
+  /** ADR 0057 — QuickBooks' counterparts. */
+  draftInvoiceReminderAction?: DraftInvoiceReminderAction;
+  approveInvoiceReminderProposalAction?: ApproveInvoiceReminderProposalAction;
 }) {
   const router = useRouter();
   const [activeFilters, setActiveFilters] = useState<
@@ -219,6 +260,78 @@ export function CommandCenterBoard({
   const { snapshot: polledSnapshot, error: pollError } = useBusinessSnapshot({
     pollIntervalMs: POLL_INTERVAL_MS,
   });
+  // "Draft for this Matter" batch trigger's own status per cluster key
+  // (`groupCardsIntoClusters`'s `CardCluster.key`) — a plain client-side
+  // in-flight/done marker, not persisted, mirroring how each individual
+  // card's own draft button already tracks its own local pending state.
+  const [matterDraftStatus, setMatterDraftStatus] = useState<
+    Record<string, "pending" | "done">
+  >({});
+
+  // Shared by the "investigate risk" command-bar path and
+  // draftMessageReplyAction's per-message "Draft a reply" button
+  // (MessageFollowUpCard) — both produce one real agent_recommendation
+  // card that needs to join this board's own session-added set the exact
+  // same way.
+  const handleAgentCardProduced = useCallback((newCard: IntelligenceCard) => {
+    setFocusedCardId(null);
+    setActiveFilters([]);
+    setAgentCards((current) => [
+      ...current.filter((card) => card.id !== newCard.id),
+      newCard,
+    ]);
+  }, []);
+
+  const draftActionsByEntityKind: DraftActionsByEntityKind = {
+    ...(draftMessageReplyAction ? { message: draftMessageReplyAction } : {}),
+    ...(draftInvoiceReminderAction
+      ? { invoice: draftInvoiceReminderAction }
+      : {}),
+    ...(draftTaskNudgeAction ? { task: draftTaskNudgeAction } : {}),
+    ...(draftDealNoteAction ? { lead: draftDealNoteAction } : {}),
+    ...(draftTicketReplyAction
+      ? { support_ticket: draftTicketReplyAction }
+      : {}),
+  };
+
+  async function handleDraftForMatter(cluster: CardCluster) {
+    setMatterDraftStatus((current) => ({
+      ...current,
+      [cluster.key]: "pending",
+    }));
+
+    // Deduped by real entity, not by card — a Matter can legitimately
+    // group two different findings on the same entity (e.g. a lead with
+    // both a follow_up_risk and an ownership_gap finding), and dispatching
+    // once per card would fire the same draft action twice for the same
+    // record, producing two near-duplicate drafts.
+    const draftableCards = getBatchDraftableCards(
+      cluster.cards,
+      draftActionsByEntityKind,
+    );
+
+    const results = await Promise.all(
+      draftableCards.map((card) =>
+        dispatchDraftForCard(card, draftActionsByEntityKind),
+      ),
+    );
+
+    for (const result of results) {
+      if (result?.ok && result.card) {
+        handleAgentCardProduced(result.card);
+      }
+    }
+
+    setMatterDraftStatus((current) => ({ ...current, [cluster.key]: "done" }));
+
+    const draftedCount = results.filter((result) => result?.ok).length;
+
+    setStatusMessage(
+      draftedCount === 0
+        ? "Couldn't draft anything for this group. Try each item's own Draft button."
+        : `Drafted ${draftedCount} of ${draftableCards.length} item${draftableCards.length === 1 ? "" : "s"} in this group — review each before approving.`,
+    );
+  }
 
   // Prefer the freshest polled cards once a poll has actually completed;
   // fall back to the real server-rendered set before that (never an empty
@@ -333,15 +446,8 @@ export function CommandCenterBoard({
           return;
         }
 
-        const newCard = investigation.card;
-
-        if (newCard) {
-          setFocusedCardId(null);
-          setActiveFilters([]);
-          setAgentCards((current) => [
-            ...current.filter((card) => card.id !== newCard.id),
-            newCard,
-          ]);
+        if (investigation.card) {
+          handleAgentCardProduced(investigation.card);
         }
 
         setStatusMessage(investigation.message);
@@ -407,16 +513,69 @@ export function CommandCenterBoard({
         </p>
       ) : (
         <div className="dynamicCardStack">
-          {visibleCards.map((card) =>
-            renderCard(
-              card,
-              createTaskAction,
-              approveAgentActionProposalAction,
-              dismissAgentActionProposalAction,
-              simulateInvoicePaymentAction,
-              recordCardFeedbackAction,
-            ),
-          )}
+          {groupCardsIntoClusters(visibleCards).map((cluster) => {
+            const renderedCards = cluster.cards.map((card) =>
+              renderCard(
+                card,
+                createTaskAction,
+                approveAgentActionProposalAction,
+                dismissAgentActionProposalAction,
+                simulateInvoicePaymentAction,
+                recordCardFeedbackAction,
+                approveMessageReplyProposalAction,
+                draftMessageReplyAction,
+                handleAgentCardProduced,
+                draftTaskNudgeAction,
+                approveTaskNudgeProposalAction,
+                draftTicketReplyAction,
+                approveTicketReplyProposalAction,
+                draftDealNoteAction,
+                approveDealNoteProposalAction,
+                draftInvoiceReminderAction,
+                approveInvoiceReminderProposalAction,
+              ),
+            );
+
+            if (cluster.cards.length < 2) {
+              return renderedCards[0];
+            }
+
+            const draftStatus = matterDraftStatus[cluster.key];
+            // Deduped by entity, not raw card count — see
+            // `handleDraftForMatter`'s own comment. The button's own label
+            // uses this same number so it never promises more drafts than
+            // the click actually produces.
+            const draftableCards = getBatchDraftableCards(
+              cluster.cards,
+              draftActionsByEntityKind,
+            );
+
+            return (
+              <section className="matterGroup" key={cluster.key}>
+                <div className="matterGroupHeader">
+                  <p>
+                    Possibly the same situation — {cluster.cards.length} related
+                    items
+                  </p>
+                  {draftableCards.length >= 2 ? (
+                    <Button
+                      variant="ghost"
+                      className="matterGroupDraftButton"
+                      disabled={draftStatus === "pending"}
+                      onClick={() => handleDraftForMatter(cluster)}
+                    >
+                      {draftStatus === "pending"
+                        ? "Drafting…"
+                        : draftStatus === "done"
+                          ? "Drafted — review below"
+                          : `Draft for all ${draftableCards.length}`}
+                    </Button>
+                  ) : null}
+                </div>
+                {renderedCards}
+              </section>
+            );
+          })}
         </div>
       )}
 

@@ -105,6 +105,18 @@ export async function ConnectorDetailContent({
         )
       : null;
 
+  // `syncImplemented` specifically means a timer-driven background poller
+  // (see its doc comment in packages/integrations/src/index.ts) and is
+  // false for every connector today — including the 8 with real,
+  // tested sync via the initial+incremental cursor pattern (Gmail,
+  // HubSpot, QuickBooks, Asana, Salesforce, Jira, Xero, Zendesk). Reads
+  // are honestly "live" once that initial sync exists, regardless of
+  // which sync mechanism produced it — checking `syncImplemented` alone
+  // here previously made every read capability show "Planned" even for
+  // connectors this exact page's own "Connected. Synced N..." banner
+  // already proves are real.
+  const hasRealRead = connector.readiness.initialSyncImplemented;
+
   const readinessItems = [
     { label: "Catalog metadata", ready: connector.readiness.catalogMetadata },
     {
@@ -373,27 +385,28 @@ export async function ConnectorDetailContent({
       <section className="connectorOverview" aria-labelledby="overview-heading">
         <div className="detailSectionHeading">
           <p className="sectionKicker">
-            {connector.readiness.syncImplemented
-              ? "What SignalDesk sees"
-              : "Designed behavior"}
+            {hasRealRead ? "What SignalDesk sees" : "Designed behavior"}
           </p>
           <h2 id="overview-heading">
-            {connector.readiness.syncImplemented
+            {hasRealRead
               ? `What ${connector.name} brings into SignalDesk`
               : "What this connector could support"}
           </h2>
           <p>
-            {connector.readiness.syncImplemented
-              ? "Writes aren't live yet — reads below are real once connected."
-              : "These are planned capabilities, not something you can use yet."}
+            {hasRealRead && connector.readiness.actionsImplemented
+              ? "Reads below are real once connected — and one write is too, always behind your explicit approval."
+              : hasRealRead
+                ? "Writes aren't live yet — reads below are real once connected."
+                : "These are planned capabilities, not something you can use yet."}
           </p>
         </div>
 
         <div className="capabilityGrid">
           {connector.capabilities.map((capability) => {
             const isLive =
-              capability.operation === "read" &&
-              connector.readiness.syncImplemented;
+              (capability.operation === "read" && hasRealRead) ||
+              (capability.operation === "write" &&
+                connector.readiness.actionsImplemented);
 
             return (
               <article className="capabilityCard" key={capability.id}>
@@ -406,7 +419,12 @@ export async function ConnectorDetailContent({
                 </span>
                 <h3>{capability.label}</h3>
                 <p>{capability.description}</p>
-                {isLive ? (
+                {isLive && capability.operation === "write" ? (
+                  <small>
+                    Requires your explicit approval every time — nothing is sent
+                    automatically.
+                  </small>
+                ) : isLive ? (
                   <small>
                     Tenant-scoped, and every record keeps a trace back to{" "}
                     {connector.name}.

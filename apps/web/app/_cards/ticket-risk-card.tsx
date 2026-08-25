@@ -1,9 +1,15 @@
-import Link from "next/link";
+"use client";
 
+import Link from "next/link";
+import { useState, useTransition } from "react";
+
+import { Button } from "../_components/button";
 import { CardActions } from "./card-actions";
 import { CardFeedbackButtons } from "./card-feedback-buttons";
 import { CardBadges, WhyDisclosure } from "./card-shell";
 import type { CardComponentProps } from "./card-types";
+
+type DraftStatus = "idle" | "pending" | "error";
 
 /**
  * Mirrors `TaskRiskCard`'s owner line and, since migration 0055
@@ -22,12 +28,57 @@ import type { CardComponentProps } from "./card-types";
  * `card.entity` is optional on the schema; falling back to plain text
  * when absent is a real, not just defensive, case (a card without a
  * single-entity reference has nothing to link to).
+ *
+ * The "Draft reply" button (ADR 0057) fires `draftTicketReplyAction`
+ * immediately — no approval gate here, since drafting has no external
+ * effect, mirroring `MessageFollowUpCard`/`TaskRiskCard`'s own draft
+ * buttons exactly. Its result is a separate `agent_recommendation` card,
+ * handed to `onAgentCardProduced` — the actual send is approved from that
+ * card, via `AgentRecommendationCard`.
  */
 export function TicketRiskCard({
   card,
   createTaskAction,
   recordCardFeedbackAction,
+  draftTicketReplyAction,
+  onAgentCardProduced,
 }: CardComponentProps) {
+  const [status, setStatus] = useState<DraftStatus>("idle");
+  const [message, setMessage] = useState<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+
+  function handleDraftReply() {
+    if (
+      !draftTicketReplyAction ||
+      !card.entity ||
+      card.entity.kind !== "support_ticket"
+    ) {
+      return;
+    }
+
+    const ticketId = card.entity.id;
+
+    setStatus("pending");
+    setMessage(null);
+
+    startTransition(async () => {
+      const result = await draftTicketReplyAction(ticketId);
+
+      if (!result.ok) {
+        setStatus("error");
+        setMessage(`Couldn't draft a reply. ${result.error}`);
+        return;
+      }
+
+      if (result.card) {
+        onAgentCardProduced?.(result.card);
+      }
+
+      setStatus("idle");
+      setMessage(result.message);
+    });
+  }
+
   return (
     <article
       className="attentionCard dynamicCard"
@@ -55,6 +106,26 @@ export function TicketRiskCard({
         <div className="attentionFooter">
           <WhyDisclosure card={card} />
           <CardActions card={card} createTaskAction={createTaskAction} />
+          {draftTicketReplyAction ? (
+            <div className="cardActions">
+              <Button
+                variant="ghost"
+                className="cardActionButton"
+                disabled={isPending}
+                onClick={handleDraftReply}
+              >
+                {isPending ? "Drafting…" : "Draft reply"}
+              </Button>
+              {message ? (
+                <p
+                  className={`cardActionStatus cardActionStatus-${status}`}
+                  role="status"
+                >
+                  {message}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
         {recordCardFeedbackAction ? (
           <CardFeedbackButtons

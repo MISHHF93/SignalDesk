@@ -164,6 +164,9 @@ export async function fetchLinearViewer(
     throw new UpstreamProviderError(
       "Linear viewer query failed. Please try again, or reconnect this integration if the problem continues.",
       payload.errors.map((e) => e.message).join(", "),
+      // A GraphQL error still returns HTTP 200 — `null` is the honest
+      // status here, not a fabricated 200.
+      null,
     );
   }
 
