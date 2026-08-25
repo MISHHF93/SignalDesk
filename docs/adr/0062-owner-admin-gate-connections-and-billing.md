@@ -2,6 +2,11 @@
 
 - Status: Accepted
 - Date: 2026-08-24
+- **Update (2026-08-24, same-day follow-up)**: this ADR's 35 gated files,
+  plus the 2 pre-existing ones (`connect-ai-provider.ts`/
+  `disconnect-ai-provider.ts`) that already had this check, now have real
+  regression tests for it — see "Follow-up: regression tests for the
+  gate itself" after Consequences.
 
 ## Context
 
@@ -89,3 +94,53 @@ connection status and subscription details (informational, unchanged) but
 can no longer disconnect a live business-system integration or alter the
 workspace's real subscription — matching the access level already
 enforced for invites, AI-provider keys, and workspace settings.
+
+## Follow-up: regression tests for the gate itself (2026-08-24, same day)
+
+`apps/web/app/_actions/` (75 files) had no test coverage at all before
+this — not specific to this ADR, true of the whole directory. That meant
+the access-control property this ADR establishes had nothing to catch a
+future regression (an edit that accidentally removed or weakened a role
+check would only surface if someone happened to notice in review).
+
+Added one `.test.ts` per gated action file — all 35 from this ADR plus
+the 2 pre-existing ones (`connect-ai-provider.ts`/
+`disconnect-ai-provider.ts`) that already had the identical check before
+this ADR, for consistency (same security property, same absence of
+coverage). Each file gets two assertions, not one:
+
+- **Deny path** (`member`/`viewer`): the action returns the exact stated
+  error, verbatim, **and** the first real side-effecting call after where
+  the role check sits (`issueOAuthState` for a connect action,
+  a `get<X>IntegrationStatus` lookup for a disconnect action,
+  `checkRateLimit`/`getOrganizationSubscription`/
+  `deleteAIProviderConnection` for a billing/AI-provider action) is
+  asserted to never have been called. The second half is the property
+  that actually matters — a test only checking the returned string would
+  pass even if the code ran the real disconnect anyway and merely
+  reported the wrong error alongside it.
+- **Allow path** (`owner`/`admin`): the same denial is asserted to
+  **not** occur, and the checkpoint function above **is** called —
+  proving the gate doesn't also block a legitimate session. This
+  deliberately does not drive every action all the way to its real
+  external effect (that would need bespoke, fragile mocking of each
+  connector's own OAuth/DB call graph, 35 times over, for a property this
+  ADR isn't the one responsible for verifying); it tolerates the action
+  throwing further downstream from intentionally minimal mocking beyond
+  that checkpoint.
+
+Two files needed a different shape than the rest, found by reading the
+actual source rather than assuming uniformity:
+`change-plan.ts`'s `previewPlanChangeAction`/`changePlanAction` share one
+internal `resolveTargetPrice` helper that performs the real role check —
+both exported functions still get their own full test pair, since both
+are independently callable entry points regardless of the shared
+implementation; and `changePlanAction` specifically calls `checkRateLimit`
+at its own top level _before_ delegating to `resolveTargetPrice`, so its
+test gives that mock an explicit allowed result rather than leaving it
+automocked to `undefined`, which would otherwise throw before the role
+gate is ever reached.
+
+Verified with `pnpm -r typecheck`, `pnpm lint`, `pnpm --filter web test`
+(225 passed, up from 69 in `apps/web` before this), `pnpm format:check`,
+and a real `next build` — all clean.

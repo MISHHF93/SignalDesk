@@ -1,0 +1,81 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../_lib/session");
+vi.mock("../_lib/oauth-state");
+vi.mock("next/navigation");
+vi.mock("next/headers", () => ({
+  headers: vi.fn().mockResolvedValue(new Headers()),
+}));
+
+import { issueOAuthState } from "../_lib/oauth-state";
+import { getCurrentOrganization } from "../_lib/session";
+import { connectZendeskAction } from "./connect-zendesk";
+
+const mockedGetCurrentOrganization = vi.mocked(getCurrentOrganization);
+const mockedIssueOAuthState = vi.mocked(issueOAuthState);
+
+/**
+ * Regression coverage for ADR 0062's owner/admin gate — see
+ * connect-asana.test.ts for the reference pattern this file replicates.
+ * Zendesk's connect action takes a real `subdomain` form field (see
+ * connect-zendesk.ts's doc comment); the role check runs before that
+ * field is ever read, so the deny path doesn't need a valid one, but the
+ * allow path needs a real DNS-label-shaped value to get past the
+ * subdomain validation and actually reach the role gate's checkpoint.
+ */
+describe("connectZendeskAction — owner/admin role gate", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("ZENDESK_CLIENT_ID", "test-client-id");
+    vi.stubEnv("ZENDESK_CLIENT_SECRET", "test-client-secret");
+  });
+
+  it.each(["member", "viewer"] as const)(
+    "denies a %s session and performs no OAuth redirect",
+    async (role) => {
+      mockedGetCurrentOrganization.mockResolvedValue({
+        organizationId: "org-1",
+        userId: "user-1",
+        role,
+        email: "member@example.com",
+        isAnonymous: false,
+      });
+
+      const result = await connectZendeskAction(
+        { error: null },
+        new FormData(),
+      );
+
+      expect(result).toEqual({
+        error: "Only an owner or admin can connect Zendesk.",
+      });
+      expect(mockedIssueOAuthState).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["owner", "admin"] as const)(
+    "lets a %s session proceed past the role gate",
+    async (role) => {
+      mockedGetCurrentOrganization.mockResolvedValue({
+        organizationId: "org-1",
+        userId: "user-1",
+        role,
+        email: "owner@example.com",
+        isAnonymous: false,
+      });
+
+      const formData = new FormData();
+      formData.set("subdomain", "acme");
+
+      const outcome = await connectZendeskAction(
+        { error: null },
+        formData,
+      ).catch((error: unknown) => ({ threw: error }));
+
+      expect(outcome).not.toEqual({
+        error: "Only an owner or admin can connect Zendesk.",
+      });
+      expect(mockedIssueOAuthState).toHaveBeenCalled();
+    },
+  );
+});
