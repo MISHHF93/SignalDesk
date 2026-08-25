@@ -147,3 +147,43 @@ behavior change beyond the logging call itself.
 This closes LAUNCH-BLOCKERS.md P2 #11 completely — the only two
 remaining raw `console.*` call sites in the app are the two named above,
 both for reasons specific to their own architecture, not oversights.
+
+### A genuine finding from reviewing this pass, not just a refactor
+
+Re-checking the change this ADR's follow-up made (rather than assuming a
+mechanical `console.error` → `errorReporter.captureException` swap is
+risk-neutral by construction) surfaced a real, previously-undisclosed
+data-hygiene improvement, confirmed live rather than assumed:
+
+`UpstreamProviderError` (`packages/integrations/src/shared/upstream-error.ts`,
+added 2026-08-22 specifically to keep a provider's raw response body out
+of the safe, user-facing `.message`) stores that raw body in its own
+`rawDetail` property, deliberately separate from `.message`. Node's
+`console.error(err)` prints an `Error`'s own enumerable properties after
+its stack trace by default — confirmed with a real one-line reproduction
+against this exact shape (`node -e '...'`, see this ADR's PR/commit for
+the command) — which means every one of this pass's 36 call sites that
+used to do `console.error("<X> failed", error)` on a caught
+`UpstreamProviderError` was, until today, printing that raw upstream
+response body straight into server logs. `createConsoleErrorReporter`
+only ever reads `error.name`/`error.message` (see
+`error-reporter.ts`/`error-reporter.test.ts`) — never an error's other
+own properties — so this pass closes that exposure path as a side effect
+of the swap, not merely relocating the same `console.error` call.
+
+Added a regression test for the actual guarantee that matters
+(`error-reporter.test.ts`, "drops an Error subclass's own extra
+properties") using an `UpstreamProviderError`-shaped local class with a
+`rawDetail`-like field containing a recognizable string, asserting it
+never appears in the reporter's output — the pre-existing test for this
+file only ever exercised a plain `new Error(...)`, which has no extra
+own properties and so could never have caught this class of leak.
+
+This also means: once a real error-monitoring vendor is wired in
+(P0 #3), only the sanitized `.message` — never `rawDetail` — will ever
+leave this app's own infrastructure. Worth re-checking this same property
+(does a new Error subclass carry a raw/sensitive field a naive
+`console.error(err)` would have printed?) any time a new one is added
+alongside this reporting seam — the regression test only proves the
+reporter itself is safe, not that every future thrown-error shape stays
+that way.

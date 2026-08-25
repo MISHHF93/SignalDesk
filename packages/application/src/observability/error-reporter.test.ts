@@ -58,4 +58,48 @@ describe("createConsoleErrorReporter", () => {
 
     spy.mockRestore();
   });
+
+  it("drops an Error subclass's own extra properties, not just an unused 'context' argument", () => {
+    // Mirrors the real shape of packages/integrations's UpstreamProviderError,
+    // which deliberately carries a raw-upstream-response-body property
+    // alongside its own safe `.message`. Node's `console.error(err)` prints
+    // an Error's own enumerable properties after the stack trace by
+    // default — confirmed live against this exact shape — so naively
+    // logging the error object itself (as every call site this reporter
+    // replaced used to do) would leak that raw body into infrastructure
+    // logs. This test would fail if `captureException` ever started
+    // spreading the error object instead of picking only `name`/`message`.
+    class RichUpstreamError extends Error {
+      readonly rawDetail: string;
+      readonly status: number;
+
+      constructor(safeMessage: string, rawDetail: string, status: number) {
+        super(safeMessage);
+        this.name = "RichUpstreamError";
+        this.rawDetail = rawDetail;
+        this.status = status;
+      }
+    }
+
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const reporter = createConsoleErrorReporter();
+
+    reporter.captureException(
+      new RichUpstreamError(
+        "QuickBooks invoice reminder failed. Please try again.",
+        "502 <html>upstream error page containing real customer data</html>",
+        502,
+      ),
+      { operation: "sync_quickbooks.invoice_validation" },
+    );
+
+    const logged = JSON.parse(spy.mock.calls[0]![0] as string);
+    expect(logged.error).toEqual({
+      name: "RichUpstreamError",
+      message: "QuickBooks invoice reminder failed. Please try again.",
+    });
+    expect(JSON.stringify(logged)).not.toContain("real customer data");
+
+    spy.mockRestore();
+  });
 });
