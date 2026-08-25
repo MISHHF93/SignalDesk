@@ -2557,10 +2557,22 @@ export const organizationSubscriptions = pgTable(
   },
   (table) => [
     unique("organization_subscriptions_org_unique").on(table.organizationId),
-    index("organization_subscriptions_stripe_subscription_id_index").on(
+    // Real constraints, not just indexes (found by review): the webhook
+    // handler resolves an organization from a bare `where
+    // stripe_subscription_id = $1` / `where stripe_customer_id = $1`
+    // (`resolve_organization_for_stripe_subscription`/`_customer`,
+    // 0025_resolve_organization_for_stripe_id.sql) with nothing at the DB
+    // layer stopping two different organizations from ever ending up
+    // with the same Stripe id — which would let a real Stripe event for
+    // one tenant silently apply to whichever organization Postgres
+    // happens to return first. Multiple `NULL`s (a subscription never
+    // linked to Stripe) remain allowed — Postgres unique constraints
+    // never compare `NULL` to `NULL` as equal, so this only rejects a
+    // genuine duplicate non-null id.
+    unique("organization_subscriptions_stripe_subscription_id_unique").on(
       table.stripeSubscriptionId,
     ),
-    index("organization_subscriptions_stripe_customer_id_index").on(
+    unique("organization_subscriptions_stripe_customer_id_unique").on(
       table.stripeCustomerId,
     ),
     // Cover organization_subscriptions_plan_id_fkey/_plan_price_id_fkey —

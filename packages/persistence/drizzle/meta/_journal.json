@@ -421,6 +421,13 @@
       "when": 1787694100000,
       "tag": "0061_revoke_public_execute_stripe_linked_subscriptions",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1787694200000,
+      "tag": "0062_unique_stripe_ids_on_subscriptions",
+      "breakpoints": true
     }
   ]
 }
