@@ -72,6 +72,27 @@ function formatWait(retryAfterSeconds: number | null): string {
  * through to `unrecoverable`, using the error's own already-safe message
  * rather than inventing a more specific claim this app can't actually
  * verify.
+ *
+ * **401/403 → `reauth_required`, unconditionally — a real, disclosed
+ * assumption, reviewed this session.** Gmail's own send path
+ * (`GmailInsufficientScopeError`, `packages/integrations/src/gmail/
+ * client.ts`) doesn't route a 403 through this generic branch at all: it
+ * inspects Google's error body first, because Google's API is confirmed
+ * (read directly from its own error-body shape) to overload a bare 403 for
+ * at least two unrelated causes — an actually-insufficient OAuth scope,
+ * and a per-user sending-limit block — where "reconnect" is only the
+ * right answer for the former. Asana/HubSpot/Zendesk/QuickBooks have no
+ * such dedicated pre-check here, on the belief that their APIs use
+ * 401/403 exclusively for a real auth/permission problem (with rate
+ * limiting handled separately via 429, per each connector's own scope
+ * doc comments) — but that belief has NOT been independently verified
+ * against live traffic the way Gmail's specific ambiguity was. If any of
+ * these providers is ever found to return 401/403 for some other,
+ * non-reauth reason, this blanket branch would misdirect a user with a
+ * genuinely different problem toward reconnecting for no reason — the
+ * same failure mode Gmail's own dedicated check exists to prevent. Flagged
+ * by this session's code review as worth this explicit disclosure rather
+ * than either a silent gap or an unverified provider-specific guess.
  */
 export function classifyRecoveryStrategy(
   error: UpstreamProviderError,
