@@ -266,22 +266,45 @@ export async function attachDefaultPaymentMethod(
 }
 
 /**
- * Reads back a subscription's one price item id — `updateSubscriptionPrice`/
- * `previewPriceChangeInvoice` need it (Stripe swaps items by id, not by
- * subscription id alone), but this app never stores it at checkout time;
- * fetching it fresh here means it's always Stripe's actual current state,
- * not a potentially-stale cached copy. Every subscription this app
- * creates has exactly one price item — `null` (not thrown) if that's ever
- * not true, so the caller can fail closed rather than act on a guess.
+ * Reads back the subscription item id for the org's *plan* price —
+ * `updateSubscriptionPrice`/`previewPriceChangeInvoice` need it (Stripe
+ * swaps items by id, not by subscription id alone), but this app never
+ * stores it at checkout time; fetching it fresh here means it's always
+ * Stripe's actual current state, not a potentially-stale cached copy.
+ *
+ * Real bug found by review: this used to always take `items.data[0]`,
+ * on the assumption every subscription has exactly one item. That's only
+ * true until an organization buys an add-on (`addSubscriptionAddonItem`
+ * adds a second real item to the *same* subscription) — at that point
+ * array position no longer reliably identifies the plan item over the
+ * add-on item (Stripe's own docs don't guarantee `items.data` ordering),
+ * and swapping the wrong item's price would silently turn an add-on item
+ * into a duplicate plan item while leaving the real plan item untouched —
+ * a real double-charge, not a cosmetic bug.
+ *
+ * `expectedPriceId` is the plan price this app already has on file for
+ * the organization (its current, pre-change Stripe price id) — matching
+ * on it is unambiguous regardless of item count or order. When the
+ * caller doesn't have one on file (a legacy subscription predating local
+ * price tracking), this only guesses when there's exactly one item, where
+ * there's nothing to disambiguate; with more than one item and no known
+ * price to match, it returns `null` so the caller fails closed rather
+ * than risk mutating the wrong item.
  */
 export async function getSubscriptionItemId(
   stripe: Stripe,
   subscriptionId: string,
+  expectedPriceId: string | null,
 ): Promise<string | null> {
   const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-  const item = subscription.items.data[0];
+  const items = subscription.items.data;
 
-  return item ? item.id : null;
+  if (expectedPriceId !== null) {
+    const matched = items.find((item) => item.price.id === expectedPriceId);
+    return matched ? matched.id : null;
+  }
+
+  return items.length === 1 ? (items[0]?.id ?? null) : null;
 }
 
 /** The one real fact every subscription-mutating call below hands back:

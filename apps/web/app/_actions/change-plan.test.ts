@@ -240,7 +240,15 @@ describe("changePlanAction — double-submit protection", () => {
     } as unknown as Awaited<ReturnType<typeof getPlanPriceById>>);
     mockedGetPlanByKey.mockResolvedValue(TARGET_PLAN);
     mockedGetCurrentStandardPrice.mockResolvedValue(TARGET_PRICE);
-    mockedResolveStripePriceId.mockReturnValue("price_stripe_business_monthly");
+    // Differentiated by row id (not a blanket return value) so tests can
+    // tell apart the current plan's Stripe price from the target plan's —
+    // getSubscriptionItemId now needs the *current* one specifically (see
+    // the regression test below).
+    mockedResolveStripePriceId.mockImplementation((row) =>
+      (row as unknown as { id: string }).id === "price-starter-monthly"
+        ? "price_stripe_starter_monthly"
+        : "price_stripe_business_monthly",
+    );
     mockedGetStripeSecretKey.mockReturnValue("sk_test_fake");
     mockedGetSubscriptionItemId.mockResolvedValue("si_123");
     mockedUpdateSubscriptionPrice.mockResolvedValue({ status: "active" });
@@ -312,6 +320,16 @@ describe("changePlanAction — double-submit protection", () => {
       undefined,
       "change-plan-lock:org-1",
       expect.any(Function),
+    );
+  });
+
+  it("regression: identifies the subscription item to mutate by the org's current plan price, not by array position — a real bug once an add-on item exists on the same subscription", async () => {
+    await changePlanAction("business").catch(() => null);
+
+    expect(mockedGetSubscriptionItemId).toHaveBeenCalledWith(
+      undefined,
+      "sub_stripe_1",
+      "price_stripe_starter_monthly",
     );
   });
 

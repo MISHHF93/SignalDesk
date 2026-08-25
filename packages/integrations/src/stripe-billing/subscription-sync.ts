@@ -8,8 +8,15 @@ import type Stripe from "stripe";
  * object onto each SubscriptionItem in Stripe's current API (verified
  * against docs.stripe.com/api/subscriptions/object this session, not
  * training data), which the installed SDK version's types may not yet
- * reflect at the top level either way. Every subscription this app
- * creates has exactly one price item, so `items.data[0]` is that item.
+ * reflect at the top level either way. `items.data[0]` is read here
+ * regardless of whether an add-on item also exists on this subscription
+ * (`addSubscriptionAddonItem`, client.ts) — safe only because this app
+ * never opts into Stripe's per-item "flexible" billing mode, so every
+ * item on one subscription shares the same billing-cycle bounds under
+ * the default "classic" mode; it would NOT be safe to read `data[0]` this
+ * way for anything price- or item-identity-specific (see
+ * `getSubscriptionItemId`'s own doc comment, client.ts, for a case where
+ * that distinction is exactly the real bug it fixes).
  *
  * Shared between the real-time webhook handler
  * (`apps/web/app/billing/webhooks/stripe/route.ts`) and the billing

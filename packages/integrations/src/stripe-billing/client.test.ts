@@ -404,13 +404,13 @@ describe("attachDefaultPaymentMethod", () => {
 });
 
 describe("getSubscriptionItemId", () => {
-  it("returns the id of the subscription's one price item", async () => {
+  it("returns the id of the subscription's one price item when no price is given to match against", async () => {
     const retrieve = vi.fn().mockResolvedValue({
-      items: { data: [{ id: "si_123" }] },
+      items: { data: [{ id: "si_123", price: { id: "price_business" } }] },
     });
     const stripe = fakeStripe({ subscriptions: { retrieve } });
 
-    const itemId = await getSubscriptionItemId(stripe, "sub_123");
+    const itemId = await getSubscriptionItemId(stripe, "sub_123", null);
 
     expect(itemId).toBe("si_123");
     expect(retrieve).toHaveBeenCalledWith("sub_123");
@@ -420,7 +420,58 @@ describe("getSubscriptionItemId", () => {
     const retrieve = vi.fn().mockResolvedValue({ items: { data: [] } });
     const stripe = fakeStripe({ subscriptions: { retrieve } });
 
-    const itemId = await getSubscriptionItemId(stripe, "sub_123");
+    const itemId = await getSubscriptionItemId(stripe, "sub_123", null);
+
+    expect(itemId).toBeNull();
+  });
+
+  it("matches the item whose price equals expectedPriceId, ignoring array position", async () => {
+    const retrieve = vi.fn().mockResolvedValue({
+      items: {
+        data: [
+          { id: "si_addon", price: { id: "price_addon_connections" } },
+          { id: "si_plan", price: { id: "price_business_monthly" } },
+        ],
+      },
+    });
+    const stripe = fakeStripe({ subscriptions: { retrieve } });
+
+    const itemId = await getSubscriptionItemId(
+      stripe,
+      "sub_123",
+      "price_business_monthly",
+    );
+
+    expect(itemId).toBe("si_plan");
+  });
+
+  it("real bug found by review: without a price to match against, refuses to guess when more than one item exists rather than blindly taking items.data[0]", async () => {
+    const retrieve = vi.fn().mockResolvedValue({
+      items: {
+        data: [
+          { id: "si_addon", price: { id: "price_addon_connections" } },
+          { id: "si_plan", price: { id: "price_business_monthly" } },
+        ],
+      },
+    });
+    const stripe = fakeStripe({ subscriptions: { retrieve } });
+
+    const itemId = await getSubscriptionItemId(stripe, "sub_123", null);
+
+    expect(itemId).toBeNull();
+  });
+
+  it("returns null when expectedPriceId is given but no item on the subscription actually has that price", async () => {
+    const retrieve = vi.fn().mockResolvedValue({
+      items: { data: [{ id: "si_123", price: { id: "price_starter" } }] },
+    });
+    const stripe = fakeStripe({ subscriptions: { retrieve } });
+
+    const itemId = await getSubscriptionItemId(
+      stripe,
+      "sub_123",
+      "price_business_monthly",
+    );
 
     expect(itemId).toBeNull();
   });

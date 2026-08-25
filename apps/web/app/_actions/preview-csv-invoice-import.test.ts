@@ -102,6 +102,7 @@ describe("previewCsvInvoiceImportAction", () => {
           currency: "USD",
           dueAt: new Date(),
           status: "open",
+          invoiceNumber: null,
           contentHash: "hash-1",
         },
       ],

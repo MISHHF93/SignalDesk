@@ -94,7 +94,23 @@ async function resolveTargetPrice(db: DatabasePool, newPlanKey: string) {
     return { error: "That plan isn't available for checkout yet." } as const;
   }
 
-  return { session, subscription, plan, newPrice, stripePriceId } as const;
+  // The org's current plan price, if known locally — lets
+  // getSubscriptionItemId identify the plan item by price rather than by
+  // array position, which stops being safe once an add-on item also
+  // exists on the same Stripe subscription (see that function's own doc
+  // comment).
+  const currentStripePriceId = currentPrice
+    ? resolveStripePriceId(currentPrice)
+    : null;
+
+  return {
+    session,
+    subscription,
+    plan,
+    newPrice,
+    stripePriceId,
+    currentStripePriceId,
+  } as const;
 }
 
 export type PreviewPlanChangeResult =
@@ -122,11 +138,13 @@ export async function previewPlanChangeAction(
       return { ok: false, error: resolved.error };
     }
 
-    const { subscription, plan, stripePriceId } = resolved;
+    const { subscription, plan, stripePriceId, currentStripePriceId } =
+      resolved;
     const stripe = createStripeBillingClient(getStripeSecretKey());
     const subscriptionItemId = await getSubscriptionItemId(
       stripe,
       subscription.stripeSubscriptionId as string,
+      currentStripePriceId,
     );
 
     if (!subscriptionItemId || !subscription.stripeCustomerId) {
@@ -207,13 +225,21 @@ export async function changePlanAction(
         return { error: resolved.error };
       }
 
-      const { session, subscription, plan, newPrice, stripePriceId } = resolved;
+      const {
+        session,
+        subscription,
+        plan,
+        newPrice,
+        stripePriceId,
+        currentStripePriceId,
+      } = resolved;
 
       try {
         const stripe = createStripeBillingClient(getStripeSecretKey());
         const subscriptionItemId = await getSubscriptionItemId(
           stripe,
           subscription.stripeSubscriptionId as string,
+          currentStripePriceId,
         );
 
         if (!subscriptionItemId) {
