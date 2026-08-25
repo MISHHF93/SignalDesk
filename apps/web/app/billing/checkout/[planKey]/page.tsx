@@ -81,6 +81,18 @@ export default async function CheckoutPage({
     session.organizationId,
   );
 
+  // Real gap found by review: startCheckoutAction (the Server Action this
+  // page's form submits to) already gates on this exact condition
+  // server-side — the enforcement was never missing — but this page never
+  // showed the matching UI-side signal `billing/page.tsx` and
+  // `connector-detail-content.tsx` both do (ADR 0062). Without it, a
+  // member/viewer saw a fully interactive "Start your free trial" /
+  // "Continue to payment" form and only learned they couldn't actually
+  // subscribe after submitting it — a dishonest UI state under CLAUDE.md's
+  // honesty discipline (a control implying a workspace action the viewer
+  // cannot complete, shown with no explanation).
+  const canManageBilling = session.role === "owner" || session.role === "admin";
+
   const price = promo
     ? await getRedeemablePromoPrice(db, promo)
     : await getCurrentStandardPrice(db, planKey, billingInterval);
@@ -145,6 +157,22 @@ export default async function CheckoutPage({
           <div>
             <h2 id="billing-notice-heading">Create a real account first</h2>
             <p>Subscriptions need a real, email-verified account.</p>
+          </div>
+        </aside>
+      ) : !canManageBilling ? (
+        <aside
+          className="honestyNotice"
+          aria-labelledby="billing-notice-heading"
+        >
+          <span className="noticeIcon" aria-hidden="true">
+            ⚠
+          </span>
+          <div>
+            <h2 id="billing-notice-heading">Owner or admin required</h2>
+            <p>
+              Ask an owner or admin on this workspace to manage its
+              subscription.
+            </p>
           </div>
         </aside>
       ) : !priceBelongsToPlan ? (
