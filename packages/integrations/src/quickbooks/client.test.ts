@@ -608,4 +608,45 @@ describe("sendQuickBooksInvoiceReminder", () => {
       "Bearer access-token-1",
     );
   });
+
+  it("regression: never auto-retries a 5xx on the memo update, since it is not idempotent", async () => {
+    // Real bug found by review: fetchWithRetry's blanket retry-on-5xx
+    // policy used to apply here unchanged, but a 5xx is not proof the
+    // sparse update never applied server-side — retrying would resend the
+    // now-stale SyncToken regardless. The memo update now opts out via
+    // `{ retryable: false }`.
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse(200, { Invoice: { Id: "148", SyncToken: "3" } }),
+      )
+      .mockResolvedValueOnce(jsonResponse(503, { error: "unavailable" }));
+
+    await expect(
+      sendQuickBooksInvoiceReminder("access-token-1", "realm-999", "148", {
+        body: "Your invoice for $500 is 10 days overdue.",
+      }),
+    ).rejects.toThrow();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("regression: never auto-retries a 5xx on the send step, since triggering an email is not idempotent", async () => {
+    // Same real bug as the memo-update case above, applied to the actual
+    // customer-facing email trigger — the highest-stakes of the three
+    // steps, since a retry here risks a real duplicate email.
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse(200, { Invoice: { Id: "148", SyncToken: "3" } }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, {}))
+      .mockResolvedValueOnce(jsonResponse(503, { error: "unavailable" }));
+
+    await expect(
+      sendQuickBooksInvoiceReminder("access-token-1", "realm-999", "148", {
+        body: "Your invoice for $500 is 10 days overdue.",
+      }),
+    ).rejects.toThrow();
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
 });

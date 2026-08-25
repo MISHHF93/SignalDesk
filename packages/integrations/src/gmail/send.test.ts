@@ -211,20 +211,21 @@ describe("sendGmailMessage", () => {
     );
   });
 
-  it("retries on a 5xx before succeeding, reusing the shared retry policy", async () => {
-    fetchMock
-      .mockResolvedValueOnce(
-        jsonResponse(503, { error: { message: "unavailable" } }),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse(200, { id: "msg_retry", threadId: "thread-123" }),
-      );
+  it("regression: never auto-retries a 5xx, since a real email send is not idempotent", async () => {
+    // Real bug found by review: fetchWithRetry's blanket retry-on-5xx
+    // policy used to apply here unchanged, but Gmail's API has no
+    // idempotency-key mechanism — a 5xx is not proof the send never went
+    // out, so retrying risked a real second email reaching the customer.
+    // sendGmailMessage now opts out via `{ retryable: false }`; this
+    // failure surfaces immediately as an UpstreamProviderError instead,
+    // letting the higher-level approve action's own safe, tracked retry
+    // (a human re-approving) handle it.
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(503, { error: { message: "unavailable" } }),
+    );
 
-    const sendPromise = sendGmailMessage("access-token", INPUT);
-    await vi.runAllTimersAsync();
-    const result = await sendPromise;
+    await expect(sendGmailMessage("access-token", INPUT)).rejects.toThrow();
 
-    expect(result).toEqual({ id: "msg_retry", threadId: "thread-123" });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ASANA_SCOPES,
   buildAsanaAuthorizationUrl,
+  createAsanaTaskStory,
   exchangeAsanaAuthorizationCode,
   fetchAsanaTasks,
   fetchAsanaWorkspaces,
@@ -346,5 +347,75 @@ describe("fetchAsanaTasks", () => {
     );
     await vi.runAllTimersAsync();
     await assertion;
+  });
+});
+
+describe("createAsanaTaskStory", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("posts the comment text to the task's stories endpoint with a bearer token", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(201, { data: { gid: "story-1" } }),
+    );
+
+    const result = await createAsanaTaskStory(
+      "access-token-1",
+      "task-148",
+      "Following up on this task.",
+    );
+
+    expect(result).toEqual({ storyGid: "story-1" });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new URL(url).pathname).toBe("/api/1.0/tasks/task-148/stories");
+    expect(init.method).toBe("POST");
+    expect((init.headers as Record<string, string>).Authorization).toBe(
+      "Bearer access-token-1",
+    );
+    expect(JSON.parse(init.body as string)).toEqual({
+      data: { text: "Following up on this task." },
+    });
+  });
+
+  it("throws when the response is ok but carries no story gid", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: {} }));
+
+    await expect(
+      createAsanaTaskStory("access-token-1", "task-148", "Body"),
+    ).rejects.toThrow(/no story gid/);
+  });
+
+  it("throws on a non-ok response", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(400, { errors: [] }));
+
+    await expect(
+      createAsanaTaskStory("access-token-1", "task-148", "Body"),
+    ).rejects.toThrow(/Asana task comment/);
+  });
+
+  it("regression: never auto-retries a 5xx, since posting a comment is not idempotent", async () => {
+    // Real bug found by review: fetchWithRetry's blanket retry-on-5xx
+    // policy used to apply here unchanged, but Asana's API has no
+    // idempotency-key mechanism — a 5xx is not proof the comment was
+    // never created, so retrying risked a real duplicate comment on the
+    // task. createAsanaTaskStory now opts out via `{ retryable: false }`.
+    fetchMock.mockResolvedValueOnce(jsonResponse(503, { errors: [] }));
+
+    await expect(
+      createAsanaTaskStory("access-token-1", "task-148", "Body"),
+    ).rejects.toThrow();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

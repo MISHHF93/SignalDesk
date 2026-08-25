@@ -8,6 +8,7 @@ import {
   fetchZendeskTickets,
   generatePkcePair,
   isValidZendeskSubdomain,
+  postZendeskTicketReply,
   refreshZendeskAccessToken,
   revokeZendeskAccessToken,
   ZENDESK_SCOPES,
@@ -307,5 +308,69 @@ describe("fetchZendeskTickets", () => {
     await expect(
       fetchZendeskTickets("acme", "bad-token", 0, null),
     ).rejects.toThrow(/Zendesk tickets fetch failed/);
+  });
+});
+
+describe("postZendeskTicketReply", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("PUTs a public comment onto the ticket with a bearer token", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, { ticket: { id: 42 } }));
+
+    await postZendeskTicketReply(
+      "access-token-1",
+      "acme",
+      42,
+      "Thanks for reaching out.",
+    );
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://acme.zendesk.com/api/v2/tickets/42.json");
+    expect(init.method).toBe("PUT");
+    expect((init.headers as Record<string, string>).Authorization).toBe(
+      "Bearer access-token-1",
+    );
+    const sentBody = JSON.parse(init.body as string);
+    expect(sentBody.ticket.comment).toEqual({
+      body: "Thanks for reaching out.",
+      public: true,
+    });
+  });
+
+  it("throws on a non-ok response", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(404, { error: "not_found" }));
+
+    await expect(
+      postZendeskTicketReply("access-token-1", "acme", 42, "Body"),
+    ).rejects.toThrow(/Zendesk ticket reply/);
+  });
+
+  it("regression: never auto-retries a 5xx, since posting a reply is not idempotent", async () => {
+    // Real bug found by review: fetchWithRetry's blanket retry-on-5xx
+    // policy used to apply here unchanged, but Zendesk's API has no
+    // idempotency-key mechanism — a 5xx is not proof the comment was
+    // never added, so retrying risked a real duplicate customer-visible
+    // reply. postZendeskTicketReply now opts out via
+    // `{ retryable: false }`.
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(503, { error: "unavailable" }),
+    );
+
+    await expect(
+      postZendeskTicketReply("access-token-1", "acme", 42, "Body"),
+    ).rejects.toThrow();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

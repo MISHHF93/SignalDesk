@@ -462,6 +462,11 @@ export async function postZendeskTicketReply(
         ticket: { comment: { body: commentBody, public: true } },
       }),
     },
+    // Posting a reply is never safe to auto-retry: Zendesk's API gives no
+    // idempotency-key mechanism, and a 5xx here is not proof the comment
+    // was never added (see `FetchWithRetryOptions.retryable`'s doc
+    // comment) — a retry risks a real duplicate customer-visible reply.
+    { retryable: false },
   );
 
   if (!response.ok) {

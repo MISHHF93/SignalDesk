@@ -599,19 +599,27 @@ export async function sendQuickBooksInvoiceReminder(
   );
   updateUrl.searchParams.set("minorversion", "65");
 
-  const updateResponse = await fetchWithRetry(updateUrl.toString(), {
-    method: "POST",
-    headers: {
-      ...authHeaders,
-      "Content-Type": "application/json",
+  const updateResponse = await fetchWithRetry(
+    updateUrl.toString(),
+    {
+      method: "POST",
+      headers: {
+        ...authHeaders,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        Id: invoiceId,
+        SyncToken: currentSyncToken,
+        sparse: true,
+        CustomerMemo: { value: mergedMemo },
+      }),
     },
-    body: JSON.stringify({
-      Id: invoiceId,
-      SyncToken: currentSyncToken,
-      sparse: true,
-      CustomerMemo: { value: mergedMemo },
-    }),
-  });
+    // Writing the memo is never safe to auto-retry: a 5xx here is not
+    // proof the update never applied (see
+    // `FetchWithRetryOptions.retryable`'s doc comment), and a retry would
+    // resend the now-stale `currentSyncToken` regardless.
+    { retryable: false },
+  );
 
   if (!updateResponse.ok) {
     await throwUpstreamError(
@@ -628,10 +636,19 @@ export async function sendQuickBooksInvoiceReminder(
   );
   sendUrl.searchParams.set("minorversion", "65");
 
-  const sendResponse = await fetchWithRetry(sendUrl.toString(), {
-    method: "POST",
-    headers: authHeaders,
-  });
+  const sendResponse = await fetchWithRetry(
+    sendUrl.toString(),
+    {
+      method: "POST",
+      headers: authHeaders,
+    },
+    // Triggering the send is never safe to auto-retry: QuickBooks's API
+    // gives no idempotency-key mechanism, and a 5xx here is not proof the
+    // email was never sent (see `FetchWithRetryOptions.retryable`'s doc
+    // comment) — a retry risks a real duplicate email reaching the
+    // customer.
+    { retryable: false },
+  );
 
   if (!sendResponse.ok) {
     await throwUpstreamError("QuickBooks invoice reminder send", sendResponse);

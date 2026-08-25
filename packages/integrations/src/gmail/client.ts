@@ -313,6 +313,11 @@ export async function sendGmailMessage(
         ...(input.threadId ? { threadId: input.threadId } : {}),
       }),
     },
+    // Sending an email is never safe to auto-retry: Gmail's API gives no
+    // idempotency-key mechanism, and a 5xx here is not proof the send never
+    // went out (see `FetchWithRetryOptions.retryable`'s doc comment) — a
+    // retry risks a real second email reaching the customer.
+    { retryable: false },
   );
 
   if (response.status === 403 && (await isInsufficientScopeError(response))) {

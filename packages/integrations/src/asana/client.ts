@@ -326,6 +326,11 @@ export async function createAsanaTaskStory(
       },
       body: JSON.stringify({ data: { text } }),
     },
+    // Posting a comment is never safe to auto-retry: Asana's API gives no
+    // idempotency-key mechanism, and a 5xx here is not proof the comment
+    // was never created (see `FetchWithRetryOptions.retryable`'s doc
+    // comment) — a retry risks a real duplicate comment on the task.
+    { retryable: false },
   );
 
   if (!response.ok) {

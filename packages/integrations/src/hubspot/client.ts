@@ -475,6 +475,11 @@ export async function createHubSpotDealNote(
         ],
       }),
     },
+    // Creating a note is never safe to auto-retry: HubSpot's API gives no
+    // idempotency-key mechanism, and a 5xx here is not proof the note was
+    // never created (see `FetchWithRetryOptions.retryable`'s doc comment)
+    // — a retry risks a real duplicate note on the deal.
+    { retryable: false },
   );
 
   if (!response.ok) {

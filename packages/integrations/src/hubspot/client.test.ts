@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  createHubSpotDealNote,
   fetchHubSpotDealsModifiedSince,
   fetchHubSpotOwners,
   revokeHubSpotRefreshToken,
@@ -253,5 +254,75 @@ describe("revokeHubSpotRefreshToken", () => {
     const ok = await revokeHubSpotRefreshToken("access-1", "refresh-1");
 
     expect(ok).toBe(false);
+  });
+});
+
+describe("createHubSpotDealNote", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("posts the note text associated to the deal with a bearer token", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(201, { id: "note-1" }));
+
+    const result = await createHubSpotDealNote(
+      "access-token-1",
+      "deal-62",
+      "Following up on this deal.",
+    );
+
+    expect(result).toEqual({ noteId: "note-1" });
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.hubapi.com/crm/v3/objects/notes");
+    expect(init.method).toBe("POST");
+    expect((init.headers as Record<string, string>).Authorization).toBe(
+      "Bearer access-token-1",
+    );
+    const sentBody = JSON.parse(init.body as string);
+    expect(sentBody.properties.hs_note_body).toBe("Following up on this deal.");
+    expect(sentBody.associations[0].to.id).toBe("deal-62");
+  });
+
+  it("throws when the response is ok but carries no note id", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, {}));
+
+    await expect(
+      createHubSpotDealNote("access-token-1", "deal-62", "Body"),
+    ).rejects.toThrow(/no note id/);
+  });
+
+  it("throws on a non-ok response", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(400, { message: "bad" }));
+
+    await expect(
+      createHubSpotDealNote("access-token-1", "deal-62", "Body"),
+    ).rejects.toThrow(/HubSpot deal note create/);
+  });
+
+  it("regression: never auto-retries a 5xx, since creating a note is not idempotent", async () => {
+    // Real bug found by review: fetchWithRetry's blanket retry-on-5xx
+    // policy used to apply here unchanged, but HubSpot's API has no
+    // idempotency-key mechanism — a 5xx is not proof the note was never
+    // created, so retrying risked a real duplicate note on the deal.
+    // createHubSpotDealNote now opts out via `{ retryable: false }`.
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(503, { message: "unavailable" }),
+    );
+
+    await expect(
+      createHubSpotDealNote("access-token-1", "deal-62", "Body"),
+    ).rejects.toThrow();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
