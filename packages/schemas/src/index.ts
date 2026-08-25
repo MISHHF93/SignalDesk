@@ -1050,8 +1050,25 @@ export const updateBusinessProfileInputSchema = z.strictObject({
   defaultExpectedResponseHours: z.number().int().positive().max(720).optional(),
   highValueThresholdCents: z.number().int().nonnegative().optional(),
   // Bit n (0 = Sunday, matching JS Date.getUTCDay()) set means day n is a
-  // working day — 0-127 covers every combination of the 7 bits.
-  workingDaysBitmask: z.number().int().min(0).max(127).optional(),
+  // working day — 1-127 covers every non-empty combination of the 7 bits.
+  // Real gap found by review: 0 (no working days) used to be schema-legal
+  // and was reachable through the profile form's checkbox fieldset, which
+  // has no "select at least one" guard of its own. Once saved,
+  // isWorkingDay/elapsedBusinessHours (@signaldesk/domain) always return
+  // false/0 for a 0 bitmask, which silently drives every elapsed-hours
+  // threshold in evaluateUntouchedLead/evaluateMessageAwaitingReply/
+  // evaluateTicketStuck permanently below its trigger point — a business
+  // owner unchecking every day gets a false "all clear" on the One Page
+  // (no stuck leads, no unanswered messages, no stuck tickets) with
+  // nothing anywhere flagging that risk detection went dark. Rejecting it
+  // here, at the boundary, is cheaper and more honest than trying to
+  // special-case a 0 bitmask throughout every downstream evaluator.
+  workingDaysBitmask: z
+    .number()
+    .int()
+    .min(1, { message: "Select at least one working day." })
+    .max(127)
+    .optional(),
   // Redeclared here rather than imported from @signaldesk/integrations'
   // `organizationIndustries` (this package has no dependency on that one) —
   // same intentional duplication as `isValidTimeZone`'s sibling constants

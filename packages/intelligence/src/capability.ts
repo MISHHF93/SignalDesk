@@ -90,8 +90,8 @@ export interface IntelligenceContext {
    * way a lead has its own), so `message-follow-up.ts` reads it from here
    * directly. */
   readonly defaultExpectedResponseHours: number;
-  /** Every currently `new`/`open`/`pending` support ticket worth
-   * surfacing as potentially stuck (`listStuckSupportTickets`,
+  /** Every currently `new`/`open` support ticket worth surfacing as
+   * potentially stuck (`listStuckSupportTickets`,
    * `@signaldesk/persistence`) — the Customer-Operations-domain
    * counterpart to `overdueTasks`/`recentUnansweredMessages`, same "real
    * set, not one representative record" shape. Reuses

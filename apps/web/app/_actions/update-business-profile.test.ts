@@ -98,25 +98,26 @@ describe("updateBusinessProfileAction", () => {
     expect(mockedUpdateOrganizationBusinessProfile).not.toHaveBeenCalled();
   });
 
-  it("treats an unchecked workingDays fieldset as a real, meaningful bitmask of 0, not an omitted field", async () => {
+  it("regression: real gap found by review — refuses to save an unchecked workingDays fieldset (bitmask 0) instead of silently persisting it", async () => {
+    // A saved bitmask of 0 used to be accepted as "a real, meaningful
+    // submitted state" and previously had a test asserting exactly that.
+    // But isWorkingDay/elapsedBusinessHours (@signaldesk/domain) always
+    // return false/0 for a 0 bitmask, which silently drives every
+    // elapsed-hours threshold in evaluateUntouchedLead/
+    // evaluateMessageAwaitingReply/evaluateTicketStuck permanently below
+    // its trigger point — a false "all clear" on the One Page with nothing
+    // flagging that risk detection went dark. Rejecting it here, before
+    // any write, is the honest behavior.
     mockedGetCurrentOrganization.mockResolvedValue(sessionWithRole("owner"));
-    mockedUpdateOrganizationBusinessProfile.mockResolvedValue(
-      undefined as unknown as Awaited<
-        ReturnType<typeof updateOrganizationBusinessProfile>
-      >,
-    );
 
-    await updateBusinessProfileAction(
+    const result = await updateBusinessProfileAction(
       { error: null, savedAt: null },
       formData({ timezone: "UTC" }),
     );
 
-    expect(mockedUpdateOrganizationBusinessProfile).toHaveBeenCalledWith(
-      undefined,
-      "org-1",
-      "user-1",
-      expect.objectContaining({ workingDaysBitmask: 0 }),
-    );
+    expect(result.savedAt).toBeNull();
+    expect(result.error).toBe("Select at least one working day.");
+    expect(mockedUpdateOrganizationBusinessProfile).not.toHaveBeenCalled();
   });
 
   it("converts checked working days into the real bitmask and dollars into cents on the happy path", async () => {
@@ -163,7 +164,7 @@ describe("updateBusinessProfileAction", () => {
 
     const result = await updateBusinessProfileAction(
       { error: null, savedAt: null },
-      formData({ timezone: "UTC" }),
+      formData({ timezone: "UTC", workingDays: ["1", "2", "3"] }),
     );
 
     expect(result).toEqual({

@@ -90,8 +90,9 @@ export interface IntelligenceFinding {
   readonly correlationName?: string;
   /**
    * Present and always `"agent"` only for a finding produced by
-   * agent-result-reconciler.ts — every one of today's 6 registered
-   * capabilities leaves this `undefined`. Lets dashboard-composition.ts
+   * agent-result-reconciler.ts — every one of today's registered
+   * `IntelligenceCapability`s (`registry.ts`) leaves this `undefined`.
+   * Lets dashboard-composition.ts
    * set a stricter riskClass/requiresApproval on the resulting
    * ActionProposal without a capability ever needing to know agents exist.
    */

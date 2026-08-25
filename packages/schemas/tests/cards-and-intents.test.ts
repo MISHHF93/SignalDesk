@@ -267,4 +267,17 @@ describe("updateBusinessProfileInputSchema", () => {
         .success,
     ).toBe(false);
   });
+
+  it("regression: real gap found by review — rejects a 0 (no working days) bitmask, since it silently disables every elapsed-hours evaluator", () => {
+    // isWorkingDay/elapsedBusinessHours (@signaldesk/domain) always return
+    // false/0 for a 0 bitmask, which drives evaluateUntouchedLead/
+    // evaluateMessageAwaitingReply/evaluateTicketStuck permanently below
+    // their trigger thresholds — a false "all clear," not a legitimate
+    // "no working days" business state.
+    const result = updateBusinessProfileInputSchema.safeParse({
+      workingDaysBitmask: 0,
+    });
+
+    expect(result.success).toBe(false);
+  });
 });
