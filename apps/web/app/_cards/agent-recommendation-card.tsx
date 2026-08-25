@@ -10,6 +10,59 @@ import type { CardComponentProps } from "./card-types";
 
 type ActionStatus = "idle" | "pending" | "success" | "error";
 
+/** The 5 connector send actions share this exact result shape (`{ ok:
+ * true, alreadySent, ...a provider-specific id/timestamp field }` or
+ * `ActionFailureResult`) — this is the minimal common structure
+ * `handleApprove`'s shared branch below actually reads, deliberately not
+ * importing each connector's own more specific result type (their extra
+ * fields are never used here). */
+interface ApproveSendResult {
+  readonly ok: boolean;
+  readonly alreadySent?: boolean;
+  readonly error?: string;
+  readonly reconnectSlug?: string;
+}
+
+type SendActionType =
+  | "send_customer_email_reply"
+  | "post_task_nudge"
+  | "post_ticket_reply"
+  | "post_deal_note"
+  | "send_invoice_reminder";
+
+/** The two messages that differ between the 5 connectors' otherwise
+ * identical approve flow — everything else about handling the result is
+ * shared. */
+const SEND_ACTION_LABELS: Record<
+  SendActionType,
+  { readonly done: string; readonly alreadyDone: string }
+> = {
+  send_customer_email_reply: {
+    done: "Reply sent.",
+    alreadyDone: "Already sent — no duplicate was sent.",
+  },
+  post_task_nudge: {
+    done: "Nudge posted.",
+    alreadyDone: "Already posted — no duplicate was posted.",
+  },
+  post_ticket_reply: {
+    done: "Reply sent.",
+    alreadyDone: "Already sent — no duplicate was sent.",
+  },
+  post_deal_note: {
+    done: "Note logged.",
+    alreadyDone: "Already logged — no duplicate was logged.",
+  },
+  send_invoice_reminder: {
+    done: "Reminder sent.",
+    alreadyDone: "Already sent — no duplicate was sent.",
+  },
+};
+
+function isSendActionType(actionType: string): actionType is SendActionType {
+  return actionType in SEND_ACTION_LABELS;
+}
+
 /**
  * Renders one reconciled Agent Fabric recommendation — never a visible
  * swarm of per-specialist cards, per the mission's "one AI" rule. Its
@@ -51,148 +104,42 @@ export function AgentRecommendationCard({
   const [reconnectSlug, setReconnectSlug] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const proposal = card.recommendedActions[0];
-  const isEmailReply = proposal?.actionType === "send_customer_email_reply";
-  const isTaskNudge = proposal?.actionType === "post_task_nudge";
-  const isTicketReply = proposal?.actionType === "post_ticket_reply";
-  const isDealNote = proposal?.actionType === "post_deal_note";
-  const isInvoiceReminder = proposal?.actionType === "send_invoice_reminder";
+  const sendActionType =
+    proposal?.actionType && isSendActionType(proposal.actionType)
+      ? proposal.actionType
+      : null;
+  const sendActionsByType: Record<
+    SendActionType,
+    ((cardId: string) => Promise<ApproveSendResult>) | undefined
+  > = {
+    send_customer_email_reply: approveMessageReplyProposalAction,
+    post_task_nudge: approveTaskNudgeProposalAction,
+    post_ticket_reply: approveTicketReplyProposalAction,
+    post_deal_note: approveDealNoteProposalAction,
+    send_invoice_reminder: approveInvoiceReminderProposalAction,
+  };
+  const sendAction = sendActionType
+    ? sendActionsByType[sendActionType]
+    : undefined;
 
   function handleApprove() {
-    if (isEmailReply) {
-      if (!approveMessageReplyProposalAction) {
+    if (sendActionType) {
+      if (!sendAction) {
         return;
       }
+
+      const labels = SEND_ACTION_LABELS[sendActionType];
 
       setStatus("pending");
       setMessage(null);
       setReconnectSlug(null);
 
       startTransition(async () => {
-        const result = await approveMessageReplyProposalAction(card.id);
+        const result = await sendAction(card.id);
 
         if (result.ok) {
           setStatus("success");
-          setMessage(
-            result.alreadySent
-              ? "Already sent — no duplicate was sent."
-              : "Reply sent.",
-          );
-        } else {
-          setStatus("error");
-          setMessage(`Action failed. ${result.error}`);
-          setReconnectSlug(result.reconnectSlug ?? null);
-        }
-      });
-
-      return;
-    }
-
-    if (isTaskNudge) {
-      if (!approveTaskNudgeProposalAction) {
-        return;
-      }
-
-      setStatus("pending");
-      setMessage(null);
-      setReconnectSlug(null);
-
-      startTransition(async () => {
-        const result = await approveTaskNudgeProposalAction(card.id);
-
-        if (result.ok) {
-          setStatus("success");
-          setMessage(
-            result.alreadySent
-              ? "Already posted — no duplicate was posted."
-              : "Nudge posted.",
-          );
-        } else {
-          setStatus("error");
-          setMessage(`Action failed. ${result.error}`);
-          setReconnectSlug(result.reconnectSlug ?? null);
-        }
-      });
-
-      return;
-    }
-
-    if (isTicketReply) {
-      if (!approveTicketReplyProposalAction) {
-        return;
-      }
-
-      setStatus("pending");
-      setMessage(null);
-      setReconnectSlug(null);
-
-      startTransition(async () => {
-        const result = await approveTicketReplyProposalAction(card.id);
-
-        if (result.ok) {
-          setStatus("success");
-          setMessage(
-            result.alreadySent
-              ? "Already sent — no duplicate was sent."
-              : "Reply sent.",
-          );
-        } else {
-          setStatus("error");
-          setMessage(`Action failed. ${result.error}`);
-          setReconnectSlug(result.reconnectSlug ?? null);
-        }
-      });
-
-      return;
-    }
-
-    if (isDealNote) {
-      if (!approveDealNoteProposalAction) {
-        return;
-      }
-
-      setStatus("pending");
-      setMessage(null);
-      setReconnectSlug(null);
-
-      startTransition(async () => {
-        const result = await approveDealNoteProposalAction(card.id);
-
-        if (result.ok) {
-          setStatus("success");
-          setMessage(
-            result.alreadySent
-              ? "Already logged — no duplicate was logged."
-              : "Note logged.",
-          );
-        } else {
-          setStatus("error");
-          setMessage(`Action failed. ${result.error}`);
-          setReconnectSlug(result.reconnectSlug ?? null);
-        }
-      });
-
-      return;
-    }
-
-    if (isInvoiceReminder) {
-      if (!approveInvoiceReminderProposalAction) {
-        return;
-      }
-
-      setStatus("pending");
-      setMessage(null);
-      setReconnectSlug(null);
-
-      startTransition(async () => {
-        const result = await approveInvoiceReminderProposalAction(card.id);
-
-        if (result.ok) {
-          setStatus("success");
-          setMessage(
-            result.alreadySent
-              ? "Already sent — no duplicate was sent."
-              : "Reminder sent.",
-          );
+          setMessage(result.alreadySent ? labels.alreadyDone : labels.done);
         } else {
           setStatus("error");
           setMessage(`Action failed. ${result.error}`);
