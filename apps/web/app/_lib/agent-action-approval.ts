@@ -143,20 +143,46 @@ export async function claimApprovalOrFail(
  * even started (an entity failed to load, a token refresh threw) never
  * leaves the collaboration permanently claimed with no real effect and no
  * way to retry. Deliberately used only around the send attempt itself, not
- * around the audit-event write that follows it — see
- * `recordApprovalAuditEvent`'s own doc comment for why those two steps need
- * different failure handling, a real bug this file's own history got wrong
- * before it was split into two helpers. */
+ * around the audit-event write that follows a *returned* (not thrown)
+ * result — see `recordApprovalAuditEvent`'s own doc comment for why those
+ * two steps need different failure handling, a real bug this file's own
+ * history got wrong before it was split into two helpers.
+ *
+ * Real bug found by review: this used to only reset the claim and rethrow,
+ * with no audit event at all for this specific path. Every other
+ * blocked/denied path in a caller action explicitly records one
+ * (`recordApprovalBlocked`), and the normal `attemptSend` *returning*
+ * `{ ok: false }` also gets one via the caller's own trailing
+ * `recordApprovalAuditEvent` call — but a genuine *throw* from `fn` (a
+ * transient DB error loading the entity, a token-refresh call throwing
+ * before any real send was attempted) propagated straight past that
+ * trailing call into the action's top-level catch, leaving this specific,
+ * real approval attempt with zero audit trail at all — indistinguishable
+ * from an approval that was never attempted. Now records one here too,
+ * via the same safe `recordApprovalAuditEvent` (never lets a failure
+ * writing *this* audit event replace the real error being rethrown). */
 export async function withApprovalRollback<T>(
   db: DatabasePool,
   organizationId: string,
   collaborationId: string,
+  userId: string,
   fn: () => Promise<T>,
 ): Promise<T> {
   try {
     return await fn();
   } catch (error) {
     await resetAgentCollaborationOutcome(db, organizationId, collaborationId);
+    await recordApprovalAuditEvent(db, organizationId, {
+      userId,
+      eventType: "agent_action_proposal.approved",
+      subjectType: "agent_collaboration",
+      subjectId: collaborationId,
+      outcome: "failed",
+      metadata: {
+        reason: "attempt_threw",
+        error: error instanceof Error ? error.message : String(error),
+      },
+    });
     throw error;
   }
 }

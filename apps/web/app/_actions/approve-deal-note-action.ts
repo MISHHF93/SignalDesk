@@ -389,6 +389,7 @@ export async function approveDealNoteProposalAction(
       db,
       session.organizationId,
       collaborationId,
+      session.userId,
       () =>
         attemptSend(
           db,

@@ -233,6 +233,7 @@ describe("withApprovalRollback", () => {
       undefined as never,
       "org-1",
       "collab-1",
+      "user-1",
       async () => "sent",
     );
 
@@ -244,9 +245,15 @@ describe("withApprovalRollback", () => {
     const failure = new Error("upstream send failed");
 
     await expect(
-      withApprovalRollback(undefined as never, "org-1", "collab-1", () => {
-        throw failure;
-      }),
+      withApprovalRollback(
+        undefined as never,
+        "org-1",
+        "collab-1",
+        "user-1",
+        () => {
+          throw failure;
+        },
+      ),
     ).rejects.toThrow(failure);
 
     expect(mockedResetAgentCollaborationOutcome).toHaveBeenCalledWith(
@@ -254,6 +261,59 @@ describe("withApprovalRollback", () => {
       "org-1",
       "collab-1",
     );
+  });
+
+  it("regression: records a failed audit event when the wrapped function throws, instead of leaving this approval attempt with no audit trail at all", async () => {
+    // Real bug found by review: this used to only reset the claim and
+    // rethrow, with no audit event for this specific path — every other
+    // blocked/denied path records one, but a genuine throw from `fn` (a
+    // transient DB error loading the entity, a token-refresh call
+    // throwing) used to leave this real approval attempt indistinguishable
+    // from one that was never attempted at all.
+    const failure = new Error("failed to load the entity");
+
+    await expect(
+      withApprovalRollback(
+        undefined as never,
+        "org-1",
+        "collab-1",
+        "user-1",
+        () => {
+          throw failure;
+        },
+      ),
+    ).rejects.toThrow(failure);
+
+    expect(mockedRecordAuditEvent).toHaveBeenCalledWith(
+      undefined,
+      "org-1",
+      expect.objectContaining({
+        userId: "user-1",
+        eventType: "agent_action_proposal.approved",
+        subjectType: "agent_collaboration",
+        subjectId: "collab-1",
+        outcome: "failed",
+      }),
+    );
+  });
+
+  it("regression: still rethrows the original error even when recording that failure's own audit event also fails", async () => {
+    const failure = new Error("upstream send failed");
+    mockedRecordAuditEvent.mockRejectedValue(
+      new Error("audit_events insert timed out"),
+    );
+
+    await expect(
+      withApprovalRollback(
+        undefined as never,
+        "org-1",
+        "collab-1",
+        "user-1",
+        () => {
+          throw failure;
+        },
+      ),
+    ).rejects.toThrow(failure);
   });
 });
 

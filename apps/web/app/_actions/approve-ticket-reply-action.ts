@@ -399,6 +399,7 @@ export async function approveTicketReplyProposalAction(
       db,
       session.organizationId,
       collaborationId,
+      session.userId,
       () =>
         attemptSend(
           db,

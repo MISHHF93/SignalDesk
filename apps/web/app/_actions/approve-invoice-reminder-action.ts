@@ -416,6 +416,7 @@ export async function approveInvoiceReminderProposalAction(
       db,
       session.organizationId,
       collaborationId,
+      session.userId,
       () =>
         attemptSend(
           db,

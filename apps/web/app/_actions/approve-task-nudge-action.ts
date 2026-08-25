@@ -376,6 +376,7 @@ export async function approveTaskNudgeProposalAction(
       db,
       session.organizationId,
       collaborationId,
+      session.userId,
       () =>
         attemptSend(
           db,
