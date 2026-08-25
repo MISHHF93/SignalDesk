@@ -1000,6 +1000,37 @@ export const supportTickets = pgTable(
   ],
 );
 
+/**
+ * `signals` and `recommendations` (below): real, RLS-forced, tested-at-the-
+ * constraint-level DDL with zero application code writing to either one
+ * and zero test coverage exercising them — a real, disclosed gap
+ * (`SIGNALDESK_SYSTEM_CERTIFICATION.md`'s inventory names this explicitly,
+ * confirmed still true on re-check, not newly discovered).
+ *
+ * Investigated why, not just re-flagged: this table's shape (`kind`,
+ * `headline`, `rationale`, `evidenceDigest`, `ruleVersion`, evaluated-at)
+ * is a persisted, durable-row design for exactly what
+ * `@signaldesk/intelligence`'s `IntelligenceFinding` now computes fresh
+ * on every page load instead — and `recommendations`'s shape
+ * (`recommendedNextStep`, `generatorKind: 'deterministic_rule' |
+ * 'model_assisted'`, a confidence/validity window) is the same durable-row
+ * treatment of what `ActionProposal`/`IntelligenceCard.recommendedActions`
+ * now compute live. Read as evidence this repo's own real architecture
+ * evolved from "persist a signal, then a recommendation off it" to
+ * "recompute both live from source data on every read" — a real, working,
+ * simpler design (no staleness between a stored signal and the data it
+ * describes) that this schema predates, not an unfinished feature waiting
+ * for a writer.
+ *
+ * Do not wire a writer to these as-is: doing so would stand up a second,
+ * competing persistence mechanism for exactly what `IntelligenceCapability`
+ * already does — the "extend, don't duplicate" principle this repo's own
+ * `CLAUDE.md` states applies here directly. If a real future need for
+ * durable (not recomputed) signals ever arises — e.g. an audit requirement
+ * to prove what was shown to a user at a specific past moment — design
+ * that against a real requirement then, reusing this shape if it still
+ * fits, rather than inventing a reason to populate it now.
+ */
 export const signals = pgTable(
   "signals",
   {

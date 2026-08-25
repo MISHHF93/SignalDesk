@@ -119,6 +119,15 @@ being built yet in `docs/product-vision-backlog.md` with a "reality check"
 against what's actually real today, rather than either building unscoped
 speculative infrastructure or letting the idea vanish.
 
+Migrations are additive by rule, not just by habit: prefer adding a
+column/table over dropping or renaming one in place. When a rename or
+removal is genuinely needed, land it as separate migrations — add the new
+shape and backfill real data first, remove the old shape only in a later
+migration once nothing reads it — never as one step that could silently
+drop or truncate real tenant data. This has been this repo's de facto
+practice since its earliest migrations (`0000` onward); it is now a stated
+rule to enforce in review, not an implicit pattern to infer from precedent.
+
 For every new feature, it's worth being able to answer: what business
 problem does this solve, what source proves it, which canonical object
 owns it, does deterministic logic suffice before reaching for AI, what

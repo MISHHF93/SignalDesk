@@ -192,13 +192,17 @@ stripe-billing-config.ts`.
 - **Shortest path**: hand `docs/launch-readiness.md`'s LEGAL_TRUST_SUPPORT
   section and the placeholder pages' own drafting checklists to counsel.
 
-### 7. No database-migration rollback discipline documented as an enforced practice
+### 7. ~~No database-migration rollback discipline documented as an enforced practice~~ — RESOLVED 2026-08-24
 
-- **Subsystem**: `packages/persistence/drizzle/`.
-- **Owner decision to adopt**: writing migrations additively (already the
-  de facto practice this whole session) needs to become a stated,
-  enforced review rule, not an implicit habit — a process decision, not
-  a build task.
+- **Subsystem**: `packages/persistence/drizzle/`, `CLAUDE.md`.
+- **What actually happened**: writing migrations additively was already
+  this repo's de facto practice since its earliest migration (`0000`) —
+  what was missing was only the stated rule. Added to `CLAUDE.md`'s
+  Process section: prefer adding over dropping/renaming in place; a
+  genuine rename/removal lands as separate migrations (add + backfill
+  first, remove only once nothing reads the old shape), never one step
+  that could silently drop or truncate real tenant data. Now a rule to
+  enforce in review, not an implicit pattern to infer from precedent.
 
 ### 8. Password-reset AND real signup confirmation email delivery unverified end to end — now with live evidence the dev project is hitting Supabase's own default sender's rate limit
 
@@ -257,11 +261,29 @@ Roles (owner/admin/member/viewer) gate actions correctly today but don't
 yet change what's rendered — disclosed as narrow-by-design scope from
 Phase 3, not a regression.
 
-### 10. Six connectors support only full re-sync, not true incremental sync
+### 10. Six connectors have no content sync at all yet — corrected 2026-08-24, this entry previously overstated what exists
 
 Slack, Stripe (Connect), Google Calendar, Microsoft Outlook, Microsoft
-Calendar, Linear — "Sync Now" still works correctly for each; this is an
-efficiency gap at scale, not a correctness gap at launch.
+Calendar, Linear. Checked directly against the catalog
+(`packages/integrations/src/index.ts`) rather than assumed from this
+entry's own prior wording: all six honestly declare
+`syncImplemented: false, initialSyncImplemented: false,
+incrementalSyncImplemented: false` — there is no `sync-*.ts` file, no
+"Sync Now" button, and no canonical-entity mapping for any of them.
+These are OAuth-connection-only integrations today (real token storage,
+real revoke), not "full-resync-only" ones — the previous wording here
+was inaccurate, not just imprecise. Building real sync for any one of
+them is a materially bigger scope than "add an incremental cursor to an
+existing sync" — each needs its own mapper, a canonical entity target
+(does a Linear task become a `tasks` row the way Asana's does? does a
+calendar event get its own new canonical entity?), and, to be visible on
+the One Page at all, a real Intelligence Core capability reading that
+new data — closer in size to one ADR-0057-style build per connector
+than a quick fix. Still `P2`/safe to launch without (none of the Golden
+Path's six workflows in `SIGNALDESK_SYSTEM_CERTIFICATION.md` depend on
+any of these six connectors syncing content), but real scoping/product
+decisions are needed before building any one of them, not just
+engineering time.
 
 ### 11. Structured application logging — partially closed 2026-08-24 (ADR 0061)
 
