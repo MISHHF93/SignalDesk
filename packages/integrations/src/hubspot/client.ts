@@ -266,6 +266,23 @@ export async function fetchHubSpotDeals(
  * docs) is a real limit this app doesn't currently need to work around,
  * since `MAX_DEAL_PAGES` (sync-hubspot.ts) already bounds a single sync
  * run far below that.
+ *
+ * Real bug found by review: this used to filter with `GT` (strict
+ * greater-than) on `hs_lastmodifieddate`. `sync-hubspot.ts` advances the
+ * stored cursor to the max `hs_lastmodifieddate` seen across every deal
+ * ingested in a run, so if `MAX_DEAL_PAGES` cuts a run off exactly where
+ * two or more deals share the identical millisecond timestamp (a bulk
+ * HubSpot import/workflow update, a real and reachable case), only the
+ * ones fetched before the cap land this run, but the cursor still
+ * advances to that shared timestamp — a strict `>` next run can then
+ * never match the remaining same-timestamp deals again, silently and
+ * permanently excluding them. `GTE` (inclusive) trades a handful of
+ * harmlessly-refetched deals at the boundary for closing that gap: this
+ * connector's own idempotency key already incorporates `sourceVersion`
+ * (`hubspot-sync.ts`'s `hubspot:deal:${externalRecordId}:${sourceVersion}`),
+ * so re-fetching an already-ingested deal at its already-seen version is
+ * a real, safe no-op via `source_records`' own `on conflict do nothing`,
+ * not a double-ingest.
  */
 export async function fetchHubSpotDealsModifiedSince(
   accessToken: string,
@@ -288,7 +305,7 @@ export async function fetchHubSpotDealsModifiedSince(
             filters: [
               {
                 propertyName: "hs_lastmodifieddate",
-                operator: "GT",
+                operator: "GTE",
                 value: sinceMillis,
               },
             ],

@@ -155,9 +155,16 @@ describe("fetchHubSpotDealsModifiedSince", () => {
       }>;
     };
 
+    // Real bug found by review: this used to be "GT" (strict), which could
+    // permanently exclude a deal that shares the exact cursor millisecond
+    // timestamp with another deal split across a MAX_DEAL_PAGES boundary.
+    // "GTE" trades a harmless re-fetch of the boundary timestamp (this
+    // connector's idempotency key already includes sourceVersion, so a
+    // re-ingest of an already-seen version is a real no-op) for closing
+    // that gap.
     expect(body.filterGroups[0]?.filters[0]).toEqual({
       propertyName: "hs_lastmodifieddate",
-      operator: "GT",
+      operator: "GTE",
       value: String(new Date("2026-08-01T00:00:00.000Z").getTime()),
     });
   });
