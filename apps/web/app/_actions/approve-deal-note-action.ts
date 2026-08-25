@@ -90,17 +90,20 @@ async function attemptSend(
   }
 
   const origin = await getRequestOrigin();
-  const accessToken = await ensureFreshHubSpotAccessToken(
-    db,
-    organizationId,
-    lead.source.integrationId,
-    origin,
-  );
 
   let outcome: CompleteHubSpotDealNoteSendOutcome | null;
   let recoveryClassification: RecoveryClassification | null = null;
+  let sendAttempted = false;
 
   try {
+    const accessToken = await ensureFreshHubSpotAccessToken(
+      db,
+      organizationId,
+      lead.source.integrationId,
+      origin,
+    );
+
+    sendAttempted = true;
     const result = await createHubSpotDealNote(
       accessToken,
       lead.source.externalRecordId,
@@ -110,17 +113,33 @@ async function attemptSend(
     outcome = { status: "sent", sentAt: new Date(), noteId: result.noteId };
   } catch (error) {
     if (error instanceof UpstreamProviderError) {
-      // A definite HubSpot rejection — HubSpot was reached and did not
-      // accept the note. Safe to record 'failed' and let the caller retry.
-      // ADR 0058/0059: classify the real HTTP status into an honest,
-      // specific explanation (and a real reconnect link when auth-related)
-      // instead of one generic sentence for every failure.
+      // A definite HubSpot rejection — HubSpot was reached (either the
+      // token-refresh endpoint or the note creation itself) and did not
+      // accept the request. Safe to record 'failed' and let the caller
+      // retry. ADR 0058/0059: classify the real HTTP status into an
+      // honest, specific explanation (and a real reconnect link when
+      // auth-related) instead of one generic sentence for every failure.
       outcome = { status: "failed", failureReason: error.message };
       recoveryClassification = classifyRecoveryStrategy(error, {
         providerName: "HubSpot",
         entityLabel: "This deal",
         connectorSlug: "hubspot",
       });
+    } else if (!sendAttempted) {
+      // The failure happened while preparing the access token — before the
+      // real HubSpot note creation was ever attempted. That's never
+      // ambiguous the way a dropped connection mid-send is, so it's always
+      // safe to record 'failed' and let the caller retry, rather than
+      // stranding this row 'pending' forever (the prior behavior here: any
+      // token-refresh failure used to permanently strand the row with no
+      // way to ever retry).
+      outcome = {
+        status: "failed",
+        failureReason:
+          error instanceof Error
+            ? error.message
+            : "Failed to prepare a HubSpot access token.",
+      };
     } else {
       // Genuinely unknown whether HubSpot received the request — leave the
       // row 'pending' rather than guessing either way.

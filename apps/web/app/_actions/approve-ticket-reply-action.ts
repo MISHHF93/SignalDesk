@@ -107,17 +107,19 @@ async function attemptSend(
     return { ok: false, error: "Reconnect Zendesk to send this reply." };
   }
 
-  const accessToken = await ensureFreshZendeskAccessToken(
-    db,
-    organizationId,
-    integration.id,
-    integration.externalAccountId,
-  );
-
   let outcome: CompleteZendeskTicketReplySendOutcome | null;
   let recoveryClassification: RecoveryClassification | null = null;
+  let sendAttempted = false;
 
   try {
+    const accessToken = await ensureFreshZendeskAccessToken(
+      db,
+      organizationId,
+      integration.id,
+      integration.externalAccountId,
+    );
+
+    sendAttempted = true;
     await postZendeskTicketReply(
       accessToken,
       integration.externalAccountId,
@@ -128,17 +130,33 @@ async function attemptSend(
     outcome = { status: "sent", sentAt: new Date() };
   } catch (error) {
     if (error instanceof UpstreamProviderError) {
-      // A definite Zendesk rejection — Zendesk was reached and did not
-      // accept the reply. Safe to record 'failed' and let the caller retry.
-      // ADR 0058/0059: classify the real HTTP status into an honest,
-      // specific explanation (and a real reconnect link when auth-related)
-      // instead of one generic sentence for every failure.
+      // A definite Zendesk rejection — Zendesk was reached (either the
+      // token-refresh endpoint or the reply post itself) and did not
+      // accept the request. Safe to record 'failed' and let the caller
+      // retry. ADR 0058/0059: classify the real HTTP status into an
+      // honest, specific explanation (and a real reconnect link when
+      // auth-related) instead of one generic sentence for every failure.
       outcome = { status: "failed", failureReason: error.message };
       recoveryClassification = classifyRecoveryStrategy(error, {
         providerName: "Zendesk",
         entityLabel: "This ticket",
         connectorSlug: "zendesk",
       });
+    } else if (!sendAttempted) {
+      // The failure happened while preparing the access token — before the
+      // real Zendesk reply post was ever attempted. That's never ambiguous
+      // the way a dropped connection mid-send is, so it's always safe to
+      // record 'failed' and let the caller retry, rather than stranding
+      // this row 'pending' forever (the prior behavior here: any token-
+      // refresh failure used to permanently strand the row with no way to
+      // ever retry).
+      outcome = {
+        status: "failed",
+        failureReason:
+          error instanceof Error
+            ? error.message
+            : "Failed to prepare a Zendesk access token.",
+      };
     } else {
       // Genuinely unknown whether Zendesk received the request — leave the
       // row 'pending' rather than guessing either way.

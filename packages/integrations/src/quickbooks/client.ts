@@ -437,6 +437,38 @@ export async function revokeQuickBooksToken(
 }
 
 /**
+ * Delimits the automated-reminder section of `CustomerMemo` from whatever a
+ * human may have typed above it. On the first reminder for an invoice,
+ * `existingMemo` is preserved in full above the marker; on every later
+ * reminder, only the text after the marker (the previous reminder body) is
+ * replaced — the human-authored prefix is never touched again. Without a
+ * stable marker there would be no way to tell "a customer's real note" from
+ * "our own last reminder" on the next send, so `CustomerMemo` would either
+ * keep silently discarding real data or grow a duplicate human prefix on
+ * every send.
+ */
+const AUTOMATED_REMINDER_MARKER =
+  "----- Automated payment reminder (this section is replaced each time a new reminder is sent) -----";
+
+export function mergeCustomerMemo(
+  existingMemo: string | undefined,
+  reminderBody: string,
+): string {
+  const markerIndex = existingMemo
+    ? existingMemo.indexOf(AUTOMATED_REMINDER_MARKER)
+    : -1;
+  const humanPrefix = (
+    markerIndex === -1
+      ? (existingMemo ?? "")
+      : existingMemo!.slice(0, markerIndex)
+  ).trim();
+
+  return humanPrefix.length > 0
+    ? `${humanPrefix}\n\n${AUTOMATED_REMINDER_MARKER}\n${reminderBody}`
+    : `${AUTOMATED_REMINDER_MARKER}\n${reminderBody}`;
+}
+
+/**
  * Sends a payment-reminder email for an overdue invoice, with a drafted
  * `body` actually visible in what gets sent — not just a resend of Intuit's
  * own fixed template to a possibly-different address.
@@ -481,6 +513,16 @@ export async function revokeQuickBooksToken(
  * are QuickBooks Online's well-established, ecosystem-wide sparse-update
  * convention — the same one `QuickBooksInvoice.SyncToken` above already
  * exists to support, reused here rather than inventing a second shape.
+ *
+ * `CustomerMemo` is also a real, human-editable field — a tenant may have
+ * already typed a genuine note onto this invoice (payment instructions, a
+ * thank-you) before any agent-drafted reminder ever ran. An early version
+ * of this function overwrote it outright, silently discarding that real
+ * data. `mergeCustomerMemo` below fixes that: it reads the invoice's
+ * current `CustomerMemo` in the same Step 1 fetch already done for
+ * `SyncToken`, and confines the drafted reminder text to a clearly marked
+ * section, so anything a human wrote before that marker survives every
+ * later reminder untouched.
  *
  * `params.subject` is accepted only for interface parity with connectors
  * whose provider genuinely has a subject field (e.g. Gmail's reply-send
@@ -528,7 +570,9 @@ export async function sendQuickBooksInvoiceReminder(
   }
 
   const readPayload = (await readResponse.json()) as {
-    readonly Invoice?: QuickBooksInvoice;
+    readonly Invoice?: QuickBooksInvoice & {
+      readonly CustomerMemo?: { readonly value: string };
+    };
   };
   const currentSyncToken = readPayload.Invoice?.SyncToken;
 
@@ -538,11 +582,18 @@ export async function sendQuickBooksInvoiceReminder(
     );
   }
 
-  // Step 2: sparse-update just CustomerMemo. `sparse: true` plus `Id`/
-  // `SyncToken` is QuickBooks Online's documented "change only the given
-  // fields, leave everything else untouched" update shape — this never
-  // touches TotalAmt/Balance/DueDate/CustomerRef or anything else this app
-  // reads and relies on elsewhere.
+  const mergedMemo = mergeCustomerMemo(
+    readPayload.Invoice?.CustomerMemo?.value,
+    params.body,
+  );
+
+  // Step 2: sparse-update just CustomerMemo, with the reminder text merged
+  // via `mergeCustomerMemo` above rather than overwritten outright, so any
+  // real note a human already typed onto this invoice survives. `sparse:
+  // true` plus `Id`/`SyncToken` is QuickBooks Online's documented "change
+  // only the given fields, leave everything else untouched" update shape —
+  // this never touches TotalAmt/Balance/DueDate/CustomerRef or anything
+  // else this app reads and relies on elsewhere.
   const updateUrl = new URL(
     `${API_BASE_URL}/company/${encodeURIComponent(realmId)}/invoice`,
   );
@@ -558,7 +609,7 @@ export async function sendQuickBooksInvoiceReminder(
       Id: invoiceId,
       SyncToken: currentSyncToken,
       sparse: true,
-      CustomerMemo: { value: params.body },
+      CustomerMemo: { value: mergedMemo },
     }),
   });
 

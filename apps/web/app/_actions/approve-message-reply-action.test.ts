@@ -290,6 +290,33 @@ describe("approveMessageReplyProposalAction", () => {
     );
   });
 
+  it("regression: records 'failed' (not left stranded 'pending') when the access-token refresh itself fails", async () => {
+    // Real bug found by review: ensureFreshGmailAccessToken used to be
+    // called outside the try/catch that classifies the outcome. A token-
+    // refresh failure happens strictly before sendGmailMessage is ever
+    // called, so it is never ambiguous the way a dropped connection
+    // mid-send is — but the old code left the row 'pending' forever
+    // anyway, permanently blocking every future retry of this
+    // collaboration.
+    mockedGetCurrentOrganization.mockResolvedValue(SESSION);
+    mockedGetAgentCollaboration.mockResolvedValue(FRESH_COLLABORATION);
+    mockedEnsureFreshAccessToken.mockRejectedValue(
+      new Error("Gmail refresh token was revoked."),
+    );
+
+    const result = await approveMessageReplyProposalAction("collab-1");
+
+    expect(result.ok).toBe(false);
+    expect(mockedSendGmailMessage).not.toHaveBeenCalled();
+    expect(mockedCompleteSend).toHaveBeenCalledWith(
+      undefined,
+      "org-1",
+      "user-1",
+      "send-1",
+      { status: "failed", failureReason: "Gmail refresh token was revoked." },
+    );
+  });
+
   it("approves and sends cleanly on the fresh happy path", async () => {
     mockedGetCurrentOrganization.mockResolvedValue(SESSION);
     mockedGetAgentCollaboration.mockResolvedValue(FRESH_COLLABORATION);

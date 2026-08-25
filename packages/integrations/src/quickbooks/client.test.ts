@@ -7,8 +7,10 @@ import {
   fetchQuickBooksClosedInvoices,
   fetchQuickBooksInvoices,
   fetchQuickBooksPayments,
+  mergeCustomerMemo,
   QUICKBOOKS_SCOPES,
   revokeQuickBooksToken,
+  sendQuickBooksInvoiceReminder,
   type QuickBooksOAuthConfig,
 } from "./client";
 
@@ -445,5 +447,165 @@ describe("fetchQuickBooksPayments", () => {
 
     expect(page.results).toEqual([]);
     expect(page.hasMore).toBe(false);
+  });
+});
+
+describe("mergeCustomerMemo", () => {
+  it("wraps the reminder body alone when there is no existing memo", () => {
+    const result = mergeCustomerMemo(
+      undefined,
+      "Your invoice for $500 is 10 days overdue.",
+    );
+
+    expect(result).toContain("Your invoice for $500 is 10 days overdue.");
+  });
+
+  it("preserves a human-authored note that predates any automated reminder", () => {
+    const humanNote =
+      "Please reach out to accounting@acme.test with any questions.";
+    const result = mergeCustomerMemo(
+      humanNote,
+      "Your invoice for $500 is 10 days overdue.",
+    );
+
+    expect(result).toContain(humanNote);
+    expect(result).toContain("Your invoice for $500 is 10 days overdue.");
+    // The human-authored note must come first — this is what lets the next
+    // reminder find and preserve it again, rather than treating it as part
+    // of a prior automated reminder.
+    expect(result.indexOf(humanNote)).toBeLessThan(
+      result.indexOf("Your invoice for $500 is 10 days overdue."),
+    );
+  });
+
+  it("replaces only the previous reminder text on a later reminder, keeping a human-authored note intact", () => {
+    const humanNote = "Thanks for being a loyal customer — call anytime.";
+    const afterFirstReminder = mergeCustomerMemo(
+      humanNote,
+      "Your invoice for $500 is 10 days overdue.",
+    );
+    const afterSecondReminder = mergeCustomerMemo(
+      afterFirstReminder,
+      "Second notice: your $500 balance is now 30 days overdue.",
+    );
+
+    expect(afterSecondReminder).toContain(humanNote);
+    expect(afterSecondReminder).toContain(
+      "Second notice: your $500 balance is now 30 days overdue.",
+    );
+    expect(afterSecondReminder).not.toContain(
+      "Your invoice for $500 is 10 days overdue.",
+    );
+    // The human note must appear exactly once — proof this doesn't
+    // duplicate it on every reminder.
+    expect(afterSecondReminder.indexOf(humanNote)).toBe(
+      afterSecondReminder.lastIndexOf(humanNote),
+    );
+  });
+});
+
+describe("sendQuickBooksInvoiceReminder", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("regression: preserves a human-authored CustomerMemo instead of silently overwriting it", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse(200, {
+          Invoice: {
+            Id: "148",
+            SyncToken: "3",
+            CustomerMemo: { value: "Thanks for being a loyal customer!" },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, {}))
+      .mockResolvedValueOnce(jsonResponse(200, {}));
+
+    await sendQuickBooksInvoiceReminder("access-token-1", "realm-999", "148", {
+      body: "Your invoice for $500 is 10 days overdue.",
+    });
+
+    const [, updateInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    const updateBody = JSON.parse(updateInit.body as string) as {
+      CustomerMemo: { value: string };
+      SyncToken: string;
+      sparse: boolean;
+    };
+
+    expect(updateBody.CustomerMemo.value).toContain(
+      "Thanks for being a loyal customer!",
+    );
+    expect(updateBody.CustomerMemo.value).toContain(
+      "Your invoice for $500 is 10 days overdue.",
+    );
+    expect(updateBody.SyncToken).toBe("3");
+    expect(updateBody.sparse).toBe(true);
+  });
+
+  it("sends only the drafted reminder when the invoice has no pre-existing memo", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse(200, { Invoice: { Id: "148", SyncToken: "3" } }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, {}))
+      .mockResolvedValueOnce(jsonResponse(200, {}));
+
+    await sendQuickBooksInvoiceReminder("access-token-1", "realm-999", "148", {
+      body: "Your invoice for $500 is 10 days overdue.",
+    });
+
+    const [, updateInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    const updateBody = JSON.parse(updateInit.body as string) as {
+      CustomerMemo: { value: string };
+    };
+
+    expect(updateBody.CustomerMemo.value).toContain(
+      "Your invoice for $500 is 10 days overdue.",
+    );
+  });
+
+  it("throws when the invoice lookup finds no invoice", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(200, {}));
+
+    await expect(
+      sendQuickBooksInvoiceReminder("access-token-1", "realm-999", "148", {
+        body: "Your invoice for $500 is 10 days overdue.",
+      }),
+    ).rejects.toThrow(/was not found/);
+  });
+
+  it("triggers the real send with a bearer token and no request body", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse(200, { Invoice: { Id: "148", SyncToken: "3" } }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, {}))
+      .mockResolvedValueOnce(jsonResponse(200, {}));
+
+    await sendQuickBooksInvoiceReminder("access-token-1", "realm-999", "148", {
+      body: "Your invoice for $500 is 10 days overdue.",
+    });
+
+    const [sendUrl, sendInit] = fetchMock.mock.calls[2] as [
+      string,
+      RequestInit,
+    ];
+    expect(new URL(sendUrl).pathname).toBe(
+      "/v3/company/realm-999/invoice/148/send",
+    );
+    expect(sendInit.method).toBe("POST");
+    expect(sendInit.body).toBeUndefined();
+    expect((sendInit.headers as Record<string, string>).Authorization).toBe(
+      "Bearer access-token-1",
+    );
   });
 });

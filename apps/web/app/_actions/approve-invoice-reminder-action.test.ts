@@ -277,6 +277,37 @@ describe("approveInvoiceReminderProposalAction", () => {
     );
   });
 
+  it("regression: records 'failed' (not left stranded 'pending') when the access-token refresh itself fails", async () => {
+    // Real bug found by review: ensureFreshQuickBooksAccessToken used to be
+    // called outside the try/catch that classifies the outcome. A token-
+    // refresh failure (a revoked refresh token, no stored tokens at all)
+    // happens strictly before sendQuickBooksInvoiceReminder is ever called,
+    // so it is never ambiguous the way a dropped connection mid-send is —
+    // but the old code left the row 'pending' forever anyway, permanently
+    // blocking every future retry of this same collaboration.
+    mockedGetCurrentOrganization.mockResolvedValue(SESSION);
+    mockedGetAgentCollaboration.mockResolvedValue(FRESH_COLLABORATION);
+    mockedBeginSend.mockResolvedValue({ id: "send-1", alreadyResolved: null });
+    mockedEnsureFreshAccessToken.mockRejectedValue(
+      new Error("QuickBooks refresh token was revoked."),
+    );
+
+    const result = await approveInvoiceReminderProposalAction("collab-1");
+
+    expect(result.ok).toBe(false);
+    expect(mockedSendReminder).not.toHaveBeenCalled();
+    expect(mockedCompleteSend).toHaveBeenCalledWith(
+      undefined,
+      "org-1",
+      "user-1",
+      "send-1",
+      {
+        status: "failed",
+        failureReason: "QuickBooks refresh token was revoked.",
+      },
+    );
+  });
+
   it("approves and sends cleanly on the fresh happy path", async () => {
     mockedGetCurrentOrganization.mockResolvedValue(SESSION);
     mockedGetAgentCollaboration.mockResolvedValue(FRESH_COLLABORATION);

@@ -57,7 +57,14 @@ const MAX_AGENT_EMAIL_SENDS_PER_DAY = 20;
  * genuinely unknown whether Gmail received the request). Only the former is
  * recorded as `'failed'` (safe to retry); the latter leaves the row
  * `'pending'`, exactly `beginCustomerEmailReplySend`'s documented, disclosed
- * "unsafe to auto-retry, surface a manual check" contract.
+ * "unsafe to auto-retry, surface a manual check" contract. A third case,
+ * `sendAttempted`, covers a failure while preparing the access token itself
+ * (a revoked refresh token, no stored tokens at all) — that always happens
+ * strictly before Gmail's send endpoint is ever called, so it is never
+ * ambiguous either, and is always recorded as `'failed'` too. Without this
+ * distinction, every token-refresh failure permanently stranded the row
+ * `'pending'` with no way to ever retry — a real bug this file had until it
+ * was found and fixed.
  */
 async function attemptSend(
   db: DatabasePool,
@@ -120,17 +127,20 @@ async function attemptSend(
   }
 
   const origin = await getRequestOrigin();
-  const accessToken = await ensureFreshGmailAccessToken(
-    db,
-    organizationId,
-    sendContext.integrationId,
-    origin,
-  );
 
   let outcome: CompleteCustomerEmailReplySendOutcome | null;
   let recoveryClassification: RecoveryClassification | null = null;
+  let sendAttempted = false;
 
   try {
+    const accessToken = await ensureFreshGmailAccessToken(
+      db,
+      organizationId,
+      sendContext.integrationId,
+      origin,
+    );
+
+    sendAttempted = true;
     const result = await sendGmailMessage(accessToken, {
       to: sendContext.counterpartyEmail,
       subject: draftedReply.subject,
@@ -161,6 +171,21 @@ async function attemptSend(
           connectorSlug: "gmail",
         });
       }
+    } else if (!sendAttempted) {
+      // The failure happened while preparing the access token — before the
+      // real Gmail send call was ever made. That's never ambiguous the way
+      // a dropped connection mid-send is, so it's always safe to record
+      // 'failed' and let the caller retry, rather than stranding this row
+      // 'pending' forever (the prior behavior here: any token-refresh
+      // failure used to permanently strand the row with no way to ever
+      // retry).
+      outcome = {
+        status: "failed",
+        failureReason:
+          error instanceof Error
+            ? error.message
+            : "Failed to prepare a Gmail access token.",
+      };
     } else {
       // Genuinely unknown whether Gmail received the request — leave the
       // row 'pending' rather than guessing either way.

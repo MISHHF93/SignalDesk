@@ -105,16 +105,18 @@ async function attemptSend(
     return { ok: false, error: "Reconnect QuickBooks to send this reminder." };
   }
 
-  const accessToken = await ensureFreshQuickBooksAccessToken(
-    db,
-    organizationId,
-    integration.id,
-  );
-
   let outcome: CompleteQuickBooksInvoiceReminderSendOutcome | null;
   let recoveryClassification: RecoveryClassification | null = null;
+  let sendAttempted = false;
 
   try {
+    const accessToken = await ensureFreshQuickBooksAccessToken(
+      db,
+      organizationId,
+      integration.id,
+    );
+
+    sendAttempted = true;
     await sendQuickBooksInvoiceReminder(
       accessToken,
       integration.externalAccountId,
@@ -130,8 +132,9 @@ async function attemptSend(
     outcome = { status: "sent", sentAt: new Date() };
   } catch (error) {
     if (error instanceof UpstreamProviderError) {
-      // A definite QuickBooks rejection — QuickBooks was reached and did
-      // not accept the send. Safe to record 'failed' and let the caller
+      // A definite QuickBooks rejection — QuickBooks was reached (either
+      // the token-refresh endpoint or the reminder send itself) and did
+      // not accept the request. Safe to record 'failed' and let the caller
       // retry. ADR 0058/0059: classify the real HTTP status into an
       // honest, specific explanation (and a real reconnect link when the
       // failure was auth-related) instead of one generic sentence for
@@ -142,6 +145,21 @@ async function attemptSend(
         entityLabel: "This invoice",
         connectorSlug: "quickbooks",
       });
+    } else if (!sendAttempted) {
+      // The failure happened while preparing the access token — before the
+      // real QuickBooks send call was ever made. That's never ambiguous
+      // the way a dropped connection mid-send is, so it's always safe to
+      // record 'failed' and let the caller retry, rather than stranding
+      // this row 'pending' forever (the prior behavior here: any token-
+      // refresh failure — a revoked refresh token, no stored tokens at all
+      // — used to permanently strand the row with no way to ever retry).
+      outcome = {
+        status: "failed",
+        failureReason:
+          error instanceof Error
+            ? error.message
+            : "Failed to prepare a QuickBooks access token.",
+      };
     } else {
       // Genuinely unknown whether QuickBooks received the request — leave
       // the row 'pending' rather than guessing either way.

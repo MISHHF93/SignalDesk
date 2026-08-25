@@ -281,6 +281,37 @@ describe("approveDealNoteProposalAction", () => {
     );
   });
 
+  it("regression: records 'failed' (not left stranded 'pending') when the access-token refresh itself fails", async () => {
+    // Real bug found by review: ensureFreshHubSpotAccessToken used to be
+    // called outside the try/catch that classifies the outcome. A token-
+    // refresh failure happens strictly before createHubSpotDealNote is
+    // ever called, so it is never ambiguous the way a dropped connection
+    // mid-send is — but the old code left the row 'pending' forever
+    // anyway, permanently blocking every future retry of this
+    // collaboration.
+    mockedGetCurrentOrganization.mockResolvedValue(SESSION);
+    mockedGetAgentCollaboration.mockResolvedValue(FRESH_COLLABORATION);
+    mockedBeginSend.mockResolvedValue({ id: "send-1", alreadyResolved: null });
+    mockedEnsureFreshAccessToken.mockRejectedValue(
+      new Error("HubSpot refresh token was revoked."),
+    );
+
+    const result = await approveDealNoteProposalAction("collab-1");
+
+    expect(result.ok).toBe(false);
+    expect(mockedCreateDealNote).not.toHaveBeenCalled();
+    expect(mockedCompleteSend).toHaveBeenCalledWith(
+      undefined,
+      "org-1",
+      "user-1",
+      "send-1",
+      {
+        status: "failed",
+        failureReason: "HubSpot refresh token was revoked.",
+      },
+    );
+  });
+
   it("approves and logs the note cleanly on the fresh happy path", async () => {
     mockedGetCurrentOrganization.mockResolvedValue(SESSION);
     mockedGetAgentCollaboration.mockResolvedValue(FRESH_COLLABORATION);

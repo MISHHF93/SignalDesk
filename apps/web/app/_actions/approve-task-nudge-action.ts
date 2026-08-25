@@ -92,16 +92,18 @@ async function attemptSend(
     };
   }
 
-  const accessToken = await ensureFreshAsanaAccessToken(
-    db,
-    organizationId,
-    task.source.integrationId,
-  );
-
   let outcome: CompleteAsanaTaskNudgeSendOutcome | null;
   let recoveryClassification: RecoveryClassification | null = null;
+  let sendAttempted = false;
 
   try {
+    const accessToken = await ensureFreshAsanaAccessToken(
+      db,
+      organizationId,
+      task.source.integrationId,
+    );
+
+    sendAttempted = true;
     const result = await createAsanaTaskStory(
       accessToken,
       task.source.externalRecordId,
@@ -115,8 +117,9 @@ async function attemptSend(
     };
   } catch (error) {
     if (error instanceof UpstreamProviderError) {
-      // A definite Asana rejection — Asana was reached and did not accept
-      // the comment. Safe to record 'failed' and let the caller retry.
+      // A definite Asana rejection — Asana was reached (either the token-
+      // refresh endpoint or the comment post itself) and did not accept
+      // the request. Safe to record 'failed' and let the caller retry.
       // ADR 0058/0059: classify the real HTTP status into an honest,
       // specific explanation (and a real reconnect link when auth-related)
       // instead of one generic sentence for every failure.
@@ -126,6 +129,21 @@ async function attemptSend(
         entityLabel: "This task",
         connectorSlug: "asana",
       });
+    } else if (!sendAttempted) {
+      // The failure happened while preparing the access token — before the
+      // real Asana post was ever made. That's never ambiguous the way a
+      // dropped connection mid-send is, so it's always safe to record
+      // 'failed' and let the caller retry, rather than stranding this row
+      // 'pending' forever (the prior behavior here: any token-refresh
+      // failure used to permanently strand the row with no way to ever
+      // retry).
+      outcome = {
+        status: "failed",
+        failureReason:
+          error instanceof Error
+            ? error.message
+            : "Failed to prepare an Asana access token.",
+      };
     } else {
       // Genuinely unknown whether Asana received the request — leave the
       // row 'pending' rather than guessing either way, same as Gmail's own
