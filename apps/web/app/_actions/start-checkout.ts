@@ -16,6 +16,7 @@ import {
   getOrganizationSubscription,
   getPlanByKey,
   getRedeemablePromoPrice,
+  recordAuditEvent,
   recordPromoRedemption,
   resurrectOrganizationSubscription,
   withAdvisoryLock,
@@ -59,6 +60,38 @@ const RESUBSCRIBABLE_STATUSES = new Set<SubscriptionStatus>([
   "canceled",
   "incomplete_expired",
 ]);
+
+/**
+ * Records a redeemed promo without letting a failure here corrupt an
+ * already-real success. Found by review: this used to be a bare
+ * `recordPromoRedemption` call inside the same try/catch whose catch
+ * returns "Checkout failed" — by the time it runs, the real Stripe
+ * subscription and the local `organization_subscriptions` row already
+ * exist, so a transient failure recording the promo (a unique-constraint
+ * blip, a connection drop) told the customer checkout failed entirely,
+ * discarding the paid path's real `clientSecret` needed to confirm
+ * payment, even though a live/trialing subscription genuinely exists. A
+ * failure here is reported so it isn't silently lost, but the real
+ * outcome above it is always still returned as-is — the same "don't let
+ * a non-critical follow-up write undo an already-real success" reasoning
+ * `recordApprovalAuditEvent` (`apps/web/app/_lib/agent-action-approval.ts`)
+ * already applies to the Agent Fabric's own approve actions.
+ */
+async function recordPromoRedemptionSafely(
+  db: DatabasePool,
+  organizationId: string,
+  priceId: string,
+): Promise<void> {
+  try {
+    await recordPromoRedemption(db, priceId);
+  } catch (error) {
+    errorReporter.captureException(error, {
+      operation: "start_checkout.record_promo_redemption",
+      organizationId,
+      correlationId: priceId,
+    });
+  }
+}
 
 /**
  * Starts real billing checkout. Two distinct outcomes:
@@ -291,8 +324,26 @@ export async function startCheckoutAction(
           }
 
           if (price.promoKey) {
-            await recordPromoRedemption(db, price.id);
+            await recordPromoRedemptionSafely(
+              db,
+              session.organizationId,
+              price.id,
+            );
           }
+
+          await recordAuditEvent(db, session.organizationId, {
+            userId: session.userId,
+            eventType: "subscription.checkout_completed",
+            subjectType: "organization_subscription",
+            subjectId: savedTrial.id,
+            outcome: "succeeded",
+            metadata: {
+              planKey,
+              mode: "trial",
+              isResubscribing,
+              stripeSubscriptionId: trial.subscriptionId,
+            },
+          });
 
           trialStarted = true;
           return { error: null, clientSecret: null };
@@ -360,8 +411,26 @@ export async function startCheckoutAction(
         }
 
         if (price.promoKey) {
-          await recordPromoRedemption(db, price.id);
+          await recordPromoRedemptionSafely(
+            db,
+            session.organizationId,
+            price.id,
+          );
         }
+
+        await recordAuditEvent(db, session.organizationId, {
+          userId: session.userId,
+          eventType: "subscription.checkout_completed",
+          subjectType: "organization_subscription",
+          subjectId: savedSubscription.id,
+          outcome: "succeeded",
+          metadata: {
+            planKey,
+            mode: "paid",
+            isResubscribing,
+            stripeSubscriptionId: result.subscriptionId,
+          },
+        });
 
         return { error: null, clientSecret: result.clientSecret };
       } catch (error) {
