@@ -16,6 +16,7 @@ import {
   getPlanPriceById,
   recordAuditEvent,
   updateSubscriptionFromStripe,
+  withAdvisoryLock,
   type DatabasePool,
 } from "@signaldesk/persistence";
 
@@ -188,58 +189,87 @@ export async function changePlanAction(
     return { error: "Too many attempts. Try again shortly." };
   }
 
-  const resolved = await resolveTargetPrice(db, newPlanKey);
+  // A real, cross-instance Postgres advisory lock (`withAdvisoryLock`,
+  // same primitive start-checkout.ts/manage-addon.ts already use for
+  // their own double-submit guard). Without it, two concurrent requests
+  // (a double-click, a client retry) could both pass
+  // resolveTargetPrice's "you're already on this plan" check before
+  // either writes, and Stripe would generate a separate proration
+  // invoice item for each `subscriptions.update` call — a real double
+  // charge for one logical plan change (found by review).
+  const lockResult = await withAdvisoryLock(
+    db,
+    `change-plan-lock:${callerSession.organizationId}`,
+    async (): Promise<ChangePlanState> => {
+      const resolved = await resolveTargetPrice(db, newPlanKey);
 
-  if ("error" in resolved) {
-    return { error: resolved.error };
+      if ("error" in resolved) {
+        return { error: resolved.error };
+      }
+
+      const { session, subscription, plan, newPrice, stripePriceId } = resolved;
+
+      try {
+        const stripe = createStripeBillingClient(getStripeSecretKey());
+        const subscriptionItemId = await getSubscriptionItemId(
+          stripe,
+          subscription.stripeSubscriptionId as string,
+        );
+
+        if (!subscriptionItemId) {
+          return {
+            error: "Couldn't read your current subscription from Stripe.",
+          };
+        }
+
+        const result = await updateSubscriptionPrice(stripe, {
+          subscriptionId: subscription.stripeSubscriptionId as string,
+          subscriptionItemId,
+          newPriceId: stripePriceId,
+        });
+
+        await updateSubscriptionFromStripe(
+          db,
+          session.organizationId,
+          subscription.stripeSubscriptionId as string,
+          {
+            status: result.status as typeof subscription.status,
+            planId: plan.id,
+            planPriceId: newPrice.id,
+          },
+        );
+
+        await recordAuditEvent(db, session.organizationId, {
+          userId: session.userId,
+          eventType: "subscription.plan_changed",
+          subjectType: "organization_subscription",
+          subjectId: subscription.id,
+          outcome: "succeeded",
+          metadata: {
+            fromPlanKey: subscription.planKey,
+            toPlanKey: newPlanKey,
+            stripeSubscriptionId: subscription.stripeSubscriptionId,
+          },
+        });
+      } catch (error) {
+        return {
+          error: describeActionError(error, "Failed to change your plan."),
+        };
+      }
+
+      return { error: null };
+    },
+  );
+
+  if (lockResult === null) {
+    return {
+      error:
+        "Another plan change is already in progress. Please wait a moment and try again.",
+    };
   }
 
-  const { session, subscription, plan, newPrice, stripePriceId } = resolved;
-
-  try {
-    const stripe = createStripeBillingClient(getStripeSecretKey());
-    const subscriptionItemId = await getSubscriptionItemId(
-      stripe,
-      subscription.stripeSubscriptionId as string,
-    );
-
-    if (!subscriptionItemId) {
-      return { error: "Couldn't read your current subscription from Stripe." };
-    }
-
-    const result = await updateSubscriptionPrice(stripe, {
-      subscriptionId: subscription.stripeSubscriptionId as string,
-      subscriptionItemId,
-      newPriceId: stripePriceId,
-    });
-
-    await updateSubscriptionFromStripe(
-      db,
-      session.organizationId,
-      subscription.stripeSubscriptionId as string,
-      {
-        status: result.status as typeof subscription.status,
-        planId: plan.id,
-        planPriceId: newPrice.id,
-      },
-    );
-
-    await recordAuditEvent(db, session.organizationId, {
-      userId: session.userId,
-      eventType: "subscription.plan_changed",
-      subjectType: "organization_subscription",
-      subjectId: subscription.id,
-      outcome: "succeeded",
-      metadata: {
-        fromPlanKey: subscription.planKey,
-        toPlanKey: newPlanKey,
-        stripeSubscriptionId: subscription.stripeSubscriptionId,
-      },
-    });
-  } catch (error) {
-    return {
-      error: describeActionError(error, "Failed to change your plan."),
-    };
+  if (lockResult.error !== null) {
+    return lockResult;
   }
 
   redirect("/billing?billing=plan_changed");
