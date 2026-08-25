@@ -152,6 +152,28 @@ export async function beginAsanaTaskNudgeSend(
       return { id: existing.id, alreadyResolved: null };
     }
 
+    // Real bug found by review: this used to hardcode `alreadyResolved:
+    // "pending"` here without re-checking — the concurrent caller that
+    // won the reset race above may have already completed the *entire*
+    // send-and-complete cycle by the time this call's own UPDATE loses
+    // that race, misreporting a real, successful send as still
+    // unresolved. See customer-email-replies.ts's identical fix.
+    const reCheckedResult = await client.query<AsanaTaskNudgeStatusRow>(
+      `select id, status, asana_story_gid
+       from asana_task_nudges
+       where organization_id = $1 and id = $2`,
+      [organizationId, existing.id],
+    );
+    const reChecked = reCheckedResult.rows[0];
+
+    if (reChecked?.status === "sent" && reChecked.asana_story_gid) {
+      return {
+        id: reChecked.id,
+        alreadyResolved: "sent",
+        asanaStoryGid: reChecked.asana_story_gid,
+      };
+    }
+
     return { id: existing.id, alreadyResolved: "pending" };
   });
 }

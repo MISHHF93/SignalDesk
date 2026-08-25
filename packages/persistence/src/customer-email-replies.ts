@@ -155,6 +155,37 @@ export async function beginCustomerEmailReplySend(
       return { id: existing.id, alreadyResolved: null };
     }
 
+    // Real bug found by review: this used to hardcode `alreadyResolved:
+    // "pending"` here without re-checking — the concurrent caller that
+    // won the reset race above isn't just resetting the row, it's about
+    // to (or may have already) completed the *entire* send-and-complete
+    // cycle. By the time this call's own UPDATE loses that race, the
+    // winner's real Gmail send may have already gone out and
+    // completeCustomerEmailReplySend may have already marked the row
+    // 'sent' — misreporting a real, successful send as still unresolved
+    // "pending", which surfaced a false "check manually" state to the
+    // approver even though nothing needs checking.
+    const reCheckedResult = await client.query<CustomerEmailReplyStatusRow>(
+      `select id, status, gmail_message_id, gmail_thread_id
+       from customer_email_replies
+       where organization_id = $1 and id = $2`,
+      [organizationId, existing.id],
+    );
+    const reChecked = reCheckedResult.rows[0];
+
+    if (
+      reChecked?.status === "sent" &&
+      reChecked.gmail_message_id &&
+      reChecked.gmail_thread_id
+    ) {
+      return {
+        id: reChecked.id,
+        alreadyResolved: "sent",
+        gmailMessageId: reChecked.gmail_message_id,
+        gmailThreadId: reChecked.gmail_thread_id,
+      };
+    }
+
     return { id: existing.id, alreadyResolved: "pending" };
   });
 }
