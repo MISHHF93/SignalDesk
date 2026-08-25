@@ -8,6 +8,8 @@ import {
   type DatabasePool,
 } from "@signaldesk/persistence";
 
+import { errorReporter } from "../../../_lib/error-reporter";
+import { logger } from "../../../_lib/logger";
 import {
   getQuickBooksWebhookVerifierToken,
   isQuickBooksWebhookConfigured,
@@ -99,7 +101,10 @@ export async function POST(request: Request): Promise<NextResponse> {
       getQuickBooksWebhookVerifierToken(),
     )
   ) {
-    console.error("QuickBooks webhook signature verification failed");
+    logger.log("error", "QuickBooks webhook signature verification failed", {
+      operation: "quickbooks_webhook.verify_signature",
+      connectorSlug: "quickbooks",
+    });
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
@@ -129,9 +134,11 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
 
       if (!lookup) {
-        console.warn(
-          `QuickBooks webhook: no active integration found for realm ${realmId}`,
-        );
+        logger.log("warn", "No active integration found for realm", {
+          operation: "quickbooks_webhook.resolve_realm",
+          connectorSlug: "quickbooks",
+          correlationId: realmId,
+        });
         continue;
       }
 
@@ -143,9 +150,12 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
 
       if (!rateLimit.allowed) {
-        console.warn(
-          `QuickBooks webhook: rate limit exceeded for realm ${realmId}`,
-        );
+        logger.log("warn", "Rate limit exceeded for realm", {
+          operation: "quickbooks_webhook.rate_limit",
+          connectorSlug: "quickbooks",
+          organizationId: lookup.organizationId,
+          correlationId: realmId,
+        });
         continue;
       }
 
@@ -189,10 +199,11 @@ export async function POST(request: Request): Promise<NextResponse> {
         },
       });
     } catch (error) {
-      console.error(
-        `QuickBooks webhook: sync failed for realm ${realmId}`,
-        error,
-      );
+      errorReporter.captureException(error, {
+        operation: "quickbooks_webhook.sync",
+        connectorSlug: "quickbooks",
+        correlationId: realmId,
+      });
     }
   }
 

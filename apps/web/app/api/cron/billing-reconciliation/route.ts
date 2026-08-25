@@ -17,6 +17,7 @@ import {
 } from "@signaldesk/persistence";
 
 import { errorReporter } from "../../../_lib/error-reporter";
+import { logger } from "../../../_lib/logger";
 import {
   getStripeSecretKey,
   isBillingConfigured,
@@ -170,9 +171,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         stripeSubscriptionId: local.stripeSubscriptionId,
         driftedFields,
       });
-      console.warn(
-        `Billing reconciliation: corrected drift for organization ${local.organizationId} (${driftedFields.join(", ")})`,
-      );
+      logger.log("warn", "Corrected subscription drift", {
+        operation: "cron.billing_reconciliation",
+        organizationId: local.organizationId,
+        correlationId: local.stripeSubscriptionId,
+      });
     } catch (error) {
       failed += 1;
       errorReporter.captureException(error, {

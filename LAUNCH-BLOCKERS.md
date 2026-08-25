@@ -263,12 +263,23 @@ Slack, Stripe (Connect), Google Calendar, Microsoft Outlook, Microsoft
 Calendar, Linear — "Sync Now" still works correctly for each; this is an
 efficiency gap at scale, not a correctness gap at launch.
 
-### 11. Structured application logging
+### 11. Structured application logging — partially closed 2026-08-24 (ADR 0061)
 
-Distinct from error monitoring (P0 #3) — a unified structured logger
-across Server Actions/Route Handlers doesn't exist. Real, but Vercel's
-own function logs plus the P0 APM fix cover the immediate operational
-need.
+Distinct from error monitoring (P0 #3). Investigating found Server
+Actions already had real structured error reporting (`errorReporter` via
+`describeActionError`) — the real gap was narrower: three Route Handlers
+with no Server Action to route through (the Stripe webhook, the
+QuickBooks webhook, the billing-reconciliation cron) called raw
+`console.*` directly, with their real exceptions never reaching error
+monitoring at all. A new `Logger` interface
+(`packages/application/src/observability/logger.ts`, same seam pattern
+as `ErrorReporter`) now covers structured info/warn logging for those
+three, and their genuine caught exceptions now route through the
+existing `errorReporter` too. Still real, still P2, not closed
+completely: ~36 other files (OAuth callbacks, disconnect actions, sync
+functions) still use raw `console.*` — lower operational value than the
+three fixed, since most already fail closed to a safe user-facing
+outcome regardless — see ADR 0061's own scope section.
 
 ### 12. OAuth-based invite acceptance
 

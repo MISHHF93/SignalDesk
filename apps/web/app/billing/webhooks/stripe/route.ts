@@ -15,6 +15,8 @@ import {
   type SubscriptionStatus,
 } from "@signaldesk/persistence";
 
+import { errorReporter } from "../../../_lib/error-reporter";
+import { logger } from "../../../_lib/logger";
 import {
   getStripeSecretKey,
   getStripeWebhookSecret,
@@ -49,9 +51,10 @@ async function syncSubscription(
     (await findOrganizationIdByStripeCustomerId(db, subscription.customer));
 
   if (!organizationId) {
-    console.warn(
-      `Stripe webhook: no organization found for subscription ${subscription.id}`,
-    );
+    logger.log("warn", "No organization found for subscription", {
+      operation: "stripe_webhook.sync_subscription",
+      correlationId: subscription.id,
+    });
     return;
   }
 
@@ -136,7 +139,9 @@ export async function POST(request: Request): Promise<NextResponse> {
       getStripeWebhookSecret(),
     );
   } catch (error) {
-    console.error("Stripe webhook signature verification failed", error);
+    errorReporter.captureException(error, {
+      operation: "stripe_webhook.verify_signature",
+    });
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
@@ -157,9 +162,10 @@ export async function POST(request: Request): Promise<NextResponse> {
       case "customer.subscription.trial_will_end": {
         const subscription = event.data
           .object as unknown as RawStripeSubscription;
-        console.log(
-          `Stripe trial ending soon for subscription ${subscription.id}`,
-        );
+        logger.log("info", "Stripe trial ending soon", {
+          operation: "stripe_webhook.trial_will_end",
+          correlationId: subscription.id,
+        });
         break;
       }
       default:
@@ -170,7 +176,10 @@ export async function POST(request: Request): Promise<NextResponse> {
         break;
     }
   } catch (error) {
-    console.error(`Stripe webhook handling failed for ${event.type}`, error);
+    errorReporter.captureException(error, {
+      operation: `stripe_webhook.handle.${event.type}`,
+      correlationId: event.id,
+    });
     return NextResponse.json(
       { error: "Webhook handling failed" },
       { status: 500 },

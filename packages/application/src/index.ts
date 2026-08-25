@@ -95,3 +95,9 @@ export {
   type ErrorReporter,
   type ErrorReportContext,
 } from "./observability/error-reporter";
+export {
+  createConsoleLogger,
+  type LogContext,
+  type Logger,
+  type LogLevel,
+} from "./observability/logger";
