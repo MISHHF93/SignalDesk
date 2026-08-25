@@ -9,6 +9,7 @@ import {
   fetchQuickBooksPayments,
   mergeCustomerMemo,
   QUICKBOOKS_SCOPES,
+  refreshQuickBooksAccessToken,
   revokeQuickBooksToken,
   sendQuickBooksInvoiceReminder,
   type QuickBooksOAuthConfig,
@@ -117,28 +118,79 @@ describe("exchangeQuickBooksAuthorizationCode", () => {
     expect(error.rawDetail).toContain("invalid_grant");
   });
 
-  it("retries on a 5xx before succeeding, reusing the shared retry policy", async () => {
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse(503, { error: "unavailable" }))
-      .mockResolvedValueOnce(
-        jsonResponse(200, {
-          token_type: "bearer",
-          access_token: "at-retry",
-          refresh_token: "rt-retry",
-          expires_in: 3600,
-          x_refresh_token_expires_in: 8_726_400,
-        }),
-      );
-
-    const resultPromise = exchangeQuickBooksAuthorizationCode(
-      CONFIG,
-      "auth-code",
+  it("regression: does not retry on a 5xx — the authorization code is single-use, so a retry would resend an already-consumed code", async () => {
+    // Real bug found by review: this used to retry on a 5xx, reusing the
+    // shared default retry policy — but a 5xx here isn't proof Intuit
+    // never consumed the code; if it did, retrying resends the same
+    // now-dead code and Intuit correctly rejects it, permanently losing
+    // the one real token pair that was already issued but never
+    // received. Fixed via `{ retryable: false }` (see the source file's
+    // own doc comment on this function).
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(503, { error: "unavailable" }),
     );
-    await vi.runAllTimersAsync();
-    const result = await resultPromise;
 
-    expect(result.accessToken).toBe("at-retry");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await expect(
+      exchangeQuickBooksAuthorizationCode(CONFIG, "auth-code"),
+    ).rejects.toThrow(UpstreamProviderError);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("refreshQuickBooksAccessToken", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("maps a successful refresh response into a QuickBooksTokenResponse", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        token_type: "bearer",
+        access_token: "at-1",
+        refresh_token: "rt-2",
+        expires_in: 3600,
+        x_refresh_token_expires_in: 8_726_400,
+      }),
+    );
+
+    const result = await refreshQuickBooksAccessToken(CONFIG, "rt-1");
+
+    expect(result).toEqual({
+      accessToken: "at-1",
+      refreshToken: "rt-2",
+      expiresIn: 3600,
+      refreshTokenExpiresIn: 8_726_400,
+    });
+  });
+
+  it("regression: does not retry on a 5xx — QuickBooks rotates the refresh token on every use, so a retry would resend an already-consumed one", async () => {
+    // Real bug found by review: this used to retry on a 5xx like any
+    // other default fetchWithRetry call. QuickBooks rotates the refresh
+    // token on every use (this function's own doc comment), so a 5xx
+    // here is not proof the rotation never happened server-side; a blind
+    // retry would resend the now-already-consumed refresh token, which
+    // QuickBooks correctly rejects — permanently losing the one real new
+    // refresh token that was already issued but never received, breaking
+    // the connection until the tenant manually reconnects.
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(503, { error: "unavailable" }),
+    );
+
+    await expect(refreshQuickBooksAccessToken(CONFIG, "rt-1")).rejects.toThrow(
+      UpstreamProviderError,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

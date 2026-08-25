@@ -15,8 +15,26 @@ export interface FetchWithRetryOptions {
    * blindly retrying one of these specific calls risks a real duplicate
    * external side effect (two Asana comments, two sent emails) that no
    * amount of this app's own send-tracking idempotency can undo once it
-   * happens. Reads, OAuth token exchange/refresh/revoke, and any other
-   * naturally-idempotent or no-side-effect call keep retrying as before.
+   * happens. Reads and any other naturally-idempotent or no-side-effect
+   * call keep retrying as before.
+   *
+   * Real bug found by review: this used to also claim "OAuth token
+   * exchange/refresh/revoke... keep retrying," on the assumption that
+   * resending the same code/refresh-token is always harmless. That only
+   * holds for a provider that doesn't rotate credentials on use (Google —
+   * confirmed non-rotating, `google-oauth.ts`'s own doc comment). An
+   * authorization `code` is single-use by the OAuth spec itself
+   * regardless of provider, and QuickBooks/Zendesk/Jira all confirm they
+   * rotate the refresh token on every use — for any of those, the same
+   * "gateway timeout after the write committed" risk above applies
+   * identically to a token exchange/refresh: retrying resends an
+   * already-consumed credential, which the provider correctly rejects,
+   * permanently losing the one real new token pair that was already
+   * issued but never received. Every token exchange/refresh call for
+   * those three providers opts out via `{ retryable: false }` (see
+   * `refreshQuickBooksAccessToken`/`requestZendeskToken`/
+   * `requestJiraToken`'s own doc comments); revoke calls stay retryable
+   * (an already-revoked token being revoked again is a genuine no-op).
    */
   readonly retryable?: boolean;
 }

@@ -151,6 +151,24 @@ describe("exchangeZendeskAuthorizationCode", () => {
       exchangeZendeskAuthorizationCode(CONFIG, "bad-code", "verifier-xyz"),
     ).rejects.toThrow(/Zendesk token request failed/);
   });
+
+  it("regression: does not retry on a 5xx — the authorization code is single-use, so a retry would resend an already-consumed code", async () => {
+    // Real bug found by review: this used to retry on a 5xx via
+    // fetchWithRetry's default policy — but a 5xx here isn't proof
+    // Zendesk never consumed the code; if it did, retrying resends the
+    // same now-dead code, which Zendesk correctly rejects, permanently
+    // losing the one real token pair that was already issued but never
+    // received. Fixed via `{ retryable: false }` on the shared
+    // requestZendeskToken helper.
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(503, { error: "unavailable" }),
+    );
+
+    await expect(
+      exchangeZendeskAuthorizationCode(CONFIG, "auth-code", "verifier-xyz"),
+    ).rejects.toThrow(/Zendesk token request failed/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("refreshZendeskAccessToken", () => {
@@ -185,6 +203,25 @@ describe("refreshZendeskAccessToken", () => {
     const body = JSON.parse(init.body as string);
     expect(body.grant_type).toBe("refresh_token");
     expect(body.refresh_token).toBe("zendesk-refresh");
+  });
+
+  it("regression: does not retry on a 5xx — Zendesk rotates the refresh token on every use, so a retry would resend an already-consumed one", async () => {
+    // Real bug found by review: this used to retry on a 5xx via
+    // fetchWithRetry's default policy. Zendesk rotates the refresh token
+    // on every use (this file's own doc comment on
+    // refreshZendeskAccessToken), so a 5xx here is not proof the
+    // rotation never happened server-side — a blind retry resends the
+    // now-already-consumed refresh token, which Zendesk correctly
+    // rejects, permanently losing the one real new refresh token that
+    // was already issued but never received.
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(503, { error: "unavailable" }),
+    );
+
+    await expect(
+      refreshZendeskAccessToken(CONFIG, "zendesk-refresh"),
+    ).rejects.toThrow(/Zendesk token request failed/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

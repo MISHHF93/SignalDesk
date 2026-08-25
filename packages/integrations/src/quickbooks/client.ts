@@ -105,6 +105,11 @@ interface RawQuickBooksTokenResponse {
  * callback redirect (alongside `code`/`state`), never inside the token
  * response body, so the callback route reads it directly off the request
  * URL instead of expecting it here.
+ *
+ * `code` is single-use by the OAuth spec itself, the same risk
+ * `refreshQuickBooksAccessToken`'s own doc comment explains for its
+ * rotating refresh token — a 5xx here is not proof Intuit never consumed
+ * it, so this opts out of retrying via `{ retryable: false }` too.
  */
 export async function exchangeQuickBooksAuthorizationCode(
   config: QuickBooksOAuthConfig,
@@ -114,19 +119,23 @@ export async function exchangeQuickBooksAuthorizationCode(
     `${config.clientId}:${config.clientSecret}`,
   ).toString("base64");
 
-  const response = await fetchWithRetry(TOKEN_URL, {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: `Basic ${credentials}`,
+  const response = await fetchWithRetry(
+    TOKEN_URL,
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: `Basic ${credentials}`,
+      },
+      body: new URLSearchParams({
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: config.redirectUri,
+      }),
     },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: config.redirectUri,
-    }),
-  });
+    { retryable: false },
+  );
 
   if (!response.ok) {
     await throwUpstreamError("QuickBooks token request", response);
@@ -150,6 +159,19 @@ export async function exchangeQuickBooksAuthorizationCode(
  * QuickBooks also rotates the refresh token on every use (per Intuit's own
  * docs), so the caller must persist the new `refreshToken` too, not just
  * the new access token.
+ *
+ * Real bug found by review: this used to retry on a 5xx/429 like any other
+ * default call, but that default assumption (`FetchWithRetryOptions.retryable`'s
+ * doc comment: "OAuth token exchange/refresh/revoke... keep retrying")
+ * only holds for a provider that doesn't rotate its refresh token (Google
+ * — the case that comment was written for). For a rotating provider like
+ * this one, a 5xx here is not proof the rotation never happened
+ * server-side; if it did, the already-consumed `refreshToken` this
+ * function was called with is now invalid, and a blind retry sends that
+ * same now-dead token, permanently losing the one real new refresh token
+ * that was already issued but never received — breaking the connection
+ * until the tenant manually reconnects. Opted out via `{ retryable: false
+ * }`, same as this file's own write endpoints (memo update, send).
  */
 export async function refreshQuickBooksAccessToken(
   config: Pick<QuickBooksOAuthConfig, "clientId" | "clientSecret">,
@@ -159,18 +181,22 @@ export async function refreshQuickBooksAccessToken(
     `${config.clientId}:${config.clientSecret}`,
   ).toString("base64");
 
-  const response = await fetchWithRetry(TOKEN_URL, {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: `Basic ${credentials}`,
+  const response = await fetchWithRetry(
+    TOKEN_URL,
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: `Basic ${credentials}`,
+      },
+      body: new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: refreshToken,
+      }),
     },
-    body: new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: refreshToken,
-    }),
-  });
+    { retryable: false },
+  );
 
   if (!response.ok) {
     await throwUpstreamError("QuickBooks token refresh", response);

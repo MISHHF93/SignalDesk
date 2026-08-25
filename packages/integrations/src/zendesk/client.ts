@@ -173,6 +173,21 @@ interface RawZendeskTokenResponse {
   readonly expires_in: number;
 }
 
+// Real bug found by review: this used to retry on a 5xx/429 like any
+// other default call, but that default assumption
+// (`FetchWithRetryOptions.retryable`'s doc comment: "OAuth token
+// exchange/refresh/revoke... keep retrying") only holds for a provider
+// that doesn't rotate credentials on use (Google — the case that comment
+// was written for). Both callers of this shared helper send a
+// single-use credential Zendesk consumes on receipt: an authorization
+// `code` (single-use by the OAuth spec itself) or a refresh token
+// (rotated on every use, this file's own doc comment on
+// `refreshZendeskAccessToken`). A 5xx here is not proof the exchange
+// never happened server-side; if it did, a blind retry resends the
+// now-already-consumed credential, which Zendesk correctly rejects —
+// permanently losing the one real new token pair that was already
+// issued but never received. Opted out via `{ retryable: false }`, same
+// as this file's own write endpoint (ticket reply post).
 async function requestZendeskToken(
   subdomain: string,
   body: Record<string, string>,
@@ -184,6 +199,7 @@ async function requestZendeskToken(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     },
+    { retryable: false },
   );
 
   if (!response.ok) {

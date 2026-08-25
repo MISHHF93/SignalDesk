@@ -121,14 +121,32 @@ interface RawJiraTokenResponse {
   readonly expires_in: number;
 }
 
+// Real bug found by review: this used to retry on a 5xx/429 like any
+// other default call, but that default assumption
+// (`FetchWithRetryOptions.retryable`'s doc comment: "OAuth token
+// exchange/refresh/revoke... keep retrying") only holds for a provider
+// that doesn't rotate credentials on use (Google — the case that comment
+// was written for). Both callers of this shared helper send a
+// single-use credential Atlassian consumes on receipt: an authorization
+// `code` (single-use by the OAuth spec itself) or a refresh token
+// (rotated on every use, this file's own doc comment on
+// `refreshJiraAccessToken`). A 5xx here is not proof the exchange never
+// happened server-side; if it did, a blind retry resends the
+// now-already-consumed credential, which Atlassian correctly rejects —
+// permanently losing the one real new token pair that was already
+// issued but never received. Opted out via `{ retryable: false }`.
 async function requestJiraToken(
   body: Record<string, string>,
 ): Promise<JiraTokenResponse> {
-  const response = await fetchWithRetry(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  const response = await fetchWithRetry(
+    TOKEN_URL,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    { retryable: false },
+  );
 
   if (!response.ok) {
     await throwUpstreamError("Jira token request", response);
