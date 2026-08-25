@@ -80,13 +80,19 @@ export async function resumeSubscriptionAction(
 
   try {
     const stripe = createStripeBillingClient(getStripeSecretKey());
-    await resumeSubscription(stripe, subscription.stripeSubscriptionId);
+    const result = await resumeSubscription(
+      stripe,
+      subscription.stripeSubscriptionId,
+    );
 
     await updateSubscriptionFromStripe(
       db,
       session.organizationId,
       subscription.stripeSubscriptionId,
-      { status: subscription.status, cancelAtPeriodEnd: false },
+      {
+        status: result.status as typeof subscription.status,
+        cancelAtPeriodEnd: false,
+      },
     );
 
     await recordAuditEvent(db, session.organizationId, {

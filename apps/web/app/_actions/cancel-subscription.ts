@@ -82,7 +82,7 @@ export async function cancelSubscriptionAction(
 
   try {
     const stripe = createStripeBillingClient(getStripeSecretKey());
-    await cancelSubscriptionAtPeriodEnd(
+    const result = await cancelSubscriptionAtPeriodEnd(
       stripe,
       subscription.stripeSubscriptionId,
     );
@@ -91,7 +91,10 @@ export async function cancelSubscriptionAction(
       db,
       session.organizationId,
       subscription.stripeSubscriptionId,
-      { status: subscription.status, cancelAtPeriodEnd: true },
+      {
+        status: result.status as typeof subscription.status,
+        cancelAtPeriodEnd: true,
+      },
     );
 
     await recordAuditEvent(db, session.organizationId, {

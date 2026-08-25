@@ -284,7 +284,10 @@ export async function getSubscriptionItemId(
   return item ? item.id : null;
 }
 
-export interface UpdateSubscriptionPriceResult {
+/** The one real fact every subscription-mutating call below hands back:
+ * the status Stripe itself reports immediately after the mutation, not
+ * whatever the caller already had cached from before the call. */
+export interface StripeSubscriptionMutationResult {
   readonly status: string;
 }
 
@@ -303,7 +306,7 @@ export async function updateSubscriptionPrice(
     subscriptionItemId: string;
     newPriceId: string;
   },
-): Promise<UpdateSubscriptionPriceResult> {
+): Promise<StripeSubscriptionMutationResult> {
   const subscription = await stripe.subscriptions.update(input.subscriptionId, {
     items: [{ id: input.subscriptionItemId, price: input.newPriceId }],
     proration_behavior: "create_prorations",
@@ -362,24 +365,35 @@ export async function removeSubscriptionAddonItem(
 /**
  * Customer-facing "Cancel" always means "keep access until the period
  * you already paid for ends" — the standard SaaS expectation, matching
- * `cancel_at_period_end` rather than an immediate `.cancel()`.
+ * `cancel_at_period_end` rather than an immediate `.cancel()`. Returns the
+ * real status Stripe reports back so the caller never has to fall back
+ * to whatever status it had cached locally before this call (a real bug
+ * found by review: a concurrent webhook landing between that earlier read
+ * and this mutation — e.g. a renewal charge failing into `past_due` right
+ * as a customer clicks "Cancel" — used to get silently overwritten back
+ * to the stale pre-call status).
  */
 export async function cancelSubscriptionAtPeriodEnd(
   stripe: Stripe,
   subscriptionId: string,
-): Promise<void> {
-  await stripe.subscriptions.update(subscriptionId, {
+): Promise<StripeSubscriptionMutationResult> {
+  const subscription = await stripe.subscriptions.update(subscriptionId, {
     cancel_at_period_end: true,
   });
+
+  return { status: subscription.status };
 }
 
+/** Same real-status-back reasoning as `cancelSubscriptionAtPeriodEnd`. */
 export async function resumeSubscription(
   stripe: Stripe,
   subscriptionId: string,
-): Promise<void> {
-  await stripe.subscriptions.update(subscriptionId, {
+): Promise<StripeSubscriptionMutationResult> {
+  const subscription = await stripe.subscriptions.update(subscriptionId, {
     cancel_at_period_end: false,
   });
+
+  return { status: subscription.status };
 }
 
 /**

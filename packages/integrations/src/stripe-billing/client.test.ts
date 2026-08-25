@@ -506,7 +506,7 @@ describe("removeSubscriptionAddonItem", () => {
 
 describe("cancelSubscriptionAtPeriodEnd / resumeSubscription", () => {
   it("sets cancel_at_period_end true, then false to resume", async () => {
-    const update = vi.fn().mockResolvedValue({});
+    const update = vi.fn().mockResolvedValue({ status: "active" });
     const stripe = fakeStripe({ subscriptions: { update } });
 
     await cancelSubscriptionAtPeriodEnd(stripe, "sub_123");
@@ -518,6 +518,21 @@ describe("cancelSubscriptionAtPeriodEnd / resumeSubscription", () => {
     expect(update).toHaveBeenCalledWith("sub_123", {
       cancel_at_period_end: false,
     });
+  });
+
+  it("regression: returns the real status Stripe reports back, not whatever the caller had cached", async () => {
+    // A real bug found by review: neither function used to return
+    // anything, forcing every caller to fall back to its own stale,
+    // pre-call cached status — exactly the kind of value a concurrent
+    // webhook could have already changed underneath it.
+    const update = vi.fn().mockResolvedValue({ status: "past_due" });
+    const stripe = fakeStripe({ subscriptions: { update } });
+
+    const cancelResult = await cancelSubscriptionAtPeriodEnd(stripe, "sub_123");
+    expect(cancelResult).toEqual({ status: "past_due" });
+
+    const resumeResult = await resumeSubscription(stripe, "sub_123");
+    expect(resumeResult).toEqual({ status: "past_due" });
   });
 });
 
