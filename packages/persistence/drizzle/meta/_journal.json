@@ -435,6 +435,13 @@
       "when": 1787694300000,
       "tag": "0063_subscription_event_ordering",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1787694400000,
+      "tag": "0064_gmail_drafted_content_requires_subject",
+      "breakpoints": true
     }
   ]
 }

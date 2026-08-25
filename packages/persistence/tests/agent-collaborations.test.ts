@@ -491,6 +491,50 @@ describe.skipIf(!process.env.DATABASE_URL)(
           body: "Thanks for reaching out — your order ships tomorrow.",
         });
       });
+
+      it("regression: rejects completing a message-linked collaboration with a drafted body but no subject — a real gmail reply needs one", async () => {
+        // Real gap found by review: agent_collaborations_drafted_content_
+        // consistent was loosened from a strict Gmail-only equality check
+        // to "subject implies body" alone, to accommodate the other four
+        // entity types' body-only drafts (Asana/HubSpot/Zendesk comment or
+        // note). That loosening applied uniformly, so a message_id-linked
+        // collaboration used to be allowed to complete with a real body and
+        // no subject at all — this is the constraint added back to close
+        // that gap specifically for message_id-linked rows.
+        const { organizationId, userId } = await seedMembership(pool);
+        const integration = await seedIntegration(pool, organizationId);
+        const sourceRecord = await seedSourceRecord(
+          pool,
+          organizationId,
+          integration.id,
+          integration.sourceSystem,
+        );
+        const message = await seedMessage(
+          pool,
+          organizationId,
+          sourceRecord.id,
+        );
+        const started = await startAgentCollaboration(pool, organizationId, {
+          userId,
+          pattern: "single_specialist",
+          objective: "Draft a reply to this message.",
+          correlationId: "correlation-single-5",
+          idempotencyKey: "message-reply-draft:org-single-5:1",
+          messageId: message.id,
+        });
+
+        await expect(
+          completeAgentCollaboration(pool, organizationId, started.id, {
+            status: "completed",
+            reconciledSummary: null,
+            reconciledConfidenceBasisPoints: null,
+            contradictionsDetected: false,
+            draftedContent: {
+              body: "Thanks for reaching out — your order ships tomorrow.",
+            },
+          }),
+        ).rejects.toThrow();
+      });
     });
   },
 );

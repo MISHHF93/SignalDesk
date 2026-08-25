@@ -1696,10 +1696,24 @@ export const agentCollaborations = pgTable(
     ),
     check(
       "agent_collaborations_drafted_content_consistent",
-      // subject implies body, but a body-only draft (Asana/HubSpot/Zendesk
-      // comment or note) is valid on its own — unlike the old Gmail-only
-      // equality check, subject and body are no longer required in lockstep.
-      sql`${table.draftedContentSubject} is null or ${table.draftedContentBody} is not null`,
+      // Two real invariants, not one: (1) subject implies body, universally
+      // — a subject with no body is never valid for any entity type; (2) a
+      // message_id-linked (Gmail) collaboration with a real drafted body
+      // must also have a subject — a real email needs one. Body-only is
+      // still valid for every other entity type (Asana/HubSpot/Zendesk
+      // comment or note never has a subject at all).
+      //
+      // Real gap found by review: this constraint used to be only
+      // invariant (1) — loosened from the old Gmail-only strict equality
+      // check to accommodate the other four entity types' body-only
+      // drafts, but that loosening applied uniformly, so a message_id-
+      // linked collaboration could be marked 'completed' with a real body
+      // and a null subject without this constraint ever catching it
+      // (customer_email_replies' own subject_not_blank check would still
+      // have caught it before an actual send, but not at draft-completion
+      // time, where this constraint is meant to catch it).
+      sql`(${table.draftedContentSubject} is null or ${table.draftedContentBody} is not null)
+          and (${table.messageId} is null or ${table.draftedContentBody} is null or ${table.draftedContentSubject} is not null)`,
     ),
     check(
       "agent_collaborations_status_allowed",
