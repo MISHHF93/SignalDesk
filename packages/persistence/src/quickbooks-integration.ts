@@ -54,6 +54,43 @@ export async function getQuickBooksIntegrationStatus(
 }
 
 /**
+ * Reads back one specific QuickBooks integration by id — the org-wide
+ * "prefer an active row" resolution `getQuickBooksIntegrationStatus` does
+ * is wrong for anything acting on a specific already-ingested invoice: an
+ * org can genuinely have more than one `quickbooks` integration row over
+ * time (disconnecting one company file and connecting a different one
+ * creates a new row, `findOrCreateQuickBooksIntegration`'s own upsert
+ * key), and an invoice ingested under the old row still carries that
+ * row's id in its own `source.integrationId` forever. Real bug found by
+ * review: the invoice-reminder approve action used to resolve "whichever
+ * QuickBooks integration is currently most-active for this org" instead
+ * of the specific one the invoice actually came from — after a company
+ * switch, this could silently send against the *new* company's realm
+ * using an *old* invoice's small-integer external id, which could
+ * collide with an unrelated real invoice there instead of failing
+ * safely. Returns `null` for an id that doesn't exist or doesn't belong
+ * to the caller's own tenant (RLS reduces the query to zero rows),
+ * matching every other by-id lookup's honest "not found" behavior in
+ * this codebase.
+ */
+export async function getQuickBooksIntegrationById(
+  pool: DatabasePool,
+  organizationId: string,
+  integrationId: string,
+): Promise<QuickBooksIntegrationRow | null> {
+  return withTenantContext(pool, organizationId, async (client) => {
+    const result = await client.query<QuickBooksIntegrationDbRow>(
+      `select id, status, external_account_label, external_account_id from integrations
+       where organization_id = $1 and id = $2 and source_system = 'quickbooks'`,
+      [organizationId, integrationId],
+    );
+
+    const row = result.rows[0];
+    return row ? toRow(row) : null;
+  });
+}
+
+/**
  * Finds or creates the integration row for a specific QuickBooks company,
  * identified by `realmId` — read directly off the OAuth callback's redirect
  * query string, not the token response (see client.ts's doc comment on

@@ -24,7 +24,7 @@ import {
   getAgentCollaboration,
   getMostRecentZendeskTicketReplySentAt,
   getSupportTicketById,
-  getZendeskIntegrationStatus,
+  getZendeskIntegrationById,
   recordAgentCollaborationOutcome,
   recordAuditEvent,
 } from "@signaldesk/persistence";
@@ -41,9 +41,7 @@ import { approveTicketReplyProposalAction } from "./approve-ticket-reply-action"
 const mockedGetCurrentOrganization = vi.mocked(getCurrentOrganization);
 const mockedGetAgentCollaboration = vi.mocked(getAgentCollaboration);
 const mockedGetSupportTicketById = vi.mocked(getSupportTicketById);
-const mockedGetZendeskIntegrationStatus = vi.mocked(
-  getZendeskIntegrationStatus,
-);
+const mockedGetZendeskIntegrationById = vi.mocked(getZendeskIntegrationById);
 const mockedGetMostRecentSentAt = vi.mocked(
   getMostRecentZendeskTicketReplySentAt,
 );
@@ -86,14 +84,14 @@ const RESUME_COLLABORATION = {
 } as unknown as Awaited<ReturnType<typeof getAgentCollaboration>>;
 
 const TICKET = {
-  source: { externalRecordId: "12345" },
+  source: { externalRecordId: "12345", integrationId: "integration-1" },
 } as unknown as Awaited<ReturnType<typeof getSupportTicketById>>;
 
 const ACTIVE_INTEGRATION = {
   id: "integration-1",
   status: "active",
   externalAccountId: "subdomain-1",
-} as unknown as Awaited<ReturnType<typeof getZendeskIntegrationStatus>>;
+} as unknown as Awaited<ReturnType<typeof getZendeskIntegrationById>>;
 
 const LIVE_STUCK_FINDING = {
   type: "ticket.stuck",
@@ -107,7 +105,7 @@ const LIVE_STUCK_FINDING = {
  * Behavioral coverage for the Zendesk ticket-reply approve action,
  * following `approve-invoice-reminder-action.test.ts`'s structure exactly —
  * this file's `attemptSend` mirrors invoice-reminder's most closely of the
- * three siblings: it re-checks `getZendeskIntegrationStatus` itself (both
+ * three siblings: it re-checks `getZendeskIntegrationById` itself (both
  * in the outer fresh-approval flow and again inside `attemptSend`), and on
  * a disconnected integration completes the send-tracking row as "failed"
  * before returning, same as invoice-reminder's own not-connected branch.
@@ -131,7 +129,7 @@ describe("approveTicketReplyProposalAction", () => {
       allowed: true,
       retryAfterSeconds: 0,
     });
-    mockedGetZendeskIntegrationStatus.mockResolvedValue(ACTIVE_INTEGRATION);
+    mockedGetZendeskIntegrationById.mockResolvedValue(ACTIVE_INTEGRATION);
     mockedGetSupportTicketById.mockResolvedValue(TICKET);
     mockedGetMostRecentSentAt.mockResolvedValue(null);
     mockedEnsureFreshAccessToken.mockResolvedValue("access-token-1");
@@ -315,6 +313,28 @@ describe("approveTicketReplyProposalAction", () => {
         status: "failed",
         failureReason: "Zendesk refresh token was revoked.",
       },
+    );
+  });
+
+  it("regression: resolves the Zendesk integration by the ticket's own source.integrationId, not whichever integration is currently most-active for the org", async () => {
+    // Real bug found by review: this used to resolve "whichever Zendesk
+    // integration is currently most-active for this org." An org can
+    // genuinely have more than one zendesk integration row over time (a
+    // subdomain switch creates a new row), and an old ticket still carries
+    // its original row's id forever — resolving the wrong one could
+    // silently post against a different account using this ticket's
+    // small-integer external id.
+    mockedGetCurrentOrganization.mockResolvedValue(SESSION);
+    mockedGetAgentCollaboration.mockResolvedValue(FRESH_COLLABORATION);
+    mockedBeginSend.mockResolvedValue({ id: "send-1", alreadyResolved: null });
+    mockedPostReply.mockResolvedValue(undefined);
+
+    await approveTicketReplyProposalAction("collab-1");
+
+    expect(mockedGetZendeskIntegrationById).toHaveBeenCalledWith(
+      undefined,
+      "org-1",
+      "integration-1",
     );
   });
 

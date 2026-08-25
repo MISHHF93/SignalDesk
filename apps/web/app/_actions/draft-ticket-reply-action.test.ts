@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // testing directly, not just the wiring.
 const mockedDraftEntityContentAction = vi.fn();
 const mockedGetSupportTicketById = vi.fn();
-const mockedGetZendeskIntegrationStatus = vi.fn();
+const mockedGetZendeskIntegrationById = vi.fn();
 const mockedFetchZendeskTicketComments = vi.fn();
 const mockedEnsureFreshZendeskAccessToken = vi.fn();
 
@@ -21,7 +21,7 @@ vi.mock("../_lib/draft-entity-content-action", () => ({
 }));
 vi.mock("@signaldesk/persistence", () => ({
   getSupportTicketById: mockedGetSupportTicketById,
-  getZendeskIntegrationStatus: mockedGetZendeskIntegrationStatus,
+  getZendeskIntegrationById: mockedGetZendeskIntegrationById,
 }));
 vi.mock("@signaldesk/integrations/zendesk", () => ({
   fetchZendeskTicketComments: mockedFetchZendeskTicketComments,
@@ -73,7 +73,7 @@ describe("draftTicketReplyAction wiring", () => {
   });
 
   it("refuses to build a draft context when Zendesk isn't connected at all", async () => {
-    mockedGetZendeskIntegrationStatus.mockResolvedValue(null);
+    mockedGetZendeskIntegrationById.mockResolvedValue(null);
 
     const buildDraftContext = capturedConfig?.buildDraftContext as (
       ticket: unknown,
@@ -87,7 +87,7 @@ describe("draftTicketReplyAction wiring", () => {
         {
           subject: "Help",
           requesterName: "Sam",
-          source: { externalRecordId: "1" },
+          source: { externalRecordId: "1", integrationId: "integration-1" },
         },
         { id: "finding-1" },
         undefined,
@@ -98,7 +98,7 @@ describe("draftTicketReplyAction wiring", () => {
   });
 
   it("refuses when the Zendesk integration is neither active nor degraded", async () => {
-    mockedGetZendeskIntegrationStatus.mockResolvedValue({
+    mockedGetZendeskIntegrationById.mockResolvedValue({
       id: "integration-1",
       status: "disconnected",
       externalAccountId: "acct-1",
@@ -116,7 +116,7 @@ describe("draftTicketReplyAction wiring", () => {
         {
           subject: "Help",
           requesterName: "Sam",
-          source: { externalRecordId: "1" },
+          source: { externalRecordId: "1", integrationId: "integration-1" },
         },
         { id: "finding-1" },
         undefined,
@@ -126,7 +126,7 @@ describe("draftTicketReplyAction wiring", () => {
   });
 
   it("fetches a live, bounded window of the ticket's most recent comments and flags truncation honestly", async () => {
-    mockedGetZendeskIntegrationStatus.mockResolvedValue({
+    mockedGetZendeskIntegrationById.mockResolvedValue({
       id: "integration-1",
       status: "active",
       externalAccountId: "acct-1",
@@ -153,13 +153,22 @@ describe("draftTicketReplyAction wiring", () => {
       {
         subject: "Can't log in",
         requesterName: "Sam",
-        source: { externalRecordId: "42" },
+        source: { externalRecordId: "42", integrationId: "integration-1" },
       },
       { id: "finding-1" },
       undefined,
       "org-1",
     );
 
+    // Real bug found by review: this used to resolve "whichever Zendesk
+    // integration is currently most-active for this org," not the specific
+    // one this ticket actually came from — see getZendeskIntegrationById's
+    // own doc comment (@signaldesk/persistence).
+    expect(mockedGetZendeskIntegrationById).toHaveBeenCalledWith(
+      undefined,
+      "org-1",
+      "integration-1",
+    );
     expect(mockedEnsureFreshZendeskAccessToken).toHaveBeenCalledWith(
       undefined,
       "org-1",
@@ -181,7 +190,7 @@ describe("draftTicketReplyAction wiring", () => {
   });
 
   it("reports no truncation when the ticket has 5 or fewer comments", async () => {
-    mockedGetZendeskIntegrationStatus.mockResolvedValue({
+    mockedGetZendeskIntegrationById.mockResolvedValue({
       id: "integration-1",
       status: "degraded",
       externalAccountId: "acct-1",
@@ -200,7 +209,7 @@ describe("draftTicketReplyAction wiring", () => {
       {
         subject: "Can't log in",
         requesterName: "Sam",
-        source: { externalRecordId: "42" },
+        source: { externalRecordId: "42", integrationId: "integration-1" },
       },
       { id: "finding-1" },
       undefined,

@@ -11,7 +11,7 @@ import {
   getAgentCollaboration,
   getMostRecentZendeskTicketReplySentAt,
   getSupportTicketById,
-  getZendeskIntegrationStatus,
+  getZendeskIntegrationById,
   type CompleteZendeskTicketReplySendOutcome,
   type DatabasePool,
 } from "@signaldesk/persistence";
@@ -94,7 +94,22 @@ async function attemptSend(
     };
   }
 
-  const integration = await getZendeskIntegrationStatus(db, organizationId);
+  // Real bug found by review: this used to resolve "whichever Zendesk
+  // integration is currently most-active for this org," not the specific
+  // one this ticket actually came from. An org can genuinely have more
+  // than one `zendesk` integration row over time (a subdomain switch
+  // creates a new row, `findOrCreateZendeskIntegration`'s own upsert
+  // key), and an old ticket still carries its original row's id forever
+  // — resolving the wrong one could silently post against a different
+  // account using this ticket's small-integer external id, which could
+  // collide with an unrelated real ticket there instead of failing
+  // safely. See `getZendeskIntegrationById`'s own doc comment
+  // (@signaldesk/persistence).
+  const integration = await getZendeskIntegrationById(
+    db,
+    organizationId,
+    ticket.source.integrationId,
+  );
 
   if (
     !integration ||
@@ -324,9 +339,20 @@ export async function approveTicketReplyProposalAction(
       };
     }
 
-    const integration = await getZendeskIntegrationStatus(
+    const ticketForIntegration = await getSupportTicketById(
       db,
       session.organizationId,
+      ticketId,
+    );
+
+    if (!ticketForIntegration) {
+      return { ok: false, error: "This ticket could not be found." };
+    }
+
+    const integration = await getZendeskIntegrationById(
+      db,
+      session.organizationId,
+      ticketForIntegration.source.integrationId,
     );
 
     if (

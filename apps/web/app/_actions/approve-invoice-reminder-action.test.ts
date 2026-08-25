@@ -24,7 +24,7 @@ import {
   getAgentCollaboration,
   getInvoiceById,
   getMostRecentQuickBooksInvoiceReminderSentAt,
-  getQuickBooksIntegrationStatus,
+  getQuickBooksIntegrationById,
   recordAgentCollaborationOutcome,
   recordAuditEvent,
 } from "@signaldesk/persistence";
@@ -41,8 +41,8 @@ import { approveInvoiceReminderProposalAction } from "./approve-invoice-reminder
 const mockedGetCurrentOrganization = vi.mocked(getCurrentOrganization);
 const mockedGetAgentCollaboration = vi.mocked(getAgentCollaboration);
 const mockedGetInvoiceById = vi.mocked(getInvoiceById);
-const mockedGetQuickBooksIntegrationStatus = vi.mocked(
-  getQuickBooksIntegrationStatus,
+const mockedGetQuickBooksIntegrationById = vi.mocked(
+  getQuickBooksIntegrationById,
 );
 const mockedGetMostRecentSentAt = vi.mocked(
   getMostRecentQuickBooksInvoiceReminderSentAt,
@@ -89,14 +89,14 @@ const RESUME_COLLABORATION = {
 
 const INVOICE = {
   amountCents: 5000,
-  source: { externalRecordId: "qb-invoice-1" },
+  source: { externalRecordId: "qb-invoice-1", integrationId: "integration-1" },
 } as unknown as Awaited<ReturnType<typeof getInvoiceById>>;
 
 const ACTIVE_INTEGRATION = {
   id: "integration-1",
   status: "active",
   externalAccountId: "realm-1",
-} as unknown as Awaited<ReturnType<typeof getQuickBooksIntegrationStatus>>;
+} as unknown as Awaited<ReturnType<typeof getQuickBooksIntegrationById>>;
 
 const LIVE_OVERDUE_FINDING = {
   type: "invoice.overdue",
@@ -130,7 +130,7 @@ describe("approveInvoiceReminderProposalAction", () => {
       allowed: true,
       retryAfterSeconds: 0,
     });
-    mockedGetQuickBooksIntegrationStatus.mockResolvedValue(ACTIVE_INTEGRATION);
+    mockedGetQuickBooksIntegrationById.mockResolvedValue(ACTIVE_INTEGRATION);
     mockedGetInvoiceById.mockResolvedValue(INVOICE);
     mockedGetMostRecentSentAt.mockResolvedValue(null);
     mockedEnsureFreshAccessToken.mockResolvedValue("access-token-1");
@@ -321,6 +321,28 @@ describe("approveInvoiceReminderProposalAction", () => {
     await approveInvoiceReminderProposalAction("collab-1");
 
     expect(mockedGetInvoiceById).toHaveBeenCalledTimes(1);
+  });
+
+  it("regression: resolves the QuickBooks integration by the invoice's own source.integrationId, not whichever integration is currently most-active for the org", async () => {
+    // Real bug found by review: this used to resolve "whichever QuickBooks
+    // integration is currently most-active for this org." An org can
+    // genuinely have more than one quickbooks integration row over time (a
+    // company-file switch creates a new row), and an old invoice still
+    // carries its original row's id forever — resolving the wrong one
+    // could silently send against a different company's realm using this
+    // invoice's small-integer external id.
+    mockedGetCurrentOrganization.mockResolvedValue(SESSION);
+    mockedGetAgentCollaboration.mockResolvedValue(FRESH_COLLABORATION);
+    mockedBeginSend.mockResolvedValue({ id: "send-1", alreadyResolved: null });
+    mockedSendReminder.mockResolvedValue(undefined);
+
+    await approveInvoiceReminderProposalAction("collab-1");
+
+    expect(mockedGetQuickBooksIntegrationById).toHaveBeenCalledWith(
+      undefined,
+      "org-1",
+      "integration-1",
+    );
   });
 
   it("approves and sends cleanly on the fresh happy path", async () => {

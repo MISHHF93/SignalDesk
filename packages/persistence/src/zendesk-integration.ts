@@ -53,6 +53,42 @@ export async function getZendeskIntegrationStatus(
 }
 
 /**
+ * Reads back one specific Zendesk integration by id — the org-wide
+ * "prefer an active row" resolution `getZendeskIntegrationStatus` does is
+ * wrong for anything acting on a specific already-ingested ticket: an org
+ * can genuinely have more than one `zendesk` integration row over time
+ * (disconnecting one subdomain and connecting a different one creates a
+ * new row, `findOrCreateZendeskIntegration`'s own upsert key), and a
+ * ticket ingested under the old row still carries that row's id in its
+ * own `source.integrationId` forever. Real bug found by review: the
+ * approve/draft ticket-reply actions used to resolve "whichever Zendesk
+ * integration is currently most-active for this org" instead of the
+ * specific one the ticket actually came from — after a subdomain switch,
+ * this could silently fetch/post against the *new* account using an
+ * *old* ticket's small-integer external id, which could collide with an
+ * unrelated real ticket there instead of failing safely. Returns `null`
+ * for an id that doesn't exist or doesn't belong to the caller's own
+ * tenant (RLS reduces the query to zero rows), matching every other
+ * by-id lookup's honest "not found" behavior in this codebase.
+ */
+export async function getZendeskIntegrationById(
+  pool: DatabasePool,
+  organizationId: string,
+  integrationId: string,
+): Promise<ZendeskIntegrationRow | null> {
+  return withTenantContext(pool, organizationId, async (client) => {
+    const result = await client.query<ZendeskIntegrationDbRow>(
+      `select id, status, external_account_label, external_account_id from integrations
+       where organization_id = $1 and id = $2 and source_system = 'zendesk'`,
+      [organizationId, integrationId],
+    );
+
+    const row = result.rows[0];
+    return row ? toRow(row) : null;
+  });
+}
+
+/**
  * Finds or creates the integration row for a specific Zendesk account,
  * identified by its own subdomain — unlike Salesforce/Xero/Jira, no
  * separate post-token-exchange discovery call is needed at all: the

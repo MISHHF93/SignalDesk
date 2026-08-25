@@ -12,7 +12,7 @@ import {
   getAgentCollaboration,
   getInvoiceById,
   getMostRecentQuickBooksInvoiceReminderSentAt,
-  getQuickBooksIntegrationStatus,
+  getQuickBooksIntegrationById,
   type CompleteQuickBooksInvoiceReminderSendOutcome,
   type DatabasePool,
 } from "@signaldesk/persistence";
@@ -89,7 +89,22 @@ async function attemptSend(
     };
   }
 
-  const integration = await getQuickBooksIntegrationStatus(db, organizationId);
+  // Real bug found by review: this used to resolve "whichever QuickBooks
+  // integration is currently most-active for this org," not the specific
+  // one this invoice actually came from. An org can genuinely have more
+  // than one `quickbooks` integration row over time (a company-file
+  // switch creates a new row, `findOrCreateQuickBooksIntegration`'s own
+  // upsert key), and an old invoice still carries its original row's id
+  // forever — resolving the wrong one could silently send against a
+  // different company's realm using this invoice's small-integer external
+  // id, which could collide with an unrelated real invoice there instead
+  // of failing safely. See `getQuickBooksIntegrationById`'s own doc
+  // comment (@signaldesk/persistence).
+  const integration = await getQuickBooksIntegrationById(
+    db,
+    organizationId,
+    invoice.source.integrationId,
+  );
 
   if (
     !integration ||
@@ -348,9 +363,10 @@ export async function approveInvoiceReminderProposalAction(
       };
     }
 
-    const integration = await getQuickBooksIntegrationStatus(
+    const integration = await getQuickBooksIntegrationById(
       db,
       session.organizationId,
+      invoiceForAudit.source.integrationId,
     );
 
     if (

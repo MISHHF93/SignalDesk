@@ -5,7 +5,7 @@ import type { SupportTicket } from "@signaldesk/domain";
 import { fetchZendeskTicketComments } from "@signaldesk/integrations/zendesk";
 import {
   getSupportTicketById,
-  getZendeskIntegrationStatus,
+  getZendeskIntegrationById,
 } from "@signaldesk/persistence";
 
 import type { DraftTicketReplyActionResult } from "../_lib/actions";
@@ -44,7 +44,17 @@ const draft = draftEntityContentAction<SupportTicket, TicketReplyDraftContext>({
   fetchEntity: (db, organizationId, ticketId) =>
     getSupportTicketById(db, organizationId, ticketId),
   buildDraftContext: async (ticket, finding, db, organizationId) => {
-    const integration = await getZendeskIntegrationStatus(db, organizationId);
+    // Real bug found by review: this used to resolve "whichever Zendesk
+    // integration is currently most-active for this org," not the
+    // specific one this ticket actually came from — see
+    // `getZendeskIntegrationById`'s own doc comment
+    // (@signaldesk/persistence) for why that could fetch a live comment
+    // thread from the wrong account entirely after a subdomain switch.
+    const integration = await getZendeskIntegrationById(
+      db,
+      organizationId,
+      ticket.source.integrationId,
+    );
 
     if (
       !integration ||
