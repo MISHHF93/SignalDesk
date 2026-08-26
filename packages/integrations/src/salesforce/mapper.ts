@@ -17,6 +17,20 @@ import type { SalesforceOpportunity } from "./client";
  * and `companyName` fall back to the opportunity's own name until that
  * lookup exists; this is honest about what is actually known today, not a
  * placeholder pretending to be real contact data.
+ *
+ * Known simplification, same class as Xero's/QuickBooks' own: `currency`
+ * is always `"USD"`. `CurrencyIsoCode` only exists on Opportunity at all
+ * for a multi-currency-enabled Salesforce org (an org-level feature
+ * toggle, not a standard field) — querying it unconditionally would break
+ * the sync outright for the more common single-currency org with a "no
+ * such column" error, which would be worse than this disclosed
+ * limitation. Safe for a USD-only org (this app's target ICP, the same
+ * assumption QuickBooks'/Xero's own mappers already make), wrong for a
+ * multi-currency one. Honestly documented, not hidden — real per-connector
+ * multi-currency support would need to land consistently across all
+ * three mappers, not just this one, or a customer connecting multiple
+ * multi-currency systems would see correct amounts from one and silently
+ * wrong ones from another.
  */
 
 const DEFAULT_CURRENCY = "USD";
