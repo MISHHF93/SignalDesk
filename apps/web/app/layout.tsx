@@ -10,6 +10,9 @@ import { getCurrentOrganization } from "./_lib/session";
 import "./globals.css";
 
 const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "SignalDesk";
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3100";
+const APP_DESCRIPTION =
+  "One page for everything that needs your attention, drawn from the tools you already use.";
 
 // A precise, technical pairing over the previous system-serif display face
 // (no asset backed it — "Iowan Old Style" only exists on macOS, everyone
@@ -31,12 +34,23 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(APP_URL),
   title: {
     default: `Today | ${APP_NAME}`,
     template: `%s | ${APP_NAME}`,
   },
-  description:
-    "One page for everything that needs your attention, drawn from the tools you already use.",
+  description: APP_DESCRIPTION,
+  openGraph: {
+    siteName: APP_NAME,
+    title: `Today | ${APP_NAME}`,
+    description: APP_DESCRIPTION,
+    type: "website",
+  },
+  twitter: {
+    card: "summary",
+    title: `Today | ${APP_NAME}`,
+    description: APP_DESCRIPTION,
+  },
 };
 
 // Unconditionally dark — the cyber theme (globals.css `:root`) no longer
