@@ -46,7 +46,7 @@ export function OAuthButtons({ next }: { next: string }) {
               className="oauthButton"
               disabled={isPending}
             >
-              <OAuthIcon provider={provider.id} />
+              <OAuthIcon provider={provider} />
               <span className="oauthButtonLabel">
                 Continue with {provider.label}
               </span>
@@ -57,7 +57,7 @@ export function OAuthButtons({ next }: { next: string }) {
               className="oauthButton oauthButtonDisabled"
               title={`${provider.label} sign-in is not yet connected`}
             >
-              <OAuthIcon provider={provider.id} />
+              <OAuthIcon provider={provider} />
               <span className="oauthButtonLabel">
                 Continue with {provider.label}
               </span>
