@@ -312,17 +312,33 @@ export function CommandCenterBoard({
     [handleAgentCardProduced],
   );
 
-  const draftActionsByEntityKind: DraftActionsByEntityKind = {
-    ...(draftMessageReplyAction ? { message: draftMessageReplyAction } : {}),
-    ...(draftInvoiceReminderAction
-      ? { invoice: draftInvoiceReminderAction }
-      : {}),
-    ...(draftTaskNudgeAction ? { task: draftTaskNudgeAction } : {}),
-    ...(draftDealNoteAction ? { lead: draftDealNoteAction } : {}),
-    ...(draftTicketReplyAction
-      ? { support_ticket: draftTicketReplyAction }
-      : {}),
-  };
+  // Real gap found by review: this object literal (and, further down,
+  // groupCardsIntoClusters/getBatchDraftableCards) recomputed on every
+  // render regardless of whether the cards/actions behind them had
+  // actually changed — including renders triggered by wholly unrelated
+  // state (statusMessage, matterDraftStatus). Memoized here so those two
+  // calls below can be memoized too, keyed on a stable dependency instead
+  // of a fresh object reference every render.
+  const draftActionsByEntityKind: DraftActionsByEntityKind = useMemo(
+    () => ({
+      ...(draftMessageReplyAction ? { message: draftMessageReplyAction } : {}),
+      ...(draftInvoiceReminderAction
+        ? { invoice: draftInvoiceReminderAction }
+        : {}),
+      ...(draftTaskNudgeAction ? { task: draftTaskNudgeAction } : {}),
+      ...(draftDealNoteAction ? { lead: draftDealNoteAction } : {}),
+      ...(draftTicketReplyAction
+        ? { support_ticket: draftTicketReplyAction }
+        : {}),
+    }),
+    [
+      draftMessageReplyAction,
+      draftInvoiceReminderAction,
+      draftTaskNudgeAction,
+      draftDealNoteAction,
+      draftTicketReplyAction,
+    ],
+  );
 
   async function handleDraftForMatter(cluster: CardCluster) {
     setMatterDraftStatus((current) => ({
@@ -537,6 +553,24 @@ export function CommandCenterBoard({
       : {}),
   };
 
+  // Both real computations, not just object bookkeeping — grouping
+  // considers every pair of visible cards, and getBatchDraftableCards
+  // dedupes by real entity — so recomputing them on every render
+  // regardless of cause (a status message, a matter's own draft-pending
+  // state) was real wasted work, not just noise. Memoized together so
+  // draftableCards is looked up per cluster below, not recomputed inline.
+  const clusters = useMemo(
+    () =>
+      groupCardsIntoClusters(visibleCards).map((cluster) => ({
+        cluster,
+        draftableCards: getBatchDraftableCards(
+          cluster.cards,
+          draftActionsByEntityKind,
+        ),
+      })),
+    [visibleCards, draftActionsByEntityKind],
+  );
+
   return (
     <>
       <CommandBar
@@ -614,7 +648,7 @@ export function CommandCenterBoard({
         </p>
       ) : (
         <div className="dynamicCardStack">
-          {groupCardsIntoClusters(visibleCards).map((cluster) => {
+          {clusters.map(({ cluster, draftableCards }) => {
             const renderedCards = cluster.cards.map((card) =>
               renderCard(card, createTaskAction, actionHandlers),
             );
@@ -624,14 +658,6 @@ export function CommandCenterBoard({
             }
 
             const draftStatus = matterDraftStatus[cluster.key];
-            // Deduped by entity, not raw card count — see
-            // `handleDraftForMatter`'s own comment. The button's own label
-            // uses this same number so it never promises more drafts than
-            // the click actually produces.
-            const draftableCards = getBatchDraftableCards(
-              cluster.cards,
-              draftActionsByEntityKind,
-            );
 
             return (
               <section className="matterGroup" key={cluster.key}>
