@@ -91,6 +91,26 @@ describe("exchangeXeroAuthorizationCode", () => {
       exchangeXeroAuthorizationCode(CONFIG, "bad-code"),
     ).rejects.toThrow(/Xero token request failed/);
   });
+
+  it("regression: does not retry on a 5xx — the authorization code is single-use, so a retry would resend an already-consumed code", async () => {
+    // Real gap found by review: this used to retry on a 5xx/429 like any
+    // other default call, missing the fix already applied to QuickBooks/
+    // Zendesk/Jira. A 5xx here is not proof Xero never consumed the code;
+    // if it did, retrying resends the same now-dead code and Xero
+    // correctly rejects it, permanently losing the one real token pair
+    // that was already issued but never received. Fixed via
+    // `{ retryable: false }` (see the source file's own doc comment on
+    // requestXeroToken).
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(503, { error: "unavailable" }),
+    );
+
+    await expect(
+      exchangeXeroAuthorizationCode(CONFIG, "auth-code"),
+    ).rejects.toThrow(/Xero token request failed/);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("refreshXeroAccessToken", () => {

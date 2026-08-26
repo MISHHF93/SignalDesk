@@ -99,27 +99,23 @@ describe("exchangeSlackAuthorizationCode", () => {
     expect(error.rawDetail).toBe("invalid_code");
   });
 
-  it("retries on a 5xx before succeeding, reusing the shared retry policy", async () => {
-    fetchMock
-      .mockResolvedValueOnce(
-        jsonResponse(503, { ok: false, error: "unavailable" }),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse(200, {
-          ok: true,
-          access_token: "xoxb-test-token",
-          bot_user_id: "U1",
-          scope: "channels:read",
-          team: { id: "T1", name: "Retry Workspace" },
-        }),
-      );
+  it("regression: does not retry on a 5xx — the authorization code is single-use, so a retry would resend an already-consumed code", async () => {
+    // Real gap found by review: this used to retry on a 5xx/429 like any
+    // other default call, reusing the shared default retry policy. But a
+    // 5xx here is not proof Slack never consumed the code; if it did,
+    // retrying resends the same now-dead code and Slack correctly rejects
+    // it, masking an already-succeeded exchange as a failure. Fixed via
+    // `{ retryable: false }` (see the source file's own doc comment on
+    // this function).
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(503, { ok: false, error: "unavailable" }),
+    );
 
-    const resultPromise = exchangeSlackAuthorizationCode(CONFIG, "auth-code");
-    await vi.runAllTimersAsync();
-    const result = await resultPromise;
+    await expect(
+      exchangeSlackAuthorizationCode(CONFIG, "auth-code"),
+    ).rejects.toThrow(UpstreamProviderError);
 
-    expect(result.teamId).toBe("T1");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

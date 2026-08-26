@@ -138,27 +138,24 @@ describe("exchangeSalesforceAuthorizationCode", () => {
     expect(error.rawDetail).toContain("authentication failure");
   });
 
-  it("retries on a 5xx before succeeding, reusing the shared retry policy", async () => {
-    fetchMock
-      .mockResolvedValueOnce(jsonResponse(503, { error: "unavailable" }))
-      .mockResolvedValueOnce(
-        jsonResponse(200, {
-          access_token: "00Dtest-access-2",
-          refresh_token: "5Aeptest-refresh-2",
-          instance_url: "https://retry.my.salesforce.com",
-        }),
-      );
-
-    const resultPromise = exchangeSalesforceAuthorizationCode(
-      CONFIG,
-      "auth-code",
-      "verifier-abc",
+  it("regression: does not retry on a 5xx — the authorization code is single-use, so a retry would resend an already-consumed code", async () => {
+    // Real gap found by review: this used to retry on a 5xx/429 like any
+    // other default call, reusing the shared default retry policy. But a
+    // 5xx here is not proof Salesforce never consumed the code; if it
+    // did, retrying resends the same now-dead code and Salesforce
+    // correctly rejects it, permanently losing the one real token pair
+    // that was already issued but never received. Fixed via
+    // `{ retryable: false }` (see the source file's own doc comment on
+    // requestSalesforceToken).
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(503, { error: "unavailable" }),
     );
-    await vi.runAllTimersAsync();
-    const result = await resultPromise;
 
-    expect(result.instanceUrl).toBe("https://retry.my.salesforce.com");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await expect(
+      exchangeSalesforceAuthorizationCode(CONFIG, "auth-code", "verifier-abc"),
+    ).rejects.toThrow(UpstreamProviderError);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

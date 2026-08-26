@@ -92,11 +92,26 @@ interface RawSalesforceTokenResponse {
 async function requestSalesforceToken(
   body: URLSearchParams,
 ): Promise<SalesforceTokenResponse> {
-  const response = await fetchWithRetry(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-  });
+  // Real gap found by review: this used to retry on a 5xx/429 like any
+  // other default call. The authorization `code` this backs (via
+  // exchangeSalesforceAuthorizationCode) is single-use by the OAuth spec
+  // itself, regardless of provider — a 5xx here is not proof Salesforce
+  // never consumed it, so a blind retry could resend an already-consumed
+  // code and fail the connect flow even though the tokens were actually
+  // issued. Salesforce doesn't rotate refresh tokens the way QuickBooks/
+  // Zendesk/Jira do, so refreshSalesforceAccessToken's own use of this
+  // shared function doesn't strictly need this, but opting out here too
+  // is strictly safer and keeps one function's retry semantics from
+  // depending on which caller invoked it.
+  const response = await fetchWithRetry(
+    TOKEN_URL,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    },
+    { retryable: false },
+  );
 
   const payload = (await response.json()) as RawSalesforceTokenResponse;
 

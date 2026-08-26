@@ -94,16 +94,25 @@ export async function exchangeSlackAuthorizationCode(
   config: SlackOAuthConfig,
   code: string,
 ): Promise<SlackTokenResponse> {
-  const response = await fetchWithRetry(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: config.clientId,
-      client_secret: config.clientSecret,
-      redirect_uri: config.redirectUri,
-      code,
-    }),
-  });
+  // Real gap found by review: this used to retry on a 5xx/429 like any
+  // other default call. The authorization `code` is single-use by the
+  // OAuth spec itself — a 5xx here is not proof Slack never consumed it,
+  // so a blind retry could resend an already-consumed code and fail the
+  // connect flow even though Slack actually issued the token.
+  const response = await fetchWithRetry(
+    TOKEN_URL,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+        redirect_uri: config.redirectUri,
+        code,
+      }),
+    },
+    { retryable: false },
+  );
 
   if (!response.ok) {
     await throwUpstreamError("Slack token request", response);

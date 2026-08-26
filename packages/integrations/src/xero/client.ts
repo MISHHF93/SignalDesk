@@ -113,15 +113,28 @@ async function requestXeroToken(
   config: Pick<XeroOAuthConfig, "clientId" | "clientSecret">,
   body: URLSearchParams,
 ): Promise<XeroTokenResponse> {
-  const response = await fetchWithRetry(TOKEN_URL, {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/x-www-form-urlencoded",
-      Authorization: basicAuthHeader(config.clientId, config.clientSecret),
+  // Real gap found by review: this used to retry on a 5xx/429 like any
+  // other default call, missing the same fix already applied to
+  // QuickBooks/Zendesk/Jira (fetch-with-retry.ts's own doc comment). Xero
+  // rotates the refresh token on every use, so a 5xx here is not proof
+  // Xero never completed the grant server-side — a blind retry could
+  // resend an already-consumed refresh token (or single-use authorization
+  // code, on the exchange leg), and Xero would correctly reject it,
+  // permanently losing the one real new token pair that was actually
+  // issued until the tenant reconnects.
+  const response = await fetchWithRetry(
+    TOKEN_URL,
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: basicAuthHeader(config.clientId, config.clientSecret),
+      },
+      body,
     },
-    body,
-  });
+    { retryable: false },
+  );
 
   if (!response.ok) {
     await throwUpstreamError("Xero token request", response);
