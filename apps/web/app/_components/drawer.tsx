@@ -17,8 +17,17 @@ import { useEffect, useRef, type ReactNode } from "react";
  * detail drawer) once a second one (ticket detail) made the shared shape
  * obvious — not built speculatively ahead of a second real need.
  */
+// Real gap found by review: `summary` is natively focusable/tabbable
+// without an explicit `tabindex` (it's the one real focusable element in
+// this drawer's actual content that isn't a form control/link — see
+// `connector-detail-content.tsx`'s `<details><summary>` implementation-
+// gates disclosure). Omitting it meant the trap's computed "last"
+// element was actually some earlier control, so Tab from there snapped
+// straight back to the close button — leaving the `<summary>` toggle and
+// everything after it permanently unreachable by keyboard, even though a
+// mouse user could click straight into it.
 const FOCUSABLE_SELECTOR =
-  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), summary, [tabindex]:not([tabindex="-1"])';
 
 export function Drawer({
   title,
