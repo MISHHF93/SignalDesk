@@ -16,15 +16,77 @@ function directionLabel(direction: ConnectorDefinition["direction"]): string {
   return "Two-way sync";
 }
 
+/** The one real connector card — shared by both the Connected and Not-yet-
+ * connected sections below rather than duplicated per section. */
+function ConnectorCard({ connector }: { connector: ConnectorDefinition }) {
+  return (
+    <article
+      className={`connectorCard ${connector.slug === "slack" ? "featuredConnector" : ""}`}
+    >
+      <div className="connectorCardTop">
+        <ConnectorMark connector={connector} />
+        <span
+          className={`availabilityBadge ${connector.availability === "foundation-preview" ? "preview" : "planned"}`}
+        >
+          {connector.availability === "foundation-preview"
+            ? "In progress"
+            : "Coming soon"}
+        </span>
+      </div>
+
+      <p className="connectorCategory">
+        {capabilityClassLabels[connector.capabilityClasses[0]!]}
+      </p>
+      <h3>{connector.name}</h3>
+      <p className="connectorDescription">{connector.shortDescription}</p>
+
+      <ul className="capabilityPreview" aria-label="Designed capabilities">
+        {connector.capabilities.map((capability) => (
+          <li key={capability.id}>
+            <span aria-hidden="true">◇</span>
+            {capability.label}
+          </li>
+        ))}
+      </ul>
+
+      <div className="connectorMeta">
+        <span>{directionLabel(connector.direction)}</span>
+        <span>
+          {connector.accessPosture === "read-only"
+            ? "Read-only"
+            : "Can also take approved actions"}
+        </span>
+      </div>
+
+      <Link className="connectorLink" href={`/integrations/${connector.slug}`}>
+        Review setup
+        <span aria-hidden="true">→</span>
+      </Link>
+    </article>
+  );
+}
+
 export function IntegrationExplorer({
   connectors,
+  connectedSlugs,
 }: {
   connectors: readonly ConnectorDefinition[];
+  /** Real, currently active/degraded source systems for this organization
+   * (`listActiveIntegrationSourceSystems`) — an empty array for a guest or
+   * signed-out visitor, never a guess. Drives the Connected/Not-yet-
+   * connected split below; unrelated to `connector.availability`
+   * (foundation-preview/planned), which is about whether the catalog
+   * entry is real at all, not whether *this* organization uses it. */
+  connectedSlugs: readonly string[];
 }) {
   const [query, setQuery] = useState("");
   const [capabilityClass, setCapabilityClass] = useState<
     ConnectorCapabilityClass | "all"
   >("all");
+  const connectedSlugSet = useMemo(
+    () => new Set(connectedSlugs),
+    [connectedSlugs],
+  );
   const capabilityClasses = useMemo(
     () =>
       Array.from(
@@ -53,6 +115,20 @@ export function IntegrationExplorer({
         return matchesCapabilityClass && searchText.includes(normalizedQuery);
       }),
     [capabilityClass, connectors, normalizedQuery],
+  );
+  const connectedConnectors = useMemo(
+    () =>
+      filteredConnectors.filter((connector) =>
+        connectedSlugSet.has(connector.slug),
+      ),
+    [connectedSlugSet, filteredConnectors],
+  );
+  const notConnectedConnectors = useMemo(
+    () =>
+      filteredConnectors.filter(
+        (connector) => !connectedSlugSet.has(connector.slug),
+      ),
+    [connectedSlugSet, filteredConnectors],
   );
 
   return (
@@ -114,63 +190,49 @@ export function IntegrationExplorer({
       </div>
 
       {filteredConnectors.length > 0 ? (
-        <ul className="connectorGrid">
-          {filteredConnectors.map((connector) => (
-            <li key={connector.slug}>
-              <article
-                className={`connectorCard ${connector.slug === "slack" ? "featuredConnector" : ""}`}
-              >
-                <div className="connectorCardTop">
-                  <ConnectorMark connector={connector} />
-                  <span
-                    className={`availabilityBadge ${connector.availability === "foundation-preview" ? "preview" : "planned"}`}
-                  >
-                    {connector.availability === "foundation-preview"
-                      ? "In progress"
-                      : "Coming soon"}
-                  </span>
-                </div>
+        <>
+          {connectedConnectors.length > 0 ? (
+            <div className="connectorGroup">
+              <h3 className="connectorGroupHeading">
+                Connected
+                <span>{connectedConnectors.length}</span>
+              </h3>
+              <ul className="connectorGrid">
+                {connectedConnectors.map((connector) => (
+                  <li key={connector.slug}>
+                    <ConnectorCard connector={connector} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
 
-                <p className="connectorCategory">
-                  {capabilityClassLabels[connector.capabilityClasses[0]!]}
-                </p>
-                <h3>{connector.name}</h3>
-                <p className="connectorDescription">
-                  {connector.shortDescription}
-                </p>
-
-                <ul
-                  className="capabilityPreview"
-                  aria-label="Designed capabilities"
-                >
-                  {connector.capabilities.map((capability) => (
-                    <li key={capability.id}>
-                      <span aria-hidden="true">◇</span>
-                      {capability.label}
-                    </li>
-                  ))}
-                </ul>
-
-                <div className="connectorMeta">
-                  <span>{directionLabel(connector.direction)}</span>
-                  <span>
-                    {connector.accessPosture === "read-only"
-                      ? "Read-only"
-                      : "Can also take approved actions"}
-                  </span>
-                </div>
-
-                <Link
-                  className="connectorLink"
-                  href={`/integrations/${connector.slug}`}
-                >
-                  Review setup
-                  <span aria-hidden="true">→</span>
-                </Link>
-              </article>
-            </li>
-          ))}
-        </ul>
+          {notConnectedConnectors.length > 0 ? (
+            // Collapsed by default once the organization has at least one
+            // real connection — that's when decluttering the other ~20
+            // catalog entries actually helps. A brand-new org with zero
+            // connections has nothing to declutter *from*, so this starts
+            // open rather than hiding the entire catalog on first visit.
+            // `connectedSlugs.length` (not the filtered count) drives this,
+            // so typing a search query never flips it shut mid-search.
+            <details
+              className="connectorGroupDisclosure"
+              open={connectedSlugs.length === 0}
+            >
+              <summary>
+                Not yet connected
+                <span>{notConnectedConnectors.length}</span>
+              </summary>
+              <ul className="connectorGrid">
+                {notConnectedConnectors.map((connector) => (
+                  <li key={connector.slug}>
+                    <ConnectorCard connector={connector} />
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+        </>
       ) : (
         <div className="emptyCatalog" role="status">
           <h3>No connectors match those filters</h3>

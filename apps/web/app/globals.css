@@ -1958,6 +1958,61 @@ input {
   color: var(--emphasis-fill-ink);
 }
 
+/* The Desk Drawers split (Phase 4 design revamp): a prominent, always-
+   expanded "Connected" group above a collapsible "Not yet connected" one,
+   rather than one flat 24-connector grid with no real/not-yet-real
+   distinction. See IntegrationExplorer's own comment for why the
+   disclosure's default open/closed state is driven by whether the
+   organization has any real connection at all, not by the current
+   search/filter. */
+.connectorGroup {
+  margin-bottom: 1.7rem;
+}
+
+.connectorGroupHeading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 0.85rem;
+  color: var(--emphasis);
+  font-size: 0.9rem;
+  font-weight: var(--weight-bold);
+}
+
+.connectorGroupHeading span,
+.connectorGroupDisclosure summary span {
+  padding: 0.1rem 0.55rem;
+  border-radius: var(--radius-full);
+  background: var(--surface-sunken);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+}
+
+.connectorGroupDisclosure {
+  margin-bottom: 1.7rem;
+}
+
+.connectorGroupDisclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: 0.85rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: var(--weight-bold);
+  cursor: pointer;
+}
+
+.connectorGroupDisclosure > summary:hover {
+  color: var(--emphasis);
+}
+
+.connectorGroupDisclosure[open] > summary {
+  color: var(--emphasis);
+}
+
 .connectorGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

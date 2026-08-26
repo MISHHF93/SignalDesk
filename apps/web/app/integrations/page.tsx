@@ -273,7 +273,10 @@ export default async function IntegrationsPage() {
         />
       ) : null}
 
-      <IntegrationExplorer connectors={connectorCatalog} />
+      <IntegrationExplorer
+        connectors={connectorCatalog}
+        connectedSlugs={connectedSlugs}
+      />
     </main>
   );
 }
