@@ -258,7 +258,7 @@ describe("fetchSalesforceOpportunities", () => {
     );
   });
 
-  it("adds a LastModifiedDate WHERE clause, unquoted ISO-8601, when sinceIso is given", async () => {
+  it("adds an inclusive LastModifiedDate WHERE clause, unquoted ISO-8601, when sinceIso is given", async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse(200, { done: true, totalSize: 0, records: [] }),
     );
@@ -273,8 +273,15 @@ describe("fetchSalesforceOpportunities", () => {
     // `URLSearchParams` encodes spaces as `+` (form-encoding convention),
     // which `decodeURIComponent` alone does not turn back into spaces.
     const decoded = decodeURIComponent(calledUrl).replace(/\+/g, " ");
+    // Real bug found by review: this used to be strict `>` (same
+    // pre-fix shape already found and corrected for HubSpot, commit
+    // 5c5b616) — a run cut off mid-batch by MAX_OPPORTUNITY_PAGES at a
+    // timestamp shared by multiple opportunities could permanently drop
+    // the ones excluded from that run under strict `>`. `>=` is safe
+    // here since ingestSalesforceOpportunity's idempotency key already
+    // includes sourceVersion.
     expect(decoded).toContain(
-      "WHERE LastModifiedDate > 2026-08-01T00:00:00.000Z",
+      "WHERE LastModifiedDate >= 2026-08-01T00:00:00.000Z",
     );
   });
 

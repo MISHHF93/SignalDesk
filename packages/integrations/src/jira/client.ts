@@ -264,7 +264,18 @@ function formatJqlDateTime(iso: string): string {
 /**
  * Fetches one page of open issues (`statusCategory != Done`) for the
  * connected site, oldest-modified-first. `sinceIso`, when given, adds
- * `AND updated > "<jql-date-literal>"` to the same query.
+ * `AND updated >= "<jql-date-literal>"` to the same query.
+ *
+ * Real bug found by review: this used to filter with strict `>` (same
+ * pre-fix shape already found and corrected for HubSpot, commit
+ * 5c5b616). `sync-jira.ts` caps a run at `MAX_ISSUE_PAGES` and advances
+ * the stored cursor to the max `updated` value seen across the run — if
+ * a run is cut off exactly where two or more issues share that same
+ * `updated` timestamp, only those fetched before the cap land, and a
+ * strict `>` next run can never match the excluded ones again
+ * (permanent data loss). `>=` trades a harmless re-fetch-and-no-op at the
+ * boundary for that — safe here since `ingestJiraIssue`'s idempotency key
+ * already includes `sourceVersion` (`packages/persistence/src/tasks.ts`).
  */
 export async function fetchJiraIssues(
   accessToken: string,
@@ -273,7 +284,7 @@ export async function fetchJiraIssues(
   pageToken?: string | null,
 ): Promise<JiraIssuePage> {
   const sinceClause = sinceIso
-    ? ` AND updated > "${formatJqlDateTime(sinceIso)}"`
+    ? ` AND updated >= "${formatJqlDateTime(sinceIso)}"`
     : "";
   const jql = `statusCategory != Done${sinceClause} ORDER BY updated ASC`;
 

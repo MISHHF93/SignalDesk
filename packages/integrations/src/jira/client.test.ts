@@ -265,7 +265,7 @@ describe("fetchJiraIssues", () => {
     expect(decoded).not.toContain("AND updated >");
   });
 
-  it("adds a quoted JQL date-literal clause (yyyy-MM-dd HH:mm, not ISO-8601) when sinceIso is given", async () => {
+  it("adds a quoted, inclusive JQL date-literal clause (yyyy-MM-dd HH:mm, not ISO-8601) when sinceIso is given", async () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse(200, { issues: [], isLast: true }),
     );
@@ -278,7 +278,14 @@ describe("fetchJiraIssues", () => {
 
     const [calledUrl] = fetchMock.mock.calls[0] as [string];
     const decoded = decodeURIComponent(calledUrl).replace(/\+/g, " ");
-    expect(decoded).toContain('AND updated > "2026-08-01 09:05"');
+    // Real bug found by review: this used to be strict `>` (same
+    // pre-fix shape already found and corrected for HubSpot, commit
+    // 5c5b616) — a run cut off mid-batch by MAX_ISSUE_PAGES at a
+    // timestamp shared by multiple issues could permanently drop the
+    // ones excluded from that run under strict `>`. `>=` is safe here
+    // since ingestJiraIssue's idempotency key already includes
+    // sourceVersion.
+    expect(decoded).toContain('AND updated >= "2026-08-01 09:05"');
   });
 
   it("passes nextPageToken through on a subsequent page request", async () => {

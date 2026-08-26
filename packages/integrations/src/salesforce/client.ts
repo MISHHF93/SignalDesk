@@ -267,18 +267,29 @@ async function requestSalesforceQuery(
 /**
  * Fetches the first page of opportunities — every one, oldest-modified-
  * first, when `sinceIso` is omitted (a full/initial pull); only those
- * modified after `sinceIso` otherwise (incremental pull), mirroring
+ * modified at or after `sinceIso` otherwise (incremental pull), mirroring
  * `fetchHubSpotDealsModifiedSince`'s cursor shape. SOQL datetime literals
  * in a WHERE clause are unquoted ISO-8601
- * (`WHERE LastModifiedDate > 2024-01-01T00:00:00Z`) — verified against
+ * (`WHERE LastModifiedDate >= 2024-01-01T00:00:00Z`) — verified against
  * Salesforce's current SOQL date-literal docs, not assumed.
+ *
+ * Real bug found by review: this used to filter with strict `>` (same
+ * pre-fix shape already found and corrected for HubSpot, commit
+ * 5c5b616). `sync-salesforce.ts` caps a run at `MAX_OPPORTUNITY_PAGES`
+ * and advances the stored cursor to the max `LastModifiedDate` seen
+ * across the run — a bulk update producing several opportunities with
+ * the identical `LastModifiedDate`, cut off mid-batch by that page cap,
+ * would have permanently dropped the remainder under strict `>`. `>=`
+ * trades a harmless re-fetch-and-no-op at the boundary for that — safe
+ * here since `ingestSalesforceOpportunity`'s idempotency key already
+ * includes `sourceVersion` (`packages/persistence/src/salesforce-sync.ts`).
  */
 export async function fetchSalesforceOpportunities(
   instanceUrl: string,
   accessToken: string,
   sinceIso?: string,
 ): Promise<SalesforceOpportunityPage> {
-  const whereClause = sinceIso ? ` WHERE LastModifiedDate > ${sinceIso}` : "";
+  const whereClause = sinceIso ? ` WHERE LastModifiedDate >= ${sinceIso}` : "";
   const soql = `SELECT ${OPPORTUNITY_FIELDS} FROM Opportunity${whereClause} ORDER BY LastModifiedDate ASC`;
   const url = new URL(`${instanceUrl}/services/data/${API_VERSION}/query/`);
   url.searchParams.set("q", soql);
