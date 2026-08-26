@@ -23,35 +23,40 @@ export const integrationHealthIntelligence: IntelligenceCapability = {
   async evaluate(
     context: IntelligenceContext,
   ): Promise<readonly IntelligenceFinding[]> {
-    const unconnectedConnector = listConnectors().find(
+    // Real gap found by review: this used to use Array.prototype.find(),
+    // so at most one unconnected foundation-preview connector was ever
+    // reported no matter how many actually were — contradicting this
+    // capability's own doc comment ("connectors that are cataloged but
+    // not yet connected," plural) and this codebase's own "evaluate the
+    // real set, not one representative record" convention every other
+    // capability follows (see capability.ts's own note on the abandoned
+    // single-lead stopgap). A brand-new tenant with zero connectors saw
+    // exactly one "X is not yet connected" card, ever, until that one
+    // connector got connected — the other unconnected ones stayed
+    // invisible the whole time.
+    const unconnectedConnectors = listConnectors().filter(
       (connector) =>
         connector.availability === "foundation-preview" &&
         !context.connectedIntegrationSlugs.includes(connector.slug),
     );
 
-    if (!unconnectedConnector) {
-      return [];
-    }
-
-    const finding: IntelligenceFinding = {
-      id: `integration-health:${unconnectedConnector.slug}`,
+    return unconnectedConnectors.map((connector) => ({
+      id: `integration-health:${connector.slug}`,
       type: "integration.unconnected",
-      entity: { kind: "connector", id: unconnectedConnector.slug },
-      title: `${unconnectedConnector.name} is not yet connected`,
-      summary: `${unconnectedConnector.name} is on your list of tools to connect, but nothing is connected yet.`,
+      entity: { kind: "connector", id: connector.slug },
+      title: `${connector.name} is not yet connected`,
+      summary: `${connector.name} is on your list of tools to connect, but nothing is connected yet.`,
       severity: "info",
       confidence: CONFIDENCE_CATALOG_FACT,
       evidence: [],
       freshness: { asOf: context.now, status: "unknown" },
       explanation: {
-        trigger: `${unconnectedConnector.name} hasn't been connected yet.`,
+        trigger: `${connector.name} hasn't been connected yet.`,
         observedValue: "Nothing is connected yet.",
         expectedBaseline: "A connected, syncing integration.",
         confidence: "high",
       },
       detectedAt: context.now,
-    };
-
-    return [finding];
+    }));
   },
 };

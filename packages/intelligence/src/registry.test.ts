@@ -93,7 +93,14 @@ describe("runIntelligenceCapabilities", () => {
     });
     const types = findings.map((finding) => finding.type);
 
-    expect(types).toEqual(["integration.unconnected"]);
+    // Real bug found by review: integration-health.ts used to report at
+    // most one unconnected connector no matter how many actually were —
+    // with zero connectors connected, every real foundation-preview
+    // connector in the catalog is genuinely unconnected.
+    expect(types.length).toBeGreaterThan(1);
+    expect(types.every((type) => type === "integration.unconnected")).toBe(
+      true,
+    );
   });
 
   it("still returns findings from the other capabilities when one throws", async () => {

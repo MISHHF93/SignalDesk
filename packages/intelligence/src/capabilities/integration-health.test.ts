@@ -28,7 +28,12 @@ const lead: Lead = {
 };
 
 describe("integrationHealthIntelligence", () => {
-  it("reports an unconnected foundation-preview connector honestly, with unknown freshness", async () => {
+  it("reports every unconnected foundation-preview connector honestly, with unknown freshness — not just one", async () => {
+    // Real bug found by review: this capability used to use
+    // Array.prototype.find(), so at most one unconnected connector was
+    // ever reported no matter how many actually were. A brand-new
+    // tenant with zero connectors has every foundation-preview connector
+    // unconnected, and all of them must be reported.
     const findings = await integrationHealthIntelligence.evaluate({
       leads: [lead],
       now: NOW,
@@ -46,13 +51,28 @@ describe("integrationHealthIntelligence", () => {
       defaultExpectedResponseHours: 24,
     });
 
-    expect(findings).toHaveLength(1);
-    expect(findings[0]?.type).toBe("integration.unconnected");
-    expect(findings[0]?.freshness).toEqual({ asOf: NOW, status: "unknown" });
-    expect(findings[0]?.evidence).toEqual([]);
+    expect(findings.length).toBeGreaterThan(1);
+    expect(
+      findings.every((finding) => finding.type === "integration.unconnected"),
+    ).toBe(true);
+    expect(
+      findings.every(
+        (finding) =>
+          finding.freshness.status === "unknown" &&
+          finding.freshness.asOf === NOW,
+      ),
+    ).toBe(true);
+    expect(findings.every((finding) => finding.evidence.length === 0)).toBe(
+      true,
+    );
+    // Every reported connector id is genuinely unconnected — none of them
+    // is the empty connectedIntegrationSlugs list itself, and ids are
+    // unique (no connector double-reported).
+    const reportedSlugs = findings.map((finding) => finding.entity?.id);
+    expect(new Set(reportedSlugs).size).toBe(reportedSlugs.length);
   });
 
-  it("skips a foundation-preview connector once it's actually connected", async () => {
+  it("skips a foundation-preview connector once it's actually connected, while still reporting every other unconnected one", async () => {
     const findings = await integrationHealthIntelligence.evaluate({
       leads: [lead],
       now: NOW,
@@ -70,8 +90,13 @@ describe("integrationHealthIntelligence", () => {
       defaultExpectedResponseHours: 24,
     });
 
-    expect(findings).toHaveLength(1);
-    expect(findings[0]?.entity).toEqual({ kind: "connector", id: "hubspot" });
+    expect(findings.some((finding) => finding.entity?.id === "slack")).toBe(
+      false,
+    );
+    expect(findings.some((finding) => finding.entity?.id === "hubspot")).toBe(
+      true,
+    );
+    expect(findings.length).toBeGreaterThan(1);
   });
 
   it("reports nothing once every foundation-preview connector is connected", async () => {

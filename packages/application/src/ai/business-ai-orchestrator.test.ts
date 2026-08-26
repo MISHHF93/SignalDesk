@@ -164,12 +164,21 @@ describe("createBusinessAIOrchestrator", () => {
       defaultExpectedResponseHours: 24,
     });
 
-    expect(attention.findings.map((finding) => finding.type)).toEqual([
-      "integration.unconnected",
-    ]);
-    expect(attention.cards.map((card) => card.type)).toEqual([
-      "integration_health",
-    ]);
+    // Real bug found by review: integration-health.ts used to report at
+    // most one unconnected connector no matter how many actually were —
+    // with zero connectors connected, every real foundation-preview
+    // connector in the catalog is genuinely unconnected, so more than one
+    // finding/card is the correct behavior here now.
+    expect(attention.findings.length).toBeGreaterThan(1);
+    expect(
+      attention.findings.every(
+        (finding) => finding.type === "integration.unconnected",
+      ),
+    ).toBe(true);
+    expect(attention.cards.length).toBeGreaterThan(1);
+    expect(
+      attention.cards.every((card) => card.type === "integration_health"),
+    ).toBe(true);
   });
 
   it("caps admitted cards below the total finding count and reports the honest deferred count", async () => {
