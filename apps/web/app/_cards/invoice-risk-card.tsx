@@ -1,9 +1,6 @@
-import { CardActions } from "./card-actions";
-import { CardFeedbackButtons } from "./card-feedback-buttons";
-import { CardBadges, WhyDisclosure } from "./card-shell";
+import { CardShell } from "./card-shell";
 import type { CardComponentProps } from "./card-types";
-import { DraftInvoiceReminderButton } from "./draft-invoice-reminder-button";
-import { formatCardCurrency } from "./format";
+import { DraftActionButton } from "./draft-action-button";
 import { InvoicePaymentScenarioButton } from "./invoice-payment-scenario-button";
 
 export function InvoiceRiskCard({
@@ -15,57 +12,31 @@ export function InvoiceRiskCard({
   onAgentCardProduced,
 }: CardComponentProps) {
   return (
-    <article
-      className="attentionCard dynamicCard"
-      data-severity={card.severity}
-      aria-label={card.title}
-    >
-      <div className="priorityRail" aria-hidden="true" />
-      <div className="attentionMain">
-        <div className="attentionHeader">
-          <div>
-            <CardBadges card={card} />
-            <h3>{card.title}</h3>
-          </div>
-          {card.financialContext ? (
-            <div className="leadValue">
-              <span>{card.financialContext.label}</span>
-              <strong>
-                {formatCardCurrency(
-                  card.financialContext.amountCents,
-                  card.financialContext.currency,
-                )}
-              </strong>
-            </div>
-          ) : null}
-        </div>
-        <p>{card.summary}</p>
-        {simulateInvoicePaymentAction && card.entity ? (
+    <CardShell
+      card={card}
+      createTaskAction={createTaskAction}
+      {...(recordCardFeedbackAction ? { recordCardFeedbackAction } : {})}
+      afterSummary={
+        simulateInvoicePaymentAction && card.entity ? (
           <InvoicePaymentScenarioButton
             invoiceId={card.entity.id}
             simulateInvoicePaymentAction={simulateInvoicePaymentAction}
           />
-        ) : null}
-        <div className="attentionFooter">
-          <WhyDisclosure card={card} />
-          <CardActions card={card} createTaskAction={createTaskAction} />
-          {draftInvoiceReminderAction &&
-          card.entity &&
-          card.entity.kind === "invoice" ? (
-            <DraftInvoiceReminderButton
-              invoiceId={card.entity.id}
-              draftInvoiceReminderAction={draftInvoiceReminderAction}
-              {...(onAgentCardProduced ? { onAgentCardProduced } : {})}
-            />
-          ) : null}
-        </div>
-        {recordCardFeedbackAction ? (
-          <CardFeedbackButtons
-            card={card}
-            recordCardFeedbackAction={recordCardFeedbackAction}
+        ) : null
+      }
+      footerActions={
+        draftInvoiceReminderAction &&
+        card.entity &&
+        card.entity.kind === "invoice" ? (
+          <DraftActionButton
+            entityId={card.entity.id}
+            action={draftInvoiceReminderAction}
+            idleLabel="Draft reminder"
+            errorPrefix="Couldn't draft a reminder."
+            {...(onAgentCardProduced ? { onAgentCardProduced } : {})}
           />
-        ) : null}
-      </div>
-    </article>
+        ) : null
+      }
+    />
   );
 }

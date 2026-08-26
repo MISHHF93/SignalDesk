@@ -1,25 +1,9 @@
 import type { CardType, IntelligenceCard } from "@signaldesk/schemas";
 import type { ComponentType } from "react";
 
-import type {
-  ApproveAgentActionProposalAction,
-  ApproveDealNoteProposalAction,
-  ApproveInvoiceReminderProposalAction,
-  ApproveMessageReplyProposalAction,
-  ApproveTaskNudgeProposalAction,
-  ApproveTicketReplyProposalAction,
-  CreateInternalTaskAction,
-  DismissAgentActionProposalAction,
-  DraftDealNoteAction,
-  DraftInvoiceReminderAction,
-  DraftMessageReplyAction,
-  DraftTaskNudgeAction,
-  DraftTicketReplyAction,
-  RecordCardFeedbackAction,
-  SimulateInvoicePaymentAction,
-} from "../_lib/actions";
+import type { CreateInternalTaskAction } from "../_lib/actions";
 import { AgentRecommendationCard } from "./agent-recommendation-card";
-import type { CardComponentProps } from "./card-types";
+import type { CardActionHandlers, CardComponentProps } from "./card-types";
 import { GoalVarianceCard } from "./goal-variance-card";
 import { IntegrationHealthCard } from "./integration-health-card";
 import { InvoiceRiskCard } from "./invoice-risk-card";
@@ -31,7 +15,7 @@ import { TaskRiskCard } from "./task-risk-card";
 import { TicketRiskCard } from "./ticket-risk-card";
 import { UnknownCard } from "./unknown-card";
 
-export type { CardComponentProps } from "./card-types";
+export type { CardActionHandlers, CardComponentProps } from "./card-types";
 
 /**
  * The Card Registry: the orchestration layer (currently
@@ -54,24 +38,21 @@ const cardRegistry: Record<CardType, ComponentType<CardComponentProps>> = {
   ticket_risk: TicketRiskCard,
 };
 
+/**
+ * Collapsed from 16 positional parameters (15 of them optional) to one
+ * grouped `actionHandlers` object — the individual-parameter signature had
+ * already been flagged as "necessary, not optional" to fix once connectors
+ * 3-5 landed (ADR 0057); this is that fix. `actionHandlers` is spread
+ * directly onto the component: every field on `CardActionHandlers` is
+ * optional, so a caller that only builds the keys it actually has (the
+ * same conditional-inclusion pattern this codebase already uses
+ * everywhere else under `exactOptionalPropertyTypes`) never spreads a
+ * literal `undefined` onto a prop that isn't there.
+ */
 export function renderCard(
   card: IntelligenceCard,
   createTaskAction: CreateInternalTaskAction,
-  approveAgentActionProposalAction?: ApproveAgentActionProposalAction,
-  dismissAgentActionProposalAction?: DismissAgentActionProposalAction,
-  simulateInvoicePaymentAction?: SimulateInvoicePaymentAction,
-  recordCardFeedbackAction?: RecordCardFeedbackAction,
-  approveMessageReplyProposalAction?: ApproveMessageReplyProposalAction,
-  draftMessageReplyAction?: DraftMessageReplyAction,
-  onAgentCardProduced?: (card: IntelligenceCard) => void,
-  draftTaskNudgeAction?: DraftTaskNudgeAction,
-  approveTaskNudgeProposalAction?: ApproveTaskNudgeProposalAction,
-  draftTicketReplyAction?: DraftTicketReplyAction,
-  approveTicketReplyProposalAction?: ApproveTicketReplyProposalAction,
-  draftDealNoteAction?: DraftDealNoteAction,
-  approveDealNoteProposalAction?: ApproveDealNoteProposalAction,
-  draftInvoiceReminderAction?: DraftInvoiceReminderAction,
-  approveInvoiceReminderProposalAction?: ApproveInvoiceReminderProposalAction,
+  actionHandlers: CardActionHandlers = {},
 ) {
   const Component = cardRegistry[card.type] ?? UnknownCard;
 
@@ -79,37 +60,7 @@ export function renderCard(
     <Component
       card={card}
       createTaskAction={createTaskAction}
-      {...(approveAgentActionProposalAction
-        ? { approveAgentActionProposalAction }
-        : {})}
-      {...(dismissAgentActionProposalAction
-        ? { dismissAgentActionProposalAction }
-        : {})}
-      {...(simulateInvoicePaymentAction
-        ? { simulateInvoicePaymentAction }
-        : {})}
-      {...(recordCardFeedbackAction ? { recordCardFeedbackAction } : {})}
-      {...(approveMessageReplyProposalAction
-        ? { approveMessageReplyProposalAction }
-        : {})}
-      {...(draftMessageReplyAction ? { draftMessageReplyAction } : {})}
-      {...(onAgentCardProduced ? { onAgentCardProduced } : {})}
-      {...(draftTaskNudgeAction ? { draftTaskNudgeAction } : {})}
-      {...(approveTaskNudgeProposalAction
-        ? { approveTaskNudgeProposalAction }
-        : {})}
-      {...(draftTicketReplyAction ? { draftTicketReplyAction } : {})}
-      {...(approveTicketReplyProposalAction
-        ? { approveTicketReplyProposalAction }
-        : {})}
-      {...(draftDealNoteAction ? { draftDealNoteAction } : {})}
-      {...(approveDealNoteProposalAction
-        ? { approveDealNoteProposalAction }
-        : {})}
-      {...(draftInvoiceReminderAction ? { draftInvoiceReminderAction } : {})}
-      {...(approveInvoiceReminderProposalAction
-        ? { approveInvoiceReminderProposalAction }
-        : {})}
+      {...actionHandlers}
       key={card.id}
     />
   );

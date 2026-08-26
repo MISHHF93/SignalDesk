@@ -18,9 +18,15 @@ import type {
   SimulateInvoicePaymentAction,
 } from "../_lib/actions";
 
-export interface CardComponentProps {
-  readonly card: IntelligenceCard;
-  readonly createTaskAction: CreateInternalTaskAction;
+/**
+ * Every optional action/callback a card component might receive, grouped
+ * into one type — passed as a single object (`renderCard`'s own
+ * `actionHandlers` parameter, registry.tsx) rather than as 14 individual
+ * positional parameters. Each card component still destructures only the
+ * handful it actually uses; nothing here forces every card to accept
+ * every handler.
+ */
+export interface CardActionHandlers {
   /**
    * Present only when the card stack includes an agent_recommendation card —
    * every other card type ignores these. Kept optional rather than a
@@ -71,4 +77,9 @@ export interface CardComponentProps {
    * `card_feedback_card_type_allowed` to cover them; all three now use
    * it too, so it's eight of the ten registered card types, not five. */
   readonly recordCardFeedbackAction?: RecordCardFeedbackAction;
+}
+
+export interface CardComponentProps extends CardActionHandlers {
+  readonly card: IntelligenceCard;
+  readonly createTaskAction: CreateInternalTaskAction;
 }

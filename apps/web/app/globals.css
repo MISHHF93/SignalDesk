@@ -1096,6 +1096,23 @@ input {
   font-variant-numeric: tabular-nums;
 }
 
+/* The financial-certainty qualifier (Phase 2 design revamp,
+   FinancialContextValue) — real, already-computed exposureType data
+   (EXPOSURE_TYPE_LABEL, @signaldesk/domain) that no card surfaced before
+   this. Deliberately overrides `.leadValue span`'s label styling (higher
+   specificity, not !important) rather than matching it: this is a quiet
+   qualifier under the amount, not a second bold uppercase label competing
+   with the real one above it. */
+.leadValue span.leadValueCertainty {
+  margin-top: 0.2rem;
+  margin-bottom: 0;
+  color: var(--faint);
+  font-size: 0.64rem;
+  font-weight: var(--weight-medium);
+  letter-spacing: normal;
+  text-transform: none;
+}
+
 .attentionFooter {
   display: flex;
   align-items: start;
@@ -1144,10 +1161,15 @@ input {
   text-transform: uppercase;
 }
 
-/* An agent-drafted reply awaiting approval (ADR 0056) — shown as a
-   distinct, sunken block so it reads as quoted content to review, not
-   this card's own summary prose. */
-.draftedReply {
+/* An agent-drafted reply awaiting approval (ADR 0056), a composer-card
+   treatment (Phase 2 design revamp) rather than a generic quoted
+   blockquote: a real email-header-style subject row (when the draft has
+   one — a comment/note draft never does) above a monospace-adjacent body,
+   since reviewing exact drafted text benefits from the same fixed-width
+   legibility this file already reserves for code/data
+   (`--font-family-mono`), not prose styling. Still a distinct, sunken
+   block so it reads as content to review, not this card's own summary. */
+.draftedContentPreview {
   margin-top: 0.75rem;
   padding: 0.85rem 1rem;
   border-radius: var(--radius-md);
@@ -1155,18 +1177,35 @@ input {
   box-shadow: var(--shadow-sm);
 }
 
-.draftedReplySubject {
-  margin: 0 0 0.4rem;
-  color: var(--muted);
-  font-size: 0.78rem;
+.draftedContentHeader {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin: 0 0 0.6rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--line-soft);
 }
 
-.draftedReplyBody {
-  margin: 0;
-  padding-left: 0.75rem;
-  border-left: 2px solid var(--faint);
-  color: var(--emphasis);
+.draftedContentHeaderLabel {
+  color: var(--faint);
+  font-size: 0.64rem;
+  font-weight: var(--weight-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.draftedContentHeaderValue {
+  color: var(--ink);
   font-size: 0.85rem;
+  font-weight: var(--weight-semibold);
+}
+
+.draftedContentBody {
+  margin: 0;
+  color: var(--emphasis);
+  font-family: var(--font-family-mono);
+  font-size: 0.8rem;
+  line-height: 1.5;
   white-space: pre-wrap;
 }
 

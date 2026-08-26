@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { Button } from "../_components/button";
-import { CardBadges, WhyDisclosure } from "./card-shell";
+import { CardShell } from "./card-shell";
 import type { CardComponentProps } from "./card-types";
+import { DraftedContentPreview } from "./drafted-content-preview";
 
 type ActionStatus = "idle" | "pending" | "success" | "error";
 
@@ -69,7 +70,9 @@ function isSendActionType(actionType: string): actionType is SendActionType {
  * proposed action always requires approval (see
  * dashboard-composition.ts's `isAgentAuthored` branch), so this renders
  * real Approve/Dismiss controls instead of `CardActions`' immediate-fire
- * button. `card.id` doubles as the real `agent_collaborations.id`
+ * button — passed into `CardShell` as `footerActions`, with no
+ * `createTaskAction` given, so `CardShell` never renders `CardActions` for
+ * this card type. `card.id` doubles as the real `agent_collaborations.id`
  * (run-agent-investigation.ts and draft-message-reply-action.ts both
  * override their finding's synthetic id with the real collaboration id
  * before composing cards), so no extra field is needed to correlate the
@@ -218,34 +221,15 @@ export function AgentRecommendationCard({
   }
 
   return (
-    <article
-      className="attentionCard dynamicCard"
-      data-severity={card.severity}
-      aria-label={card.title}
-    >
-      <div className="priorityRail" aria-hidden="true" />
-      <div className="attentionMain">
-        <div className="attentionHeader">
-          <div>
-            <CardBadges card={card} />
-            <h3>{card.title}</h3>
-          </div>
-        </div>
-        <p>{card.summary}</p>
-        {card.draftedContent ? (
-          <div className="draftedReply">
-            {card.draftedContent.subject ? (
-              <p className="draftedReplySubject">
-                <strong>Subject:</strong> {card.draftedContent.subject}
-              </p>
-            ) : null}
-            <blockquote className="draftedReplyBody">
-              {card.draftedContent.body}
-            </blockquote>
-          </div>
-        ) : null}
-        <div className="attentionFooter">
-          <WhyDisclosure card={card} />
+    <CardShell
+      card={card}
+      afterSummary={
+        card.draftedContent ? (
+          <DraftedContentPreview draftedContent={card.draftedContent} />
+        ) : null
+      }
+      footerActions={
+        <>
           {proposal?.requiresApproval && status !== "success" ? (
             <div className="cardActions">
               <Button
@@ -285,8 +269,8 @@ export function AgentRecommendationCard({
               ) : null}
             </p>
           ) : null}
-        </div>
-      </div>
-    </article>
+        </>
+      }
+    />
   );
 }

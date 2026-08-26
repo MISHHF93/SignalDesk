@@ -37,7 +37,7 @@ import {
 } from "../_lib/use-business-snapshot";
 import { useInvestigationSteps } from "../_lib/use-investigation-steps";
 import { formatRelativeTime } from "../_cards/format";
-import { renderCard } from "../_cards/registry";
+import { renderCard, type CardActionHandlers } from "../_cards/registry";
 import { Button } from "./button";
 import { CommandBar } from "./command-bar";
 import { RecentActivityPanel } from "./recent-activity-panel";
@@ -501,6 +501,42 @@ export function CommandCenterBoard({
     });
   }
 
+  // Built once per render, not once per card in the cluster loop below —
+  // renderCard's own `actionHandlers` parameter is identical for every
+  // card `CommandCenterBoard` renders. Conditional spreads (not a plain
+  // object literal) so an unwired action is genuinely absent from this
+  // object, never present as an explicit `undefined` value, matching
+  // `exactOptionalPropertyTypes`'s distinction between the two.
+  const actionHandlers: CardActionHandlers = {
+    onAgentCardProduced: handleAgentCardProduced,
+    ...(approveAgentActionProposalAction
+      ? { approveAgentActionProposalAction }
+      : {}),
+    ...(dismissAgentActionProposalAction
+      ? { dismissAgentActionProposalAction }
+      : {}),
+    ...(simulateInvoicePaymentAction ? { simulateInvoicePaymentAction } : {}),
+    ...(recordCardFeedbackAction ? { recordCardFeedbackAction } : {}),
+    ...(approveMessageReplyProposalAction
+      ? { approveMessageReplyProposalAction }
+      : {}),
+    ...(draftMessageReplyAction ? { draftMessageReplyAction } : {}),
+    ...(draftTaskNudgeAction ? { draftTaskNudgeAction } : {}),
+    ...(approveTaskNudgeProposalAction
+      ? { approveTaskNudgeProposalAction }
+      : {}),
+    ...(draftTicketReplyAction ? { draftTicketReplyAction } : {}),
+    ...(approveTicketReplyProposalAction
+      ? { approveTicketReplyProposalAction }
+      : {}),
+    ...(draftDealNoteAction ? { draftDealNoteAction } : {}),
+    ...(approveDealNoteProposalAction ? { approveDealNoteProposalAction } : {}),
+    ...(draftInvoiceReminderAction ? { draftInvoiceReminderAction } : {}),
+    ...(approveInvoiceReminderProposalAction
+      ? { approveInvoiceReminderProposalAction }
+      : {}),
+  };
+
   return (
     <>
       <CommandBar
@@ -580,25 +616,7 @@ export function CommandCenterBoard({
         <div className="dynamicCardStack">
           {groupCardsIntoClusters(visibleCards).map((cluster) => {
             const renderedCards = cluster.cards.map((card) =>
-              renderCard(
-                card,
-                createTaskAction,
-                approveAgentActionProposalAction,
-                dismissAgentActionProposalAction,
-                simulateInvoicePaymentAction,
-                recordCardFeedbackAction,
-                approveMessageReplyProposalAction,
-                draftMessageReplyAction,
-                handleAgentCardProduced,
-                draftTaskNudgeAction,
-                approveTaskNudgeProposalAction,
-                draftTicketReplyAction,
-                approveTicketReplyProposalAction,
-                draftDealNoteAction,
-                approveDealNoteProposalAction,
-                draftInvoiceReminderAction,
-                approveInvoiceReminderProposalAction,
-              ),
+              renderCard(card, createTaskAction, actionHandlers),
             );
 
             if (cluster.cards.length < 2) {

@@ -1,26 +1,8 @@
-"use client";
-
-import Link from "next/link";
-import { useState, useTransition } from "react";
-
-import { Button } from "../_components/button";
-import { CardActions } from "./card-actions";
-import { CardFeedbackButtons } from "./card-feedback-buttons";
-import { CardBadges, WhyDisclosure } from "./card-shell";
+import { CardShell } from "./card-shell";
 import type { CardComponentProps } from "./card-types";
-
-type DraftStatus = "idle" | "pending" | "error";
+import { DraftActionButton } from "./draft-action-button";
 
 /**
- * Mirrors `TaskRiskCard`'s owner line and, since migration 0055
- * (`card_feedback_type_sync.sql`) widened `card_feedback_card_type_allowed`
- * to cover every real card type, its `CardFeedbackButtons` too — an
- * earlier version of this comment claimed the constraint still blocked
- * `ticket_risk`/`ownership_gap`/`message_follow_up`, which was true when
- * written but stale by the time it was re-checked (2026-08-23): the
- * constraint has covered all three since 0055 landed, the missing piece
- * was only ever this component never rendering the button.
- *
  * The title links to `/tickets/{card.entity.id}` — the real
  * `support_tickets.id` `composeCards` already carries onto the card via
  * `finding.entity` — opening as a Level-3 drawer over the still-visible
@@ -43,97 +25,26 @@ export function TicketRiskCard({
   draftTicketReplyAction,
   onAgentCardProduced,
 }: CardComponentProps) {
-  const [status, setStatus] = useState<DraftStatus>("idle");
-  const [message, setMessage] = useState<string | null>(null);
-  const [isPending, startTransition] = useTransition();
-
-  function handleDraftReply() {
-    if (
-      !draftTicketReplyAction ||
-      !card.entity ||
-      card.entity.kind !== "support_ticket"
-    ) {
-      return;
-    }
-
-    const ticketId = card.entity.id;
-
-    setStatus("pending");
-    setMessage(null);
-
-    startTransition(async () => {
-      const result = await draftTicketReplyAction(ticketId);
-
-      if (!result.ok) {
-        setStatus("error");
-        setMessage(`Couldn't draft a reply. ${result.error}`);
-        return;
-      }
-
-      if (result.card) {
-        onAgentCardProduced?.(result.card);
-      }
-
-      setStatus("idle");
-      setMessage(result.message);
-    });
-  }
-
   return (
-    <article
-      className="attentionCard dynamicCard"
-      data-severity={card.severity}
-      aria-label={card.title}
-    >
-      <div className="priorityRail" aria-hidden="true" />
-      <div className="attentionMain">
-        <div className="attentionHeader">
-          <div>
-            <CardBadges card={card} />
-            {card.entity ? (
-              <h3>
-                <Link href={`/tickets/${card.entity.id}`}>{card.title}</Link>
-              </h3>
-            ) : (
-              <h3>{card.title}</h3>
-            )}
-          </div>
-        </div>
-        <p>{card.summary}</p>
-        {card.owner ? (
-          <p className="contactName">Assignee: {card.owner.name}</p>
-        ) : null}
-        <div className="attentionFooter">
-          <WhyDisclosure card={card} />
-          <CardActions card={card} createTaskAction={createTaskAction} />
-          {draftTicketReplyAction ? (
-            <div className="cardActions">
-              <Button
-                variant="ghost"
-                className="cardActionButton"
-                disabled={isPending}
-                onClick={handleDraftReply}
-              >
-                {isPending ? "Drafting…" : "Draft reply"}
-              </Button>
-              {message ? (
-                <p
-                  className={`cardActionStatus cardActionStatus-${status}`}
-                  role="status"
-                >
-                  {message}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-        {recordCardFeedbackAction ? (
-          <CardFeedbackButtons
-            card={card}
-            recordCardFeedbackAction={recordCardFeedbackAction}
+    <CardShell
+      card={card}
+      createTaskAction={createTaskAction}
+      ownerLabel="Assignee"
+      {...(card.entity ? { titleHref: `/tickets/${card.entity.id}` } : {})}
+      {...(recordCardFeedbackAction ? { recordCardFeedbackAction } : {})}
+      footerActions={
+        draftTicketReplyAction &&
+        card.entity &&
+        card.entity.kind === "support_ticket" ? (
+          <DraftActionButton
+            entityId={card.entity.id}
+            action={draftTicketReplyAction}
+            idleLabel="Draft reply"
+            errorPrefix="Couldn't draft a reply."
+            {...(onAgentCardProduced ? { onAgentCardProduced } : {})}
           />
-        ) : null}
-      </div>
-    </article>
+        ) : null
+      }
+    />
   );
 }
