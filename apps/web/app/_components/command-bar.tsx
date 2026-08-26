@@ -84,6 +84,11 @@ export function CommandBar({
     }
 
     onSubmitCommand(trimmed);
+    // Real gap found by review: this never reset the input, unlike every
+    // other form in this app (e.g. CreateGoalForm clears its fields on
+    // submit) — the submitted text stayed sitting in the box, making a
+    // real submission look like it silently didn't register.
+    setValue("");
   }
 
   return (

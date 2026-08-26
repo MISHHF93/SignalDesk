@@ -273,14 +273,33 @@ export function CommandCenterBoard({
   // (MessageFollowUpCard) — both produce one real agent_recommendation
   // card that needs to join this board's own session-added set the exact
   // same way.
+  // Real bug found by review: this used to unconditionally clear
+  // focusedCardId/activeFilters on every call — correct for a fresh
+  // "investigate risk" command (a genuinely new, board-wide query that
+  // should reset the view), but this same callback is also passed to
+  // every per-card "Draft a reply/note/nudge/reminder" button and the
+  // "Draft for this Matter" batch action, none of which should touch the
+  // board's view state. A user who ran a filter command, then clicked
+  // "Draft a reply" on one of the still-visible cards, had their filter
+  // silently cleared and the whole board snap back to "show everything"
+  // with no indication why. Split into the plain add-or-replace-the-card
+  // update (used everywhere) and a separate view-resetting wrapper (used
+  // only by the investigate command below).
   const handleAgentCardProduced = useCallback((newCard: IntelligenceCard) => {
-    setFocusedCardId(null);
-    setActiveFilters([]);
     setAgentCards((current) => [
       ...current.filter((card) => card.id !== newCard.id),
       newCard,
     ]);
   }, []);
+
+  const handleInvestigationCardProduced = useCallback(
+    (newCard: IntelligenceCard) => {
+      setFocusedCardId(null);
+      setActiveFilters([]);
+      handleAgentCardProduced(newCard);
+    },
+    [handleAgentCardProduced],
+  );
 
   const draftActionsByEntityKind: DraftActionsByEntityKind = {
     ...(draftMessageReplyAction ? { message: draftMessageReplyAction } : {}),
@@ -447,7 +466,7 @@ export function CommandCenterBoard({
         }
 
         if (investigation.card) {
-          handleAgentCardProduced(investigation.card);
+          handleInvestigationCardProduced(investigation.card);
         }
 
         setStatusMessage(investigation.message);
