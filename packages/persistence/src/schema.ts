@@ -703,6 +703,18 @@ export const artifacts = pgTable(
     })
       .defaultNow()
       .notNull(),
+    // Real gap found by review: the morning-brief cron's "already
+    // generated today" check (a separate SELECT, then an unconditional
+    // INSERT) was a non-atomic check-then-act, despite that route's own
+    // doc comment explicitly claiming idempotency and acknowledging that
+    // Vercel Cron delivery "can duplicate-invoke." Nullable — only the
+    // cron path sets one (`daily-brief:{utcDate}`); the user-triggered
+    // "Generate my brief"/"Since you left" actions intentionally create a
+    // fresh artifact on every real click and never set this, which is
+    // why this can't be `.notNull()` the way every other idempotency-key
+    // column in this schema is (those tables have no legitimate
+    // "no key" case the way this one does).
+    idempotencyKey: text("idempotency_key"),
     ...timestamps,
   },
   (table) => [
@@ -710,6 +722,19 @@ export const artifacts = pgTable(
       table.organizationId,
       table.type,
       table.generatedAt,
+    ),
+    // A plain (non-partial) unique constraint on a nullable column is
+    // exactly what's needed here: Postgres never considers two NULLs
+    // equal for uniqueness purposes, so every user-triggered artifact
+    // (idempotency_key left null) stays completely unconstrained, while
+    // any two cron-generated artifacts that ever share the same
+    // (organization_id, idempotency_key) collide at the database level —
+    // the real atomicity guarantee no advisory lock or app-level check
+    // can fully provide against a genuinely concurrent duplicate cron
+    // invocation.
+    unique("artifacts_org_idempotency_unique").on(
+      table.organizationId,
+      table.idempotencyKey,
     ),
     check("artifacts_type_allowed", sql`${table.type} in ('daily_brief')`),
     check(

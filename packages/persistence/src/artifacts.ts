@@ -67,23 +67,44 @@ export interface CreateArtifactInput {
   readonly content: string;
   readonly structuredData: Record<string, unknown>;
   readonly sourceFindingIds: readonly string[];
+  /** Real gap found by review: the morning-brief cron's "already
+   * generated today" check used to be a separate SELECT before an
+   * unconditional INSERT — a non-atomic check-then-act, despite that
+   * route's own doc comment explicitly claiming idempotency and
+   * acknowledging Vercel Cron delivery "can duplicate-invoke." Passing a
+   * real key here (`daily-brief:{utcDate}`) makes the guarantee real: two
+   * concurrent invocations for the same organization/key can never both
+   * insert (`artifacts_org_idempotency_unique`, migration 0065). Omit
+   * entirely for a user-triggered "Generate my brief"/"Since you left"
+   * click, which intentionally creates a fresh artifact every time. */
+  readonly idempotencyKey?: string;
 }
 
 /**
  * Persists a real, deterministically-assembled artifact — always created
  * with status `generated` (v1 has no draft/review/approval workflow to
  * put anything in another state; see the migration's own doc comment).
+ *
+ * Returns `null`, not a thrown error, when `idempotencyKey` is given and
+ * conflicts with an existing `(organizationId, idempotencyKey)` row — a
+ * real duplicate invocation was caught, not a failure. Every existing
+ * user-triggered caller omits `idempotencyKey` and can keep assuming a
+ * non-null result in practice (a `null` `idempotencyKey` never conflicts
+ * with anything in Postgres), but the return type stays honestly
+ * `Artifact | null` for both cases rather than overloading on a shape
+ * that real callers build dynamically, not just as object literals.
  */
 export async function createArtifact(
   pool: DatabasePool,
   organizationId: string,
   input: CreateArtifactInput,
-): Promise<Artifact> {
+): Promise<Artifact | null> {
   return withTenantContext(pool, organizationId, async (client) => {
     const result = await client.query<ArtifactDbRow>(
       `insert into public.artifacts
-         (id, organization_id, type, title, content, structured_data, source_finding_ids)
-       values ($1, $2, $3, $4, $5, $6, $7)
+         (id, organization_id, type, title, content, structured_data, source_finding_ids, idempotency_key)
+       values ($1, $2, $3, $4, $5, $6, $7, $8)
+       on conflict (organization_id, idempotency_key) do nothing
        returning id, organization_id, type, title, status, generated_by, content,
                  structured_data, source_finding_ids, generated_at`,
       [
@@ -94,12 +115,19 @@ export async function createArtifact(
         input.content,
         JSON.stringify(input.structuredData),
         input.sourceFindingIds,
+        input.idempotencyKey ?? null,
       ],
     );
 
     const row = result.rows[0];
 
     if (!row) {
+      if (input.idempotencyKey) {
+        // A real conflict: another call already created this exact
+        // (organizationId, idempotencyKey) artifact — not an error.
+        return null;
+      }
+
       throw new Error("artifacts insert returned no row");
     }
 

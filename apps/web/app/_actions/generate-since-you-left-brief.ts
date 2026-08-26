@@ -68,6 +68,17 @@ export async function generateSinceYouLeftBriefAction(): Promise<GenerateSinceYo
       sourceFindingIds: brief.sourceFindingIds,
     });
 
+    if (!artifact) {
+      // Unreachable in practice — this call never sets idempotencyKey, and
+      // createArtifact only returns null on a real idempotency conflict.
+      // Handled honestly rather than asserted away, since createArtifact's
+      // return type is shared with the cron path that does hit this.
+      return {
+        ok: false,
+        error: "Failed to generate the Since You Left brief.",
+      };
+    }
+
     return { ok: true, artifact };
   } catch (error) {
     return {

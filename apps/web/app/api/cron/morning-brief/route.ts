@@ -2,8 +2,7 @@ import { generateDailyBrief } from "@signaldesk/application";
 import {
   createArtifact,
   createDatabasePool,
-  listActiveOrganizationIds,
-  listArtifacts,
+  listOrganizationsNeedingDailyBrief,
   type DatabasePool,
 } from "@signaldesk/persistence";
 import type { NextRequest } from "next/server";
@@ -25,16 +24,15 @@ function getPool(): DatabasePool {
 // invocation from attempting an unbounded number of organizations (this
 // dev environment alone has thousands of test-fixture rows) within
 // Vercel's function duration limit; a real production org count should
-// stay comfortably under this for the foreseeable future.
+// stay comfortably under this for the foreseeable future. Real gap found
+// by review: `listActiveOrganizationIds` (no ordering) used to back this
+// slice, so once real org count exceeded this cap, the same arbitrary
+// subset could be returned every run, permanently excluding the rest
+// rather than just delaying them. `listOrganizationsNeedingDailyBrief`
+// (migration 0065b) orders by least-recently-briefed first specifically
+// so a run capped here always makes forward progress on the ones that
+// need it most.
 const MAX_ORGANIZATIONS_PER_RUN = 500;
-
-function isSameUtcDay(a: Date, b: Date): boolean {
-  return (
-    a.getUTCFullYear() === b.getUTCFullYear() &&
-    a.getUTCMonth() === b.getUTCMonth() &&
-    a.getUTCDate() === b.getUTCDate()
-  );
-}
 
 /**
  * The Morning Business Agent's real trigger (`PRODUCTION-ACTIVATION-
@@ -48,9 +46,17 @@ function isSameUtcDay(a: Date, b: Date): boolean {
  * *when* it runs, not a second implementation of *what* it produces.
  *
  * Idempotent per Vercel's own explicit guidance for cron endpoints
- * (delivery is best-effort and can duplicate-invoke): skips an
- * organization that already has a `daily_brief` artifact generated
- * earlier the same UTC day, rather than creating a second one.
+ * (delivery is best-effort and can duplicate-invoke) — really, at the
+ * database level now, not just in appearance. Real gap found by review:
+ * this used to check "does a `daily_brief` artifact already exist for
+ * today?" via a separate `listArtifacts` read, then unconditionally
+ * insert — a non-atomic check-then-act that two overlapping invocations
+ * for the same organization could both pass, each inserting a real
+ * duplicate brief. `createArtifact` now takes a real
+ * `idempotencyKey` (`daily-brief:{utcDate}`), enforced unique per
+ * organization by the database itself (migration 0065) — an overlapping
+ * invocation's insert is rejected by Postgres, not raced against in
+ * application code.
  *
  * One organization's failure is caught and reported individually — never
  * lets a single bad organization abort the whole run.
@@ -64,32 +70,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   const db = getPool();
-  const organizationIds = (await listActiveOrganizationIds(db)).slice(
-    0,
+  const now = new Date();
+  const organizationIds = await listOrganizationsNeedingDailyBrief(
+    db,
     MAX_ORGANIZATIONS_PER_RUN,
   );
+  const utcDate = now.toISOString().slice(0, 10);
 
-  const now = new Date();
   let generated = 0;
   let skipped = 0;
   let failed = 0;
 
   for (const organizationId of organizationIds) {
     try {
-      const existingBriefs = await listArtifacts(
-        db,
-        organizationId,
-        "daily_brief",
-      );
-      const alreadyGeneratedToday = existingBriefs.some((artifact) =>
-        isSameUtcDay(artifact.generatedAt, now),
-      );
-
-      if (alreadyGeneratedToday) {
-        skipped += 1;
-        continue;
-      }
-
       // Only `organizationId` is real here — `getTodaysAttention` reads
       // nothing else off this object (confirmed directly by inspecting
       // every `session.*` reference in `todays-attention.ts` before
@@ -107,15 +100,22 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const { findings } = await getTodaysAttention(syntheticSession, now);
       const brief = generateDailyBrief(findings, now);
 
-      await createArtifact(db, organizationId, {
+      const artifact = await createArtifact(db, organizationId, {
         type: "daily_brief",
         title: brief.title,
         content: brief.content,
         structuredData: { ...brief.structuredData },
         sourceFindingIds: brief.sourceFindingIds,
+        idempotencyKey: `daily-brief:${utcDate}`,
       });
 
-      generated += 1;
+      if (artifact) {
+        generated += 1;
+      } else {
+        // A real conflict: this organization already has today's brief,
+        // created by an earlier or concurrently-overlapping invocation.
+        skipped += 1;
+      }
     } catch (error) {
       failed += 1;
       errorReporter.captureException(error, {

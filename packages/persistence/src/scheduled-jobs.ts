@@ -27,6 +27,29 @@ export async function listActiveOrganizationIds(
   return result.rows.map((row) => row.id);
 }
 
+/**
+ * The morning-brief cron's real organization selection, up to `max` ids —
+ * real gap found by review: capping an unordered full scan at
+ * `MAX_ORGANIZATIONS_PER_RUN` could silently, permanently exclude
+ * whatever organization count exceeds that cap, rather than just delaying
+ * it. `list_organizations_needing_daily_brief` (migration 0065b) orders by
+ * each organization's own last `daily_brief` artifact (never-briefed
+ * first), so an organization skipped today floats toward the front of
+ * tomorrow's run instead of never being reached — the ordering, not this
+ * wrapper, is what actually fixes the bug.
+ */
+export async function listOrganizationsNeedingDailyBrief(
+  pool: DatabasePool,
+  max: number,
+): Promise<readonly string[]> {
+  const result = await pool.query<{ id: string }>(
+    "select id from public.list_organizations_needing_daily_brief($1) as t(id)",
+    [max],
+  );
+
+  return result.rows.map((row) => row.id);
+}
+
 export interface StripeLinkedSubscription {
   readonly organizationId: string;
   readonly stripeSubscriptionId: string;

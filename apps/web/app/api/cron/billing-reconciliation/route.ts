@@ -32,7 +32,16 @@ function getPool(): DatabasePool {
 
 // Same real, disclosed safety bound `morning-brief`'s cron already
 // established for this exact reason (bounding one invocation within
-// Vercel's function duration limit) — see that route's own comment.
+// Vercel's function duration limit) — see that route's own comment. Real
+// gap found by review: `listStripeLinkedSubscriptions` used to have no
+// ordering, so once real subscription count exceeded this cap, the same
+// arbitrary subset could be returned every run, permanently excluding
+// the rest rather than just delaying them — silently defeating the exact
+// guarantee this sweep exists to provide (LAUNCH-BLOCKERS.md P1 #8). It
+// now orders by `updated_at` ascending (migration 0065b): an untouched,
+// already-in-sync subscription stays at the front (always inside the
+// cap), while one just corrected moves toward the back for a while,
+// making room for others.
 const MAX_SUBSCRIPTIONS_PER_RUN = 500;
 
 function datesDiffer(a: Date | null, b: Date | null): boolean {
