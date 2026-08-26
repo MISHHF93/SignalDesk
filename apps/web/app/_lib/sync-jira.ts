@@ -12,6 +12,7 @@ import {
   listRecentSyncJobsForConnection,
   startSyncJob,
   storeJiraTokens,
+  withAdvisoryLock,
   type DatabasePool,
   type SyncJobTrigger,
 } from "@signaldesk/persistence";
@@ -25,6 +26,8 @@ import { logger } from "./logger";
 // bounds a single synchronous sync run, not the site's real issue count.
 const MAX_ISSUE_PAGES = 20;
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
+const TOKEN_REFRESH_LOCK_MAX_ATTEMPTS = 5;
+const TOKEN_REFRESH_LOCK_RETRY_DELAY_MS = 300;
 
 export interface JiraSyncResult {
   readonly ingested: number;
@@ -38,11 +41,22 @@ export interface JiraSyncResult {
  * token on every use — both the new access and refresh tokens must be
  * persisted together, the same real behavior QuickBooks' own refresh
  * already handles.
+ *
+ * Real gap found by review: this used to read-check-refresh-store with no
+ * locking at all — the exact race already fixed for QuickBooks
+ * (`ensureFreshQuickBooksAccessToken`, `sync-quickbooks.ts`). Two
+ * concurrent callers for the same integration could both read the same
+ * near-expiry token and both call `refreshJiraAccessToken` with it —
+ * since Atlassian rotates the refresh token on every use, only one call
+ * can actually succeed; the other gets a genuine `invalid_grant`
+ * rejection instead of retrying cleanly. Fixed with the same
+ * `withAdvisoryLock`-backed retry shape as QuickBooks.
  */
 export async function ensureFreshJiraAccessToken(
   pool: DatabasePool,
   organizationId: string,
   integrationId: string,
+  attempt = 0,
 ): Promise<string> {
   const tokens = await getJiraTokens(pool, organizationId, integrationId);
 
@@ -54,16 +68,59 @@ export async function ensureFreshJiraAccessToken(
     return tokens.accessToken;
   }
 
-  const config = getJiraClientCredentials();
-  const refreshed = await refreshJiraAccessToken(config, tokens.refreshToken);
+  const refreshedAccessToken = await withAdvisoryLock(
+    pool,
+    `jira-token-refresh:${integrationId}`,
+    async (): Promise<string> => {
+      // Re-read inside the lock — a concurrent caller may have already
+      // refreshed and stored a fresh token while we were waiting to
+      // acquire it.
+      const currentTokens =
+        (await getJiraTokens(pool, organizationId, integrationId)) ?? tokens;
 
-  await storeJiraTokens(pool, organizationId, integrationId, {
-    accessToken: refreshed.accessToken,
-    refreshToken: refreshed.refreshToken,
-    expiresAt: new Date(Date.now() + refreshed.expiresIn * 1000),
-  });
+      if (
+        currentTokens.expiresAt.getTime() - Date.now() >
+        TOKEN_REFRESH_BUFFER_MS
+      ) {
+        return currentTokens.accessToken;
+      }
 
-  return refreshed.accessToken;
+      const config = getJiraClientCredentials();
+      const refreshed = await refreshJiraAccessToken(
+        config,
+        currentTokens.refreshToken,
+      );
+
+      await storeJiraTokens(pool, organizationId, integrationId, {
+        accessToken: refreshed.accessToken,
+        refreshToken: refreshed.refreshToken,
+        expiresAt: new Date(Date.now() + refreshed.expiresIn * 1000),
+      });
+
+      return refreshed.accessToken;
+    },
+  );
+
+  if (refreshedAccessToken !== null) {
+    return refreshedAccessToken;
+  }
+
+  if (attempt >= TOKEN_REFRESH_LOCK_MAX_ATTEMPTS) {
+    throw new Error(
+      "Could not refresh the Jira access token — another refresh for this connection was already in progress.",
+    );
+  }
+
+  await new Promise((resolve) =>
+    setTimeout(resolve, TOKEN_REFRESH_LOCK_RETRY_DELAY_MS),
+  );
+
+  return ensureFreshJiraAccessToken(
+    pool,
+    organizationId,
+    integrationId,
+    attempt + 1,
+  );
 }
 
 /**

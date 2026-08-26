@@ -15,6 +15,7 @@ import {
   startSyncJob,
   storeXeroTokens,
   updateInvoiceStatusBySourceRecord,
+  withAdvisoryLock,
   type DatabasePool,
   type SyncJobTrigger,
 } from "@signaldesk/persistence";
@@ -29,6 +30,8 @@ import { getXeroClientCredentials } from "./xero-config";
 // count.
 const MAX_INVOICE_PAGES = 20;
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
+const TOKEN_REFRESH_LOCK_MAX_ATTEMPTS = 5;
+const TOKEN_REFRESH_LOCK_RETRY_DELAY_MS = 300;
 
 export interface XeroSyncResult {
   readonly ingested: number;
@@ -46,11 +49,24 @@ export interface XeroSyncResult {
  * in this codebase — so "Sync Now" needs this on nearly every call, the
  * same proactive-refresh shape QuickBooks/HubSpot use (unlike Salesforce,
  * whose OAuth response discloses no expiry to check against at all).
+ *
+ * Real gap found by review: this used to read-check-refresh-store with no
+ * locking at all — the exact race already fixed for QuickBooks
+ * (`ensureFreshQuickBooksAccessToken`, `sync-quickbooks.ts`). Two
+ * concurrent callers for the same integration (a scheduled sync and a
+ * manual "Sync Now" landing at the same moment — plausible given Xero's
+ * access tokens last only 30 minutes, the shortest here) could both read
+ * the same near-expiry token and both call `refreshXeroAccessToken` with
+ * it — since Xero rotates the refresh token on every use, only one call
+ * can actually succeed; the other gets a genuine `invalid_grant`
+ * rejection instead of retrying cleanly. Fixed with the same
+ * `withAdvisoryLock`-backed retry shape as QuickBooks.
  */
 export async function ensureFreshXeroAccessToken(
   pool: DatabasePool,
   organizationId: string,
   integrationId: string,
+  attempt = 0,
 ): Promise<string> {
   const tokens = await getXeroTokens(pool, organizationId, integrationId);
 
@@ -62,16 +78,59 @@ export async function ensureFreshXeroAccessToken(
     return tokens.accessToken;
   }
 
-  const config = getXeroClientCredentials();
-  const refreshed = await refreshXeroAccessToken(config, tokens.refreshToken);
+  const refreshedAccessToken = await withAdvisoryLock(
+    pool,
+    `xero-token-refresh:${integrationId}`,
+    async (): Promise<string> => {
+      // Re-read inside the lock — a concurrent caller may have already
+      // refreshed and stored a fresh token while we were waiting to
+      // acquire it.
+      const currentTokens =
+        (await getXeroTokens(pool, organizationId, integrationId)) ?? tokens;
 
-  await storeXeroTokens(pool, organizationId, integrationId, {
-    accessToken: refreshed.accessToken,
-    refreshToken: refreshed.refreshToken,
-    expiresAt: new Date(Date.now() + refreshed.expiresIn * 1000),
-  });
+      if (
+        currentTokens.expiresAt.getTime() - Date.now() >
+        TOKEN_REFRESH_BUFFER_MS
+      ) {
+        return currentTokens.accessToken;
+      }
 
-  return refreshed.accessToken;
+      const config = getXeroClientCredentials();
+      const refreshed = await refreshXeroAccessToken(
+        config,
+        currentTokens.refreshToken,
+      );
+
+      await storeXeroTokens(pool, organizationId, integrationId, {
+        accessToken: refreshed.accessToken,
+        refreshToken: refreshed.refreshToken,
+        expiresAt: new Date(Date.now() + refreshed.expiresIn * 1000),
+      });
+
+      return refreshed.accessToken;
+    },
+  );
+
+  if (refreshedAccessToken !== null) {
+    return refreshedAccessToken;
+  }
+
+  if (attempt >= TOKEN_REFRESH_LOCK_MAX_ATTEMPTS) {
+    throw new Error(
+      "Could not refresh the Xero access token — another refresh for this connection was already in progress.",
+    );
+  }
+
+  await new Promise((resolve) =>
+    setTimeout(resolve, TOKEN_REFRESH_LOCK_RETRY_DELAY_MS),
+  );
+
+  return ensureFreshXeroAccessToken(
+    pool,
+    organizationId,
+    integrationId,
+    attempt + 1,
+  );
 }
 
 /**
