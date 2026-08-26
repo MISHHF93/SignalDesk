@@ -29,6 +29,7 @@ const draft = draftEntityContentAction<Lead, DealNoteDraftContext>({
   loadFailedMessage: "Could not load this deal.",
   draftedMessage: "Note drafted.",
   draftFailedMessage: "Couldn't draft a note right now.",
+  draftingStepLabel: "Drafting deal note…",
   fetchEntity: (db, organizationId, leadId) =>
     getLeadById(db, organizationId, leadId),
   buildDraftContext: (lead, finding) => {
@@ -65,6 +66,7 @@ const draft = draftEntityContentAction<Lead, DealNoteDraftContext>({
 
 export async function draftDealNoteAction(
   leadId: string,
+  draftId: string,
 ): Promise<DraftDealNoteActionResult> {
-  return draft(leadId);
+  return draft(leadId, draftId);
 }

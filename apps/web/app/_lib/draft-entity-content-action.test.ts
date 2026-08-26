@@ -97,6 +97,7 @@ const testConfig = {
   loadFailedMessage: "Could not load this invoice.",
   draftedMessage: "Reminder drafted.",
   draftFailedMessage: "Couldn't draft a reminder right now.",
+  draftingStepLabel: "Drafting invoice reminder…",
   fetchEntity: mockedFetchEntity,
   buildDraftContext: mockedBuildDraftContext,
   collaborationEntityRef: (invoiceId: string) => ({ invoiceId }),
@@ -159,7 +160,10 @@ describe("draftEntityContentAction", () => {
   it("returns early with no session", async () => {
     mockedGetCurrentOrganization.mockResolvedValue(null);
 
-    const result = await draft("invoice-1");
+    const result = await draft(
+      "invoice-1",
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({ ok: false, error: "Sign in to do this." });
     expect(mockedCheckRateLimit).not.toHaveBeenCalled();
@@ -169,7 +173,10 @@ describe("draftEntityContentAction", () => {
     mockedGetCurrentOrganization.mockResolvedValue(SESSION);
     mockedIsAgentFabricEnabled.mockReturnValue(false);
 
-    const result = await draft("invoice-1");
+    const result = await draft(
+      "invoice-1",
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({
       ok: true,
@@ -192,7 +199,10 @@ describe("draftEntityContentAction", () => {
       retryAfterSeconds: 125,
     });
 
-    const result = await draft("invoice-1");
+    const result = await draft(
+      "invoice-1",
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({
       ok: false,
@@ -211,7 +221,10 @@ describe("draftEntityContentAction", () => {
       findings: [],
     } as unknown as Awaited<ReturnType<typeof getTodaysAttention>>);
 
-    const result = await draft("invoice-1");
+    const result = await draft(
+      "invoice-1",
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({
       ok: true,
@@ -225,7 +238,10 @@ describe("draftEntityContentAction", () => {
     mockedGetCurrentOrganization.mockResolvedValue(SESSION);
     mockedClassifyEvidenceSufficiency.mockReturnValue("stale");
 
-    const result = await draft("invoice-1");
+    const result = await draft(
+      "invoice-1",
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({
       ok: true,
@@ -239,7 +255,10 @@ describe("draftEntityContentAction", () => {
     mockedGetCurrentOrganization.mockResolvedValue(SESSION);
     mockedWithAdvisoryLock.mockResolvedValue(null);
 
-    const result = await draft("invoice-1");
+    const result = await draft(
+      "invoice-1",
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({
       ok: true,
@@ -253,7 +272,10 @@ describe("draftEntityContentAction", () => {
     mockedGetCurrentOrganization.mockResolvedValue(SESSION);
     mockedFetchEntity.mockResolvedValue(null);
 
-    const result = await draft("invoice-1");
+    const result = await draft(
+      "invoice-1",
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({
       ok: true,
@@ -275,7 +297,10 @@ describe("draftEntityContentAction", () => {
       new Error("no stored token for this connector"),
     );
 
-    const result = await draft("invoice-1");
+    const result = await draft(
+      "invoice-1",
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({
       ok: false,
@@ -297,7 +322,10 @@ describe("draftEntityContentAction", () => {
       draftedContent: null,
     } as unknown as Awaited<ReturnType<typeof draftContent>>);
 
-    const result = await draft("invoice-1");
+    const result = await draft(
+      "invoice-1",
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({
       ok: true,
@@ -319,7 +347,10 @@ describe("draftEntityContentAction", () => {
       typeof composeCards
     >);
 
-    const result = await draft("invoice-1");
+    const result = await draft(
+      "invoice-1",
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({
       ok: true,
@@ -338,7 +369,10 @@ describe("draftEntityContentAction", () => {
     mockedGetCurrentOrganization.mockResolvedValue(SESSION);
     mockedGetTodaysAttention.mockRejectedValue(new Error("db unavailable"));
 
-    const result = await draft("invoice-1");
+    const result = await draft(
+      "invoice-1",
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({ ok: false, error: "db unavailable" });
   });

@@ -133,7 +133,10 @@ describe("draftMessageReplyAction", () => {
   it("returns early with no session", async () => {
     mockedGetCurrentOrganization.mockResolvedValue(null);
 
-    const result = await draftMessageReplyAction("message-1");
+    const result = await draftMessageReplyAction(
+      "message-1",
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({ ok: false, error: "Sign in to do this." });
     expect(mockedCheckRateLimit).not.toHaveBeenCalled();
@@ -143,7 +146,10 @@ describe("draftMessageReplyAction", () => {
     mockedGetCurrentOrganization.mockResolvedValue(SESSION);
     mockedIsAgentFabricEnabled.mockReturnValue(false);
 
-    const result = await draftMessageReplyAction("message-1");
+    const result = await draftMessageReplyAction(
+      "message-1",
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({
       ok: true,
@@ -171,7 +177,10 @@ describe("draftMessageReplyAction", () => {
       retryAfterSeconds: 125,
     });
 
-    const result = await draftMessageReplyAction("message-1");
+    const result = await draftMessageReplyAction(
+      "message-1",
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({
       ok: false,
@@ -191,7 +200,10 @@ describe("draftMessageReplyAction", () => {
       findings: [],
     } as unknown as Awaited<ReturnType<typeof getTodaysAttention>>);
 
-    const result = await draftMessageReplyAction("message-1");
+    const result = await draftMessageReplyAction(
+      "message-1",
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({
       ok: true,
@@ -212,7 +224,10 @@ describe("draftMessageReplyAction", () => {
     mockedGetCurrentOrganization.mockResolvedValue(SESSION);
     mockedClassifyEvidenceSufficiency.mockReturnValue("stale");
 
-    const result = await draftMessageReplyAction("message-1");
+    const result = await draftMessageReplyAction(
+      "message-1",
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({
       ok: true,
@@ -232,7 +247,10 @@ describe("draftMessageReplyAction", () => {
     mockedGetCurrentOrganization.mockResolvedValue(SESSION);
     mockedWithAdvisoryLock.mockResolvedValue(null);
 
-    const result = await draftMessageReplyAction("message-1");
+    const result = await draftMessageReplyAction(
+      "message-1",
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({
       ok: true,
@@ -253,7 +271,10 @@ describe("draftMessageReplyAction", () => {
     mockedGetCurrentOrganization.mockResolvedValue(SESSION);
     mockedGetMessageDraftContext.mockResolvedValue(null);
 
-    const result = await draftMessageReplyAction("message-1");
+    const result = await draftMessageReplyAction(
+      "message-1",
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({
       ok: true,
@@ -272,7 +293,10 @@ describe("draftMessageReplyAction", () => {
   it("returns an honest message when the specialist produces no drafted content", async () => {
     mockedGetCurrentOrganization.mockResolvedValue(SESSION);
 
-    const result = await draftMessageReplyAction("message-1");
+    const result = await draftMessageReplyAction(
+      "message-1",
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({
       ok: true,
@@ -299,7 +323,10 @@ describe("draftMessageReplyAction", () => {
       typeof composeCards
     >);
 
-    const result = await draftMessageReplyAction("message-1");
+    const result = await draftMessageReplyAction(
+      "message-1",
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({
       ok: true,
@@ -321,7 +348,10 @@ describe("draftMessageReplyAction", () => {
     mockedGetCurrentOrganization.mockResolvedValue(SESSION);
     mockedGetTodaysAttention.mockRejectedValue(new Error("db unavailable"));
 
-    const result = await draftMessageReplyAction("message-1");
+    const result = await draftMessageReplyAction(
+      "message-1",
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({ ok: false, error: "db unavailable" });
   });

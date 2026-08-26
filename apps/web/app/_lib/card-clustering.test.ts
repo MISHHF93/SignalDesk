@@ -202,7 +202,16 @@ describe("dispatchDraftForCard", () => {
       { invoice: draftInvoiceReminderAction },
     );
 
-    expect(draftInvoiceReminderAction).toHaveBeenCalledWith("inv-1");
+    // The second argument is a real draft id `dispatchDraftForCard` itself
+    // generates per dispatch (docs/adr/0063-agent-investigation-progress.md)
+    // — a fresh UUID every call, so this only asserts its shape, not an
+    // exact value.
+    expect(draftInvoiceReminderAction).toHaveBeenCalledWith(
+      "inv-1",
+      expect.stringMatching(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+      ),
+    );
     expect(result).toBe(okResult);
   });
 
@@ -218,7 +227,12 @@ describe("dispatchDraftForCard", () => {
       { lead: draftDealNoteAction },
     );
 
-    expect(draftDealNoteAction).toHaveBeenCalledWith("lead-1");
+    expect(draftDealNoteAction).toHaveBeenCalledWith(
+      "lead-1",
+      expect.stringMatching(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+      ),
+    );
     expect(result).toBe(okResult);
   });
 });

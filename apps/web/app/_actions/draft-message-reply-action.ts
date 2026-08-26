@@ -8,11 +8,14 @@ import {
   type IntelligenceFinding,
 } from "@signaldesk/intelligence";
 import {
+  appendInvestigationSteps,
   completeAgentCollaboration,
+  completeInvestigationStep,
   createDatabasePool,
   getMessageDraftContext,
   recordAuditEvent,
   startAgentCollaboration,
+  startInvestigationStep,
   withAdvisoryLock,
   type DatabasePool,
 } from "@signaldesk/persistence";
@@ -23,15 +26,43 @@ import { availabilityFor, providerFor } from "../_lib/agent-fabric";
 import { createAgentGatewayService } from "../_lib/agent-gateway";
 import { describeActionError } from "../_lib/describe-action-error";
 import { classifyEvidenceSufficiency } from "../_lib/evidence-sufficiency";
+import { logger } from "../_lib/logger";
 import { checkRateLimit } from "../_lib/rate-limit";
 import { getCurrentOrganization } from "../_lib/session";
 import { getTodaysAttention } from "../_lib/todays-attention";
+import { isValidUuid } from "../_lib/uuid";
 
 let pool: DatabasePool | undefined;
 
 function getPool(): DatabasePool {
   pool ??= createDatabasePool();
   return pool;
+}
+
+const LOADING_CONTEXT_STEP = 0;
+const DRAFTING_STEP = 1;
+
+/**
+ * The Work Mat's step-progress tracking (docs/adr/0063-agent-investigation-
+ * progress.md) is a real, but secondary, write — a failure here must never
+ * take down the draft itself. Mirrors `draft-entity-content-action.ts`'s
+ * own identically-named helper (this file predates that shared factory and
+ * stays separate — see its own doc comment — so this is duplicated once,
+ * not shared).
+ */
+async function recordStepSafely(
+  organizationId: string,
+  promise: Promise<unknown>,
+): Promise<void> {
+  try {
+    await promise;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    logger.log("warn", `Draft step tracking failed: ${message}`, {
+      operation: "agent.draft.step_tracking",
+      organizationId,
+    });
+  }
 }
 
 /**
@@ -52,8 +83,13 @@ function getPool(): DatabasePool {
  */
 export async function draftMessageReplyAction(
   messageId: string,
+  draftId: string,
 ): Promise<DraftMessageReplyActionResult> {
   try {
+    if (!isValidUuid(draftId)) {
+      return { ok: false, error: "Invalid draft id." };
+    }
+
     const session = await getCurrentOrganization();
 
     if (!session) {
@@ -134,6 +170,7 @@ export async function draftMessageReplyAction(
           db,
           session.organizationId,
           {
+            id: draftId,
             userId: session.userId,
             pattern: "single_specialist",
             objective: "Draft a reply to this unanswered customer message.",
@@ -143,6 +180,25 @@ export async function draftMessageReplyAction(
           },
         );
 
+        await recordStepSafely(
+          session.organizationId,
+          appendInvestigationSteps(
+            db,
+            session.organizationId,
+            collaboration.id,
+            ["Loading context…", "Drafting reply…"],
+          ),
+        );
+        await recordStepSafely(
+          session.organizationId,
+          startInvestigationStep(
+            db,
+            session.organizationId,
+            collaboration.id,
+            LOADING_CONTEXT_STEP,
+          ),
+        );
+
         const draftContext = await getMessageDraftContext(
           db,
           session.organizationId,
@@ -150,6 +206,16 @@ export async function draftMessageReplyAction(
         );
 
         if (!draftContext) {
+          await recordStepSafely(
+            session.organizationId,
+            completeInvestigationStep(
+              db,
+              session.organizationId,
+              collaboration.id,
+              LOADING_CONTEXT_STEP,
+              "failed",
+            ),
+          );
           await completeAgentCollaboration(
             db,
             session.organizationId,
@@ -168,6 +234,26 @@ export async function draftMessageReplyAction(
             message: "Could not load this message.",
           };
         }
+
+        await recordStepSafely(
+          session.organizationId,
+          completeInvestigationStep(
+            db,
+            session.organizationId,
+            collaboration.id,
+            LOADING_CONTEXT_STEP,
+            "done",
+          ),
+        );
+        await recordStepSafely(
+          session.organizationId,
+          startInvestigationStep(
+            db,
+            session.organizationId,
+            collaboration.id,
+            DRAFTING_STEP,
+          ),
+        );
 
         const gateway = createAgentGatewayService({
           pool: db,
@@ -189,16 +275,25 @@ export async function draftMessageReplyAction(
           availabilityFor(),
           gateway.dispatchMessageDraft,
         );
+        const draftSucceeded =
+          result.status === "completed" && Boolean(result.draftedContent);
 
+        await recordStepSafely(
+          session.organizationId,
+          completeInvestigationStep(
+            db,
+            session.organizationId,
+            collaboration.id,
+            DRAFTING_STEP,
+            draftSucceeded ? "done" : "failed",
+          ),
+        );
         await completeAgentCollaboration(
           db,
           session.organizationId,
           collaboration.id,
           {
-            status:
-              result.status === "completed" && result.draftedContent
-                ? "completed"
-                : "failed",
+            status: draftSucceeded ? "completed" : "failed",
             reconciledSummary: null,
             reconciledConfidenceBasisPoints: Math.round(
               result.confidence * 10_000,

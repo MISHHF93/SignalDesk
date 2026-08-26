@@ -11,10 +11,13 @@ import {
   type IntelligenceType,
 } from "@signaldesk/intelligence";
 import {
+  appendInvestigationSteps,
   completeAgentCollaboration,
+  completeInvestigationStep,
   createDatabasePool,
   recordAuditEvent,
   startAgentCollaboration,
+  startInvestigationStep,
   withAdvisoryLock,
   type DatabasePool,
   type StartAgentCollaborationInput,
@@ -31,9 +34,35 @@ import { availabilityFor, providerFor } from "./agent-fabric";
 import { createAgentGatewayService } from "./agent-gateway";
 import { describeActionError } from "./describe-action-error";
 import { classifyEvidenceSufficiency } from "./evidence-sufficiency";
+import { logger } from "./logger";
 import { checkRateLimit } from "./rate-limit";
 import { getCurrentOrganization } from "./session";
 import { getTodaysAttention } from "./todays-attention";
+import { isValidUuid } from "./uuid";
+
+const LOADING_CONTEXT_STEP = 0;
+const DRAFTING_STEP = 1;
+
+/**
+ * The Work Mat's step-progress tracking (docs/adr/0063-agent-investigation-
+ * progress.md) is a real, but secondary, write — a failure here must never
+ * take down the draft itself, which worked before this feature existed and
+ * must keep working exactly the same if a step-tracking write ever fails.
+ */
+async function recordStepSafely(
+  organizationId: string,
+  promise: Promise<unknown>,
+): Promise<void> {
+  try {
+    await promise;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    logger.log("warn", `Draft step tracking failed: ${message}`, {
+      operation: "agent.draft.step_tracking",
+      organizationId,
+    });
+  }
+}
 
 let pool: DatabasePool | undefined;
 
@@ -81,6 +110,10 @@ export interface DraftEntityContentConfig<TEntity, TContext> {
   readonly loadFailedMessage: string;
   readonly draftedMessage: string;
   readonly draftFailedMessage: string;
+  /** e.g. "Drafting invoice reminder…" — the Work Mat's second, connector-
+   * specific step label (docs/adr/0063-agent-investigation-progress.md).
+   * The first step ("Loading context…") is generic across every connector. */
+  readonly draftingStepLabel: string;
   readonly fetchEntity: (
     db: DatabasePool,
     organizationId: string,
@@ -122,11 +155,19 @@ export function draftEntityContentAction<
   TContext extends { readonly capability: StructuredGenerationTask },
 >(
   config: DraftEntityContentConfig<TEntity, TContext>,
-): (entityId: string) => Promise<DraftEntityContentActionResult> {
+): (
+  entityId: string,
+  draftId: string,
+) => Promise<DraftEntityContentActionResult> {
   return async function draft(
     entityId: string,
+    draftId: string,
   ): Promise<DraftEntityContentActionResult> {
     try {
+      if (!isValidUuid(draftId)) {
+        return { ok: false, error: "Invalid draft id." };
+      }
+
       const session = await getCurrentOrganization();
 
       if (!session) {
@@ -198,6 +239,7 @@ export function draftEntityContentAction<
             db,
             session.organizationId,
             {
+              id: draftId,
               userId: session.userId,
               pattern: "single_specialist",
               objective: config.objective,
@@ -207,6 +249,25 @@ export function draftEntityContentAction<
             },
           );
 
+          await recordStepSafely(
+            session.organizationId,
+            appendInvestigationSteps(
+              db,
+              session.organizationId,
+              collaboration.id,
+              ["Loading context…", config.draftingStepLabel],
+            ),
+          );
+          await recordStepSafely(
+            session.organizationId,
+            startInvestigationStep(
+              db,
+              session.organizationId,
+              collaboration.id,
+              LOADING_CONTEXT_STEP,
+            ),
+          );
+
           const entity = await config.fetchEntity(
             db,
             session.organizationId,
@@ -214,6 +275,16 @@ export function draftEntityContentAction<
           );
 
           if (!entity) {
+            await recordStepSafely(
+              session.organizationId,
+              completeInvestigationStep(
+                db,
+                session.organizationId,
+                collaboration.id,
+                LOADING_CONTEXT_STEP,
+                "failed",
+              ),
+            );
             await completeAgentCollaboration(
               db,
               session.organizationId,
@@ -255,6 +326,16 @@ export function draftEntityContentAction<
               session.organizationId,
             );
           } catch (error) {
+            await recordStepSafely(
+              session.organizationId,
+              completeInvestigationStep(
+                db,
+                session.organizationId,
+                collaboration.id,
+                LOADING_CONTEXT_STEP,
+                "failed",
+              ),
+            );
             await completeAgentCollaboration(
               db,
               session.organizationId,
@@ -273,6 +354,26 @@ export function draftEntityContentAction<
             };
           }
 
+          await recordStepSafely(
+            session.organizationId,
+            completeInvestigationStep(
+              db,
+              session.organizationId,
+              collaboration.id,
+              LOADING_CONTEXT_STEP,
+              "done",
+            ),
+          );
+          await recordStepSafely(
+            session.organizationId,
+            startInvestigationStep(
+              db,
+              session.organizationId,
+              collaboration.id,
+              DRAFTING_STEP,
+            ),
+          );
+
           const result = await draftContent(
             config.capability,
             config.objective,
@@ -281,16 +382,25 @@ export function draftEntityContentAction<
             availabilityFor(),
             gateway.dispatchContentDraft,
           );
+          const draftSucceeded =
+            result.status === "completed" && Boolean(result.draftedContent);
 
+          await recordStepSafely(
+            session.organizationId,
+            completeInvestigationStep(
+              db,
+              session.organizationId,
+              collaboration.id,
+              DRAFTING_STEP,
+              draftSucceeded ? "done" : "failed",
+            ),
+          );
           await completeAgentCollaboration(
             db,
             session.organizationId,
             collaboration.id,
             {
-              status:
-                result.status === "completed" && result.draftedContent
-                  ? "completed"
-                  : "failed",
+              status: draftSucceeded ? "completed" : "failed",
               reconciledSummary: null,
               reconciledConfidenceBasisPoints: Math.round(
                 result.confidence * 10_000,

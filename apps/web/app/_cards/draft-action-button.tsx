@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 
 import { Button } from "../_components/button";
 import type { DraftEntityContentActionResult } from "../_lib/actions";
+import { useInvestigationSteps } from "../_lib/use-investigation-steps";
 
 type DraftStatus = "idle" | "pending" | "error";
 
@@ -18,6 +19,14 @@ type DraftStatus = "idle" | "pending" | "error";
  * five — the entity kind check that gates whether to render this at all
  * stays in each card file, since only the card knows which `card.entity.kind`
  * it expects.
+ *
+ * Extended (docs/adr/0063-agent-investigation-progress.md) with the same
+ * real step-progress view the Work Mat gives investigations: a client-
+ * generated draft id becomes the drafting collaboration's own primary key
+ * (`agent_collaborations.id`), so `useInvestigationSteps` can poll for real
+ * progress ("Loading context…", "Drafting X…") from the instant the button
+ * is clicked, reusing the exact same table/route/hook/CSS — no new
+ * infrastructure for this second, single-step-fan-out case.
  */
 export function DraftActionButton({
   entityId,
@@ -29,6 +38,7 @@ export function DraftActionButton({
   readonly entityId: string;
   readonly action: (
     entityId: string,
+    draftId: string,
   ) => Promise<DraftEntityContentActionResult>;
   /** e.g. "Draft note", "Draft nudge", "Draft reply", "Draft a reply". */
   readonly idleLabel: string;
@@ -38,27 +48,36 @@ export function DraftActionButton({
 }) {
   const [status, setStatus] = useState<DraftStatus>("idle");
   const [message, setMessage] = useState<string | null>(null);
+  const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const draftSteps = useInvestigationSteps(activeDraftId);
 
   function handleClick() {
     setStatus("pending");
     setMessage(null);
 
+    const draftId = crypto.randomUUID();
+    setActiveDraftId(draftId);
+
     startTransition(async () => {
-      const result = await action(entityId);
+      try {
+        const result = await action(entityId, draftId);
 
-      if (!result.ok) {
-        setStatus("error");
-        setMessage(`${errorPrefix} ${result.error}`);
-        return;
+        if (!result.ok) {
+          setStatus("error");
+          setMessage(`${errorPrefix} ${result.error}`);
+          return;
+        }
+
+        if (result.card) {
+          onAgentCardProduced?.(result.card);
+        }
+
+        setStatus("idle");
+        setMessage(result.message);
+      } finally {
+        setActiveDraftId(null);
       }
-
-      if (result.card) {
-        onAgentCardProduced?.(result.card);
-      }
-
-      setStatus("idle");
-      setMessage(result.message);
     });
   }
 
@@ -72,6 +91,19 @@ export function DraftActionButton({
       >
         {isPending ? "Drafting…" : idleLabel}
       </Button>
+      {activeDraftId && draftSteps.length > 0 ? (
+        <ul className="workMatSteps" aria-label="Draft progress">
+          {draftSteps.map((step) => (
+            <li
+              key={step.stepIndex}
+              className={`workMatStep workMatStep-${step.status}`}
+            >
+              <span className="workMatStepIndicator" aria-hidden="true" />
+              {step.label}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {message ? (
         <p
           className={`cardActionStatus cardActionStatus-${status}`}

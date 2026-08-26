@@ -87,18 +87,26 @@ export async function dispatchDraftForCard(
     return null;
   }
 
+  // Each dispatched draft is still its own independent single_specialist
+  // collaboration (docs/adr/0063-agent-investigation-progress.md) and
+  // needs its own real draft id — this batch trigger doesn't surface any
+  // one entity's step progress live (there's no single-card view to show
+  // it in here), but the server-side step rows are still written
+  // uniformly for every draft regardless of caller.
+  const draftId = crypto.randomUUID();
+
   switch (card.entity.kind) {
     case "message":
-      return actions.message ? actions.message(card.entity.id) : null;
+      return actions.message ? actions.message(card.entity.id, draftId) : null;
     case "invoice":
-      return actions.invoice ? actions.invoice(card.entity.id) : null;
+      return actions.invoice ? actions.invoice(card.entity.id, draftId) : null;
     case "task":
-      return actions.task ? actions.task(card.entity.id) : null;
+      return actions.task ? actions.task(card.entity.id, draftId) : null;
     case "lead":
-      return actions.lead ? actions.lead(card.entity.id) : null;
+      return actions.lead ? actions.lead(card.entity.id, draftId) : null;
     case "support_ticket":
       return actions.support_ticket
-        ? actions.support_ticket(card.entity.id)
+        ? actions.support_ticket(card.entity.id, draftId)
         : null;
     default:
       return null;

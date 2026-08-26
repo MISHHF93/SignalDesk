@@ -29,6 +29,7 @@ const draft = draftEntityContentAction<Task, TaskNudgeDraftContext>({
   loadFailedMessage: "Could not load this task.",
   draftedMessage: "Nudge drafted.",
   draftFailedMessage: "Couldn't draft a nudge right now.",
+  draftingStepLabel: "Drafting task nudge…",
   fetchEntity: (db, organizationId, taskId) =>
     getTaskById(db, organizationId, taskId),
   buildDraftContext: (task, finding) => {
@@ -62,6 +63,7 @@ const draft = draftEntityContentAction<Task, TaskNudgeDraftContext>({
 
 export async function draftTaskNudgeAction(
   taskId: string,
+  draftId: string,
 ): Promise<DraftTaskNudgeActionResult> {
-  return draft(taskId);
+  return draft(taskId, draftId);
 }

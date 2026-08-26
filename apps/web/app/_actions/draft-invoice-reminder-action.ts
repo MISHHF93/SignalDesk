@@ -28,6 +28,7 @@ const draft = draftEntityContentAction<Invoice, InvoiceReminderDraftContext>({
   loadFailedMessage: "Could not load this invoice.",
   draftedMessage: "Reminder drafted.",
   draftFailedMessage: "Couldn't draft a reminder right now.",
+  draftingStepLabel: "Drafting invoice reminder…",
   fetchEntity: (db, organizationId, invoiceId) =>
     getInvoiceById(db, organizationId, invoiceId),
   buildDraftContext: (invoice, finding) => {
@@ -65,6 +66,7 @@ const draft = draftEntityContentAction<Invoice, InvoiceReminderDraftContext>({
 
 export async function draftInvoiceReminderAction(
   invoiceId: string,
+  draftId: string,
 ): Promise<DraftInvoiceReminderActionResult> {
-  return draft(invoiceId);
+  return draft(invoiceId, draftId);
 }

@@ -112,8 +112,16 @@ export type DraftMessageReplyActionResult =
     }
   | { readonly ok: false; readonly error: string };
 
+/** `draftId` is generated client-side (`DraftActionButton`, one
+ * `crypto.randomUUID()` call) and becomes this draft's own
+ * `agent_collaborations.id` — the same client-generated-id pattern
+ * `runAgentInvestigationAction` established (docs/adr/0063-agent-
+ * investigation-progress.md), extended here so the button can poll
+ * `agent_investigation_steps` for real progress the instant it fires,
+ * without a first round trip just to learn an id. */
 export type DraftMessageReplyAction = (
   messageId: string,
+  draftId: string,
 ) => Promise<DraftMessageReplyActionResult>;
 
 export type ApproveMessageReplyProposalActionResult =
@@ -146,8 +154,11 @@ export type DraftEntityContentActionResult =
 
 export type DraftTaskNudgeActionResult = DraftEntityContentActionResult;
 
+/** See `DraftMessageReplyAction`'s own doc comment — `draftId` is the same
+ * client-generated Work Mat step-tracking id, extended to this connector. */
 export type DraftTaskNudgeAction = (
   taskId: string,
+  draftId: string,
 ) => Promise<DraftTaskNudgeActionResult>;
 
 export type ApproveTaskNudgeProposalActionResult =
@@ -166,8 +177,11 @@ export type ApproveTaskNudgeProposalAction = (
 
 export type DraftTicketReplyActionResult = DraftEntityContentActionResult;
 
+/** See `DraftMessageReplyAction`'s own doc comment — `draftId` is the same
+ * client-generated Work Mat step-tracking id, extended to this connector. */
 export type DraftTicketReplyAction = (
   ticketId: string,
+  draftId: string,
 ) => Promise<DraftTicketReplyActionResult>;
 
 export type ApproveTicketReplyProposalActionResult =
@@ -187,8 +201,11 @@ export type ApproveTicketReplyProposalAction = (
 
 export type DraftDealNoteActionResult = DraftEntityContentActionResult;
 
+/** See `DraftMessageReplyAction`'s own doc comment — `draftId` is the same
+ * client-generated Work Mat step-tracking id, extended to this connector. */
 export type DraftDealNoteAction = (
   leadId: string,
+  draftId: string,
 ) => Promise<DraftDealNoteActionResult>;
 
 export type ApproveDealNoteProposalActionResult =
@@ -205,8 +222,11 @@ export type ApproveDealNoteProposalAction = (
 
 export type DraftInvoiceReminderActionResult = DraftEntityContentActionResult;
 
+/** See `DraftMessageReplyAction`'s own doc comment — `draftId` is the same
+ * client-generated Work Mat step-tracking id, extended to this connector. */
 export type DraftInvoiceReminderAction = (
   invoiceId: string,
+  draftId: string,
 ) => Promise<DraftInvoiceReminderActionResult>;
 
 export type ApproveInvoiceReminderProposalActionResult =

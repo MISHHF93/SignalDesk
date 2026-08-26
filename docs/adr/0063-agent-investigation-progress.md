@@ -119,3 +119,39 @@ next real step, if this is prioritized further, is applying the same
 step-tracking table to `single_specialist` collaborations (draft actions)
 rather than only `parallel_specialists` investigations — not a bigger
 schema.
+
+## Update (2026-08-26): extended to the five `single_specialist` draft actions
+
+Done, per this ADR's own named next step above. `DraftActionButton` (the
+one shared component behind every "Draft note/nudge/reply/reminder"
+button) now generates its own client-side draft id the same way
+`CommandCenterBoard` does for investigations, and polls the exact same
+`agent_investigation_steps` table/route/hook/CSS — no new
+infrastructure, just a second real caller of what already existed.
+
+Two real steps per draft, not a mechanical copy of the investigation's
+three-domain shape: **"Loading context…"** (covers fetching the entity
+and building its connector-specific draft context — genuinely slow for
+Zendesk, which does a live token-refresh-and-fetch here, near-instant
+for the other four connectors, whose context is a pure transform of an
+already-fetched row) and a connector-specific **"Drafting X…"** (covers
+the actual specialist call). Both `draftEntityContentAction`'s shared
+factory (QuickBooks/Asana/HubSpot/Zendesk) and Gmail's separate
+`draftMessageReplyAction` gained this — the two implementations were
+already structurally identical, so the change was symmetric across
+both, one small step-tracking addition per early-return branch (entity
+not found, `buildDraftContext` throwing) so a failure never leaves a
+step stuck at `pending`.
+
+The batch "Draft for this Matter" trigger (ADR 0060) also generates a
+real draft id per dispatched entity now, since the same action
+functions require one — but doesn't show any per-entity step list live;
+there's no single-card view to put it in when several entities draft in
+parallel, and building one was judged disproportionate to what this
+extension asked for. The server-side step rows are still written for
+every draft regardless of caller, just not everywhere surfaced.
+
+Verified live: seeded a real overdue invoice, clicked "Draft reminder,"
+and confirmed both step labels render with live status transitions
+before handing off to the existing composer-card preview — the same
+verification discipline every phase of this initiative has used.

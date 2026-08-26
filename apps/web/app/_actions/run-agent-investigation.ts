@@ -31,6 +31,7 @@ import { logger } from "../_lib/logger";
 import { checkRateLimit } from "../_lib/rate-limit";
 import { getCurrentOrganization } from "../_lib/session";
 import { getTodaysAttention } from "../_lib/todays-attention";
+import { isValidUuid } from "../_lib/uuid";
 
 let pool: DatabasePool | undefined;
 
@@ -38,9 +39,6 @@ function getPool(): DatabasePool {
   pool ??= createDatabasePool();
   return pool;
 }
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * The Work Mat's step-progress tracking (docs/adr/0063-agent-investigation-progress.md)
@@ -90,7 +88,7 @@ export async function runAgentInvestigationAction(
   investigationId: string,
 ): Promise<RunAgentInvestigationActionResult> {
   try {
-    if (!UUID_PATTERN.test(investigationId)) {
+    if (!isValidUuid(investigationId)) {
       return { ok: false, error: "Invalid investigation id." };
     }
 

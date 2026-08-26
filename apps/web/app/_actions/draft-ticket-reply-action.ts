@@ -41,6 +41,7 @@ const draft = draftEntityContentAction<SupportTicket, TicketReplyDraftContext>({
   loadFailedMessage: "Could not load this ticket.",
   draftedMessage: "Reply drafted.",
   draftFailedMessage: "Couldn't draft a reply right now.",
+  draftingStepLabel: "Drafting ticket reply…",
   fetchEntity: (db, organizationId, ticketId) =>
     getSupportTicketById(db, organizationId, ticketId),
   buildDraftContext: async (ticket, finding, db, organizationId) => {
@@ -95,6 +96,7 @@ const draft = draftEntityContentAction<SupportTicket, TicketReplyDraftContext>({
 
 export async function draftTicketReplyAction(
   ticketId: string,
+  draftId: string,
 ): Promise<DraftTicketReplyActionResult> {
-  return draft(ticketId);
+  return draft(ticketId, draftId);
 }
