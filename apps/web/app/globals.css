@@ -547,6 +547,11 @@ input {
   font-size: clamp(1.35rem, 2.4vw, 1.7rem);
   font-weight: 550;
   letter-spacing: -0.02em;
+  /* Real gap found by review: tabular-figure alignment existed only in
+     the Pricing/Billing checkout flow; the One Page's own top-level
+     business-metric tiles — a real financial figure the owner scans
+     first — had none. */
+  font-variant-numeric: tabular-nums;
 }
 
 .metricLabel {
@@ -748,12 +753,17 @@ input {
   font-style: italic;
 }
 
+/* Real bug found by review: this used to reference `var(--accent)`, a
+   token removed in the 2026-08-23 monochrome pass but never redefined —
+   this chip's border/background/text were silently unstyled. Uses
+   `--emphasis` (that pass's own designated "only accent left in UI
+   chrome"), matching this chip's role as an interactive suggestion. */
 .goalFormSuggestionApply {
   padding: 0.15rem 0.5rem;
   border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--emphasis) 45%, transparent);
+  background: color-mix(in srgb, var(--emphasis) 12%, transparent);
+  color: var(--emphasis);
   font-size: 0.68rem;
   font-weight: 600;
   cursor: pointer;
@@ -761,7 +771,7 @@ input {
 }
 
 .goalFormSuggestionApply:hover {
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  background: color-mix(in srgb, var(--emphasis) 20%, transparent);
 }
 
 .csvImportSection {
@@ -867,10 +877,15 @@ input {
   background: var(--surface);
   border: 1px solid color-mix(in srgb, var(--muted) 12%, transparent);
   box-shadow: var(--shadow);
+  /* Real gap found by review: this was the one card-hover transition
+     still hand-timed (0.18s ease) instead of the shared motion tokens
+     every other interactive surface in this file uses, so it silently
+     wouldn't move in step with a future global motion-speed change (or
+     honor prefers-reduced-motion the same centralized way). */
   transition:
-    box-shadow 0.18s ease,
-    transform 0.18s ease,
-    border-color 0.18s ease;
+    box-shadow var(--motion-fast) var(--motion-ease),
+    transform var(--motion-fast) var(--motion-ease),
+    border-color var(--motion-fast) var(--motion-ease);
 }
 
 .attentionCard:hover {
@@ -1023,6 +1038,10 @@ input {
   font-size: clamp(1.55rem, 2.5vw, 2.1rem);
   font-weight: 600;
   letter-spacing: -0.035em;
+  /* Real gap found by review: every card's own dollar figure (invoice,
+     lead, goal, payment) had no numeric-alignment treatment at all,
+     unlike the identical concern already handled in Pricing/Billing. */
+  font-variant-numeric: tabular-nums;
 }
 
 .attentionFooter {
@@ -2245,13 +2264,17 @@ input {
   }
 }
 
+/* Real duplication found by review: `.drawerPanel .connectorDetailHero`'s
+   `grid-template-columns: 1fr` used to be redeclared here too, inside a
+   viewport media query — fully redundant with the unconditional rule
+   above (line ~2186), which explains exactly why this can't be a
+   viewport query in the first place (the drawer's own fixed 720px width,
+   not the browser viewport, is what's narrow). Only the drawer's actual
+   viewport-driven behavior — going full-width below 720px — belongs
+   here. */
 @media (max-width: 720px) {
   .drawerPanel {
     width: 100%;
-  }
-
-  .drawerPanel .connectorDetailHero {
-    grid-template-columns: 1fr;
   }
 }
 
@@ -3143,15 +3166,20 @@ input {
 /* A real correlated group (relatedFindingIds, correlateFindingsByName) —
    several independent cards that may describe the same real situation,
    held together visually. Still N separate cards underneath, never a
-   merge — this is presentation only. */
+   merge — this is presentation only. Real bug found by review: this
+   used to reference `var(--accent)`, a token removed in the 2026-08-23
+   monochrome pass (see `:root`'s own comment) but never defined again —
+   left this dashed border/tint and the header text silently unstyled.
+   Uses `--emphasis` (the pass's own designated "only accent left in UI
+   chrome"), since this banner is organizational, not a severity signal. */
 .matterGroup {
   display: flex;
   flex-direction: column;
   gap: 0.7rem;
   padding: 0.9rem;
   border-radius: 1.1rem;
-  background: color-mix(in srgb, var(--accent) 5%, transparent);
-  border: 1px dashed color-mix(in srgb, var(--accent) 30%, transparent);
+  background: color-mix(in srgb, var(--emphasis) 5%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--emphasis) 30%, transparent);
 }
 
 .matterGroupHeader {
@@ -3168,7 +3196,7 @@ input {
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--emphasis);
 }
 
 .matterGroupDraftButton {
@@ -3179,6 +3207,12 @@ input {
   letter-spacing: normal;
 }
 
+/* Severity single source of truth, confirmed: this block's per-severity
+   colors and .priorityRail's (above) both resolve to the same
+   :root --severity-*-bg/-ink custom properties — neither hand-duplicates
+   a literal color, so a future severity-color change already can't
+   update one without the other. No change needed here beyond this
+   confirmation. */
 .dynamicCard .priorityBadge {
   background: var(--severity-high-bg);
   color: var(--severity-high-ink);
