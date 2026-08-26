@@ -315,6 +315,30 @@ describe("runAgentInvestigationAction", () => {
     );
   });
 
+  it("routes a real lead-risk finding to the lead domain (ADR 0064's generalized registry)", async () => {
+    mockedGetCurrentOrganization.mockResolvedValue(SESSION);
+    const leadFinding = {
+      id: "finding-lead-1",
+      type: "lead.follow_up_risk",
+      freshness: { status: "fresh" },
+    } as unknown as Awaited<
+      ReturnType<typeof getTodaysAttention>
+    >["findings"][number];
+    mockedGetTodaysAttention.mockResolvedValue({
+      findings: [OVERDUE_INVOICE_FINDING, leadFinding],
+    } as unknown as Awaited<ReturnType<typeof getTodaysAttention>>);
+
+    await runAgentInvestigationAction("11111111-1111-1111-1111-111111111111");
+
+    const domainRequests = mockedRunParallelSpecialists.mock.calls[0]?.[0];
+    const leadRequest = domainRequests?.find((r) => r.domain === "lead");
+    expect(leadRequest).toBeDefined();
+    expect(leadRequest?.capability).toBe("interpret_lead_risk");
+    expect(leadRequest?.findings).toEqual([leadFinding]);
+    const financeRequest = domainRequests?.find((r) => r.domain === "finance");
+    expect(financeRequest?.findings).toEqual([OVERDUE_INVOICE_FINDING]);
+  });
+
   it("returns a description of the failure when a top-level step throws", async () => {
     mockedGetCurrentOrganization.mockResolvedValue(SESSION);
     mockedGetTodaysAttention.mockRejectedValue(new Error("db unavailable"));

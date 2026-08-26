@@ -6,7 +6,10 @@ import type {
 } from "@signaldesk/schemas";
 import { describe, expect, it, vi } from "vitest";
 
-import { runParallelSpecialists } from "./parallel-specialist-coordinator";
+import {
+  runParallelSpecialists,
+  type SpecialistDomainRequest,
+} from "./parallel-specialist-coordinator";
 
 const ALL_AVAILABLE = { isAvailable: () => true };
 const NONE_AVAILABLE = { isAvailable: () => false };
@@ -56,6 +59,37 @@ function ticketFinding(): IntelligenceFinding {
   };
 }
 
+function leadFinding(): IntelligenceFinding {
+  return {
+    id: "lead-risk:org-1:lead-1",
+    type: "lead.follow_up_risk",
+    title: "Lead has gone quiet",
+    summary:
+      "Lead has had no activity 6 days past the expected response window.",
+    severity: "medium",
+    confidence: 0.85,
+    evidence: [],
+    freshness: { asOf: new Date(), status: "fresh" },
+    explanation: { trigger: "no activity past window", confidence: "high" },
+    detectedAt: new Date(),
+  };
+}
+
+function goalFinding(): IntelligenceFinding {
+  return {
+    id: "goal-variance:org-1:goal-1",
+    type: "goal.at_risk",
+    title: "Quarterly goal at risk",
+    summary: "Metric is trending below its target pace.",
+    severity: "low",
+    confidence: 0.8,
+    evidence: [],
+    freshness: { asOf: new Date(), status: "fresh" },
+    explanation: { trigger: "below target pace", confidence: "medium" },
+    detectedAt: new Date(),
+  };
+}
+
 function stubResult(
   taskId: string,
   agent: AgentCard,
@@ -71,6 +105,30 @@ function stubResult(
   };
 }
 
+function domainRequest(
+  domain: string,
+  capability: SpecialistDomainRequest["capability"],
+  findings: readonly IntelligenceFinding[],
+): SpecialistDomainRequest {
+  return {
+    domain,
+    capability,
+    objective: `Interpret ${domain} risk.`,
+    findings,
+  };
+}
+
+const FINANCE = (findings: readonly IntelligenceFinding[]) =>
+  domainRequest("finance", "interpret_financial_risk", findings);
+const DELIVERY = (findings: readonly IntelligenceFinding[]) =>
+  domainRequest("delivery", "interpret_delivery_risk", findings);
+const TICKET = (findings: readonly IntelligenceFinding[]) =>
+  domainRequest("ticket", "interpret_ticket_risk", findings);
+const LEAD = (findings: readonly IntelligenceFinding[]) =>
+  domainRequest("lead", "interpret_lead_risk", findings);
+const GOAL = (findings: readonly IntelligenceFinding[]) =>
+  domainRequest("goal", "interpret_goal_variance", findings);
+
 describe("runParallelSpecialists", () => {
   it("dispatches all three domains, reusing a backend once both real agents are already assigned", async () => {
     const dispatch = vi.fn(
@@ -82,9 +140,11 @@ describe("runParallelSpecialists", () => {
     );
 
     const results = await runParallelSpecialists(
-      { findings: [invoiceFinding()] },
-      { findings: [taskFinding()] },
-      { findings: [ticketFinding()] },
+      [
+        FINANCE([invoiceFinding()]),
+        DELIVERY([taskFinding()]),
+        TICKET([ticketFinding()]),
+      ],
       ALL_AVAILABLE,
       dispatch,
     );
@@ -104,6 +164,41 @@ describe("runParallelSpecialists", () => {
     ]);
   });
 
+  it("generalizes to more than three real domains (lead and goal, ADR 0064)", async () => {
+    const dispatch = vi.fn(
+      async (
+        task: AgentTask,
+        agent: AgentCard,
+        findings: readonly IntelligenceFinding[],
+      ) => stubResult(task.id, agent, findings),
+    );
+
+    const results = await runParallelSpecialists(
+      [
+        FINANCE([invoiceFinding()]),
+        DELIVERY([taskFinding()]),
+        TICKET([ticketFinding()]),
+        LEAD([leadFinding()]),
+        GOAL([goalFinding()]),
+      ],
+      ALL_AVAILABLE,
+      dispatch,
+    );
+
+    expect(results).toHaveLength(5);
+    expect(dispatch).toHaveBeenCalledTimes(5);
+    const capabilities = dispatch.mock.calls.map(
+      ([task]) => task.requestedCapability,
+    );
+    expect(capabilities).toEqual([
+      "interpret_financial_risk",
+      "interpret_delivery_risk",
+      "interpret_ticket_risk",
+      "interpret_lead_risk",
+      "interpret_goal_variance",
+    ]);
+  });
+
   it("contributes nothing for a domain with no findings", async () => {
     const dispatch = vi.fn(
       async (
@@ -114,9 +209,7 @@ describe("runParallelSpecialists", () => {
     );
 
     const results = await runParallelSpecialists(
-      { findings: [] },
-      { findings: [taskFinding()] },
-      { findings: [] },
+      [FINANCE([]), DELIVERY([taskFinding()]), TICKET([])],
       ALL_AVAILABLE,
       dispatch,
     );
@@ -138,9 +231,11 @@ describe("runParallelSpecialists", () => {
     );
 
     const results = await runParallelSpecialists(
-      { findings: [invoiceFinding()] },
-      { findings: [taskFinding()] },
-      { findings: [ticketFinding()] },
+      [
+        FINANCE([invoiceFinding()]),
+        DELIVERY([taskFinding()]),
+        TICKET([ticketFinding()]),
+      ],
       onlyDeterministic,
       dispatch,
     );
@@ -161,9 +256,11 @@ describe("runParallelSpecialists", () => {
     );
 
     const results = await runParallelSpecialists(
-      { findings: [invoiceFinding()] },
-      { findings: [taskFinding()] },
-      { findings: [ticketFinding()] },
+      [
+        FINANCE([invoiceFinding()]),
+        DELIVERY([taskFinding()]),
+        TICKET([ticketFinding()]),
+      ],
       NONE_AVAILABLE,
       dispatch,
     );
@@ -178,9 +275,7 @@ describe("runParallelSpecialists", () => {
     });
 
     const results = await runParallelSpecialists(
-      { findings: [invoiceFinding()] },
-      { findings: [] },
-      { findings: [] },
+      [FINANCE([invoiceFinding()]), DELIVERY([]), TICKET([])],
       ALL_AVAILABLE,
       dispatch,
     );
@@ -201,9 +296,7 @@ describe("runParallelSpecialists", () => {
     const finding = invoiceFinding();
 
     await runParallelSpecialists(
-      { findings: [finding] },
-      { findings: [] },
-      { findings: [] },
+      [FINANCE([finding]), DELIVERY([]), TICKET([])],
       ALL_AVAILABLE,
       dispatch,
     );
@@ -227,9 +320,11 @@ describe("runParallelSpecialists", () => {
     );
 
     const results = await runParallelSpecialists(
-      { findings: [invoiceFinding()] },
-      { findings: [taskFinding()] },
-      { findings: [ticketFinding()] },
+      [
+        FINANCE([invoiceFinding()]),
+        DELIVERY([taskFinding()]),
+        TICKET([ticketFinding()]),
+      ],
       ALL_AVAILABLE,
       dispatch,
     );
@@ -254,9 +349,11 @@ describe("runParallelSpecialists", () => {
     );
 
     const results = await runParallelSpecialists(
-      { findings: [invoiceFinding()] },
-      { findings: [taskFinding()] },
-      { findings: [ticketFinding()] },
+      [
+        FINANCE([invoiceFinding()]),
+        DELIVERY([taskFinding()]),
+        TICKET([ticketFinding()]),
+      ],
       ALL_AVAILABLE,
       dispatch,
     );
@@ -277,9 +374,11 @@ describe("runParallelSpecialists", () => {
     const onSpecialistSettled = vi.fn();
 
     await runParallelSpecialists(
-      { findings: [invoiceFinding()] },
-      { findings: [taskFinding()] },
-      { findings: [ticketFinding()] },
+      [
+        FINANCE([invoiceFinding()]),
+        DELIVERY([taskFinding()]),
+        TICKET([ticketFinding()]),
+      ],
       ALL_AVAILABLE,
       dispatch,
       onSpecialistSettled,
@@ -306,9 +405,11 @@ describe("runParallelSpecialists", () => {
     const onSpecialistSettled = vi.fn();
 
     await runParallelSpecialists(
-      { findings: [invoiceFinding()] },
-      { findings: [taskFinding()] },
-      { findings: [ticketFinding()] },
+      [
+        FINANCE([invoiceFinding()]),
+        DELIVERY([taskFinding()]),
+        TICKET([ticketFinding()]),
+      ],
       NONE_AVAILABLE,
       dispatch,
       onSpecialistSettled,
@@ -328,9 +429,7 @@ describe("runParallelSpecialists", () => {
     const onSpecialistSettled = vi.fn();
 
     await runParallelSpecialists(
-      { findings: [invoiceFinding()] },
-      { findings: [] },
-      { findings: [] },
+      [FINANCE([invoiceFinding()]), DELIVERY([]), TICKET([])],
       ALL_AVAILABLE,
       dispatch,
       onSpecialistSettled,
@@ -353,9 +452,7 @@ describe("runParallelSpecialists", () => {
     const onSpecialistSettled = vi.fn();
 
     await runParallelSpecialists(
-      { findings: [] },
-      { findings: [taskFinding()] },
-      { findings: [] },
+      [FINANCE([]), DELIVERY([taskFinding()]), TICKET([])],
       ALL_AVAILABLE,
       dispatch,
       onSpecialistSettled,

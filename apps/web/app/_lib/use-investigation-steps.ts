@@ -50,7 +50,6 @@ export function useInvestigationSteps(
 
   useEffect(() => {
     if (!collaborationId) {
-      setSteps([]);
       return;
     }
 
@@ -87,5 +86,9 @@ export function useInvestigationSteps(
     };
   }, [collaborationId]);
 
-  return steps;
+  // Derived, not stored: a null id always reads as no steps, regardless of
+  // whatever the previous investigation's `steps` state still holds — the
+  // effect above only ever writes `steps` for a real, non-null id, so there
+  // is no separate reset branch to keep in sync with this one.
+  return collaborationId ? steps : [];
 }

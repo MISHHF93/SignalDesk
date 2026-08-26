@@ -755,6 +755,8 @@ export const agentCapabilitySchema = z.enum([
   "interpret_financial_risk",
   "interpret_delivery_risk",
   "interpret_ticket_risk",
+  "interpret_lead_risk",
+  "interpret_goal_variance",
   "draft_customer_reply",
   "draft_invoice_reminder",
   "draft_task_nudge",
@@ -778,6 +780,7 @@ export const agentCardSchema = z.strictObject({
         "ticket_findings",
         "message_findings",
         "lead_findings",
+        "goal_findings",
       ]),
     )
     .min(1),

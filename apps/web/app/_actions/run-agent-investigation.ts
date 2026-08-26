@@ -6,9 +6,12 @@ import {
   composeCards,
   reconcileSpecialistResults,
   runParallelSpecialists,
-  type SpecialistDomain,
+  type SpecialistDomainRequest,
 } from "@signaldesk/application";
-import { prioritizeFindings } from "@signaldesk/intelligence";
+import {
+  prioritizeFindings,
+  type IntelligenceFinding,
+} from "@signaldesk/intelligence";
 import {
   appendInvestigationSteps,
   completeAgentCollaboration,
@@ -39,6 +42,63 @@ function getPool(): DatabasePool {
   pool ??= createDatabasePool();
   return pool;
 }
+
+/**
+ * The real, app-owned registry of investigation domains (ADR 0064,
+ * generalizing the original hardcoded finance/delivery/ticket triad to any
+ * number of real domains) — `packages/application`'s `runParallelSpecialists`
+ * knows nothing about what any of these mean; this app decides which real
+ * finding types exist and which capability/step-label/objective each maps
+ * to. Adding a 6th domain here (were one to become real) needs no change
+ * to the coordinator itself, only a new entry in this list.
+ */
+const INVESTIGATION_DOMAINS: ReadonlyArray<{
+  readonly domain: string;
+  readonly findingType: string;
+  readonly capability: SpecialistDomainRequest["capability"];
+  readonly stepLabel: string;
+  readonly objective: string;
+}> = [
+  {
+    domain: "finance",
+    findingType: "invoice.overdue",
+    capability: "interpret_financial_risk",
+    stepLabel: "Checking overdue invoices…",
+    objective:
+      "Interpret current financial risk from real overdue-invoice findings.",
+  },
+  {
+    domain: "delivery",
+    findingType: "task.overdue",
+    capability: "interpret_delivery_risk",
+    stepLabel: "Checking overdue tasks…",
+    objective:
+      "Interpret current delivery risk from real overdue-task findings.",
+  },
+  {
+    domain: "ticket",
+    findingType: "ticket.stuck",
+    capability: "interpret_ticket_risk",
+    stepLabel: "Checking stuck support tickets…",
+    objective:
+      "Interpret current ticket risk from real stuck support-ticket findings.",
+  },
+  {
+    domain: "lead",
+    findingType: "lead.follow_up_risk",
+    capability: "interpret_lead_risk",
+    stepLabel: "Checking at-risk leads…",
+    objective: "Interpret current lead risk from real follow-up-risk findings.",
+  },
+  {
+    domain: "goal",
+    findingType: "goal.at_risk",
+    capability: "interpret_goal_variance",
+    stepLabel: "Checking goals at risk…",
+    objective:
+      "Interpret current goal variance from real at-risk goal findings.",
+  },
+];
 
 /**
  * The Work Mat's step-progress tracking (docs/adr/0063-agent-investigation-progress.md)
@@ -145,26 +205,27 @@ export async function runAgentInvestigationAction(
 
     const now = new Date();
     const attention = await getTodaysAttention(session, now);
-    const financeFindings = attention.findings.filter(
-      (finding) => finding.type === "invoice.overdue",
+
+    // One real finding subset per registered domain (ADR 0064) — a domain
+    // with no matching findings simply never appears in `domainFindings`
+    // below, the same "never a fabricated step" doctrine the Work Mat plan
+    // already followed for the original 3 domains.
+    const domainFindings = new Map<string, readonly IntelligenceFinding[]>(
+      INVESTIGATION_DOMAINS.map((entry) => [
+        entry.domain,
+        attention.findings.filter(
+          (finding) => finding.type === entry.findingType,
+        ),
+      ]),
     );
-    const deliveryFindings = attention.findings.filter(
-      (finding) => finding.type === "task.overdue",
-    );
-    const ticketFindings = attention.findings.filter(
-      (finding) => finding.type === "ticket.stuck",
-    );
+    const allDomainFindings = [...domainFindings.values()].flat();
 
     // A real, deterministic evidence-sufficiency check *before* the model
     // ever sees anything — SignalDesk decides whether there's enough real
     // evidence to investigate, rather than trusting the model's own
     // self-reported confidence to catch an evidence gap after the call
     // (see `evidence-sufficiency.ts`'s doc comment for why this exists).
-    const evidenceSufficiency = classifyEvidenceSufficiency([
-      ...financeFindings,
-      ...deliveryFindings,
-      ...ticketFindings,
-    ]);
+    const evidenceSufficiency = classifyEvidenceSufficiency(allDomainFindings);
 
     if (evidenceSufficiency === "missing") {
       await recordDeclinedTrigger("no_material_findings");
@@ -210,31 +271,26 @@ export async function runAgentInvestigationAction(
             userId: session.userId,
             pattern: "parallel_specialists",
             objective:
-              "Investigate current finance, delivery, and ticket risk.",
+              "Investigate current finance, delivery, ticket, lead, and goal risk.",
             correlationId: randomUUID(),
             idempotencyKey: randomUUID(),
           },
         );
 
-        // The Work Mat's step plan — one label per domain that actually has
-        // real findings to check (never a fabricated fixed list), plus the
-        // reconciliation step every real run reaches. Declared all up front,
-        // 'pending', so the client sees the whole real plan immediately and
-        // fills in status as each step genuinely starts/settles.
-        const domainStepIndex = new Map<SpecialistDomain, number>();
+        // The Work Mat's step plan — one label per registered domain that
+        // actually has real findings to check (never a fabricated fixed
+        // list), plus the reconciliation step every real run reaches.
+        // Declared all up front, 'pending', so the client sees the whole
+        // real plan immediately and fills in status as each step genuinely
+        // starts/settles.
+        const domainStepIndex = new Map<string, number>();
         const stepLabels: string[] = [];
 
-        if (financeFindings.length > 0) {
-          domainStepIndex.set("finance", stepLabels.length);
-          stepLabels.push("Checking overdue invoices…");
-        }
-        if (deliveryFindings.length > 0) {
-          domainStepIndex.set("delivery", stepLabels.length);
-          stepLabels.push("Checking overdue tasks…");
-        }
-        if (ticketFindings.length > 0) {
-          domainStepIndex.set("ticket", stepLabels.length);
-          stepLabels.push("Checking stuck support tickets…");
+        for (const entry of INVESTIGATION_DOMAINS) {
+          if ((domainFindings.get(entry.domain) ?? []).length > 0) {
+            domainStepIndex.set(entry.domain, stepLabels.length);
+            stepLabels.push(entry.stepLabel);
+          }
         }
 
         const reconcileStepIndex = stepLabels.length;
@@ -271,10 +327,16 @@ export async function runAgentInvestigationAction(
             providerFor(agentId, session.organizationId, db),
         });
 
+        const domainRequests: SpecialistDomainRequest[] =
+          INVESTIGATION_DOMAINS.map((entry) => ({
+            domain: entry.domain,
+            capability: entry.capability,
+            objective: entry.objective,
+            findings: domainFindings.get(entry.domain) ?? [],
+          }));
+
         const results = await runParallelSpecialists(
-          { findings: financeFindings },
-          { findings: deliveryFindings },
-          { findings: ticketFindings },
+          domainRequests,
           availabilityFor(),
           gateway.dispatch,
           (domain, result) => {
@@ -310,11 +372,7 @@ export async function runAgentInvestigationAction(
         );
 
         const { finding: reconciled, contradictionsDetected } =
-          reconcileSpecialistResults(results, [
-            ...financeFindings,
-            ...deliveryFindings,
-            ...ticketFindings,
-          ]);
+          reconcileSpecialistResults(results, allDomainFindings);
 
         await recordStepSafely(
           session.organizationId,

@@ -229,6 +229,54 @@ describe("reconcileSpecialistResults", () => {
     );
   });
 
+  it("titles a lead-risk-only investigation (ADR 0064's generalized domain list)", () => {
+    const leadFinding: IntelligenceFinding = {
+      id: "lead-risk:org-1:lead-1",
+      type: "lead.follow_up_risk",
+      title: "Lead has gone quiet",
+      summary: "Lead has had no activity 6 days past the expected window.",
+      severity: "medium",
+      confidence: 0.85,
+      evidence: [],
+      freshness: { asOf: new Date(), status: "fresh" },
+      explanation: { trigger: "no activity past window", confidence: "high" },
+      detectedAt: new Date(),
+    };
+    const outcome = reconcileSpecialistResults(
+      [result({ evidenceIds: ["lead-risk:org-1:lead-1"] })],
+      [leadFinding],
+    );
+
+    expect(outcome.finding?.title).toBe("Lead risk investigation");
+  });
+
+  it("titles a cross-domain investigation covering finance and goal variance — a combination the original 3-domain title-builder could never produce", () => {
+    const goalFinding: IntelligenceFinding = {
+      id: "goal-variance:org-1:goal-1",
+      type: "goal.at_risk",
+      title: "Quarterly goal at risk",
+      summary: "Metric is trending below its target pace.",
+      severity: "low",
+      confidence: 0.8,
+      evidence: [],
+      freshness: { asOf: new Date(), status: "fresh" },
+      explanation: { trigger: "below target pace", confidence: "medium" },
+      detectedAt: new Date(),
+    };
+    const outcome = reconcileSpecialistResults(
+      [
+        result({ evidenceIds: ["overdue-invoice:org-1:invoice-1"] }),
+        result({
+          agentId: "deterministic-specialist",
+          evidenceIds: ["goal-variance:org-1:goal-1"],
+        }),
+      ],
+      [invoiceFinding(), goalFinding],
+    );
+
+    expect(outcome.finding?.title).toBe("Finance and goal risk investigation");
+  });
+
   it("dedupes identical claims across results", () => {
     const outcome = reconcileSpecialistResults(
       [result(), result({ agentId: "deterministic-specialist" })],

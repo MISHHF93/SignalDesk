@@ -24,34 +24,53 @@ function maxSeverity(findings: readonly IntelligenceFinding[]): CardSeverity {
   );
 }
 
+// One entry per real investigation domain's finding type (ADR 0064
+// generalized this from a hardcoded 3-way if/else to a data-driven list —
+// adding a domain here is now the only change a future one needs, never a
+// combinatorial branch). `label` is the plain business word used in the
+// title; the singular form doubles as "<Label> risk investigation" when
+// exactly one domain is present.
+const DOMAIN_TITLE_LABELS: ReadonlyArray<{
+  readonly findingType: string;
+  readonly label: string;
+}> = [
+  { findingType: "invoice.overdue", label: "finance" },
+  { findingType: "task.overdue", label: "delivery" },
+  { findingType: "ticket.stuck", label: "ticket" },
+  { findingType: "lead.follow_up_risk", label: "lead" },
+  { findingType: "goal.at_risk", label: "goal" },
+];
+
+function joinWithAnd(labels: readonly string[]): string {
+  if (labels.length === 1) {
+    return labels[0]!;
+  }
+  if (labels.length === 2) {
+    return `${labels[0]} and ${labels[1]}`;
+  }
+  return `${labels.slice(0, -1).join(", ")}, and ${labels[labels.length - 1]}`;
+}
+
 function buildTitle(citedFindings: readonly IntelligenceFinding[]): string {
-  const hasFinance = citedFindings.some((f) => f.type === "invoice.overdue");
-  const hasDelivery = citedFindings.some((f) => f.type === "task.overdue");
-  const hasTicket = citedFindings.some((f) => f.type === "ticket.stuck");
+  const presentLabels = DOMAIN_TITLE_LABELS.filter((entry) =>
+    citedFindings.some((finding) => finding.type === entry.findingType),
+  ).map((entry) => entry.label);
 
-  if (hasFinance && hasDelivery && hasTicket) {
-    return "Finance, delivery, and ticket risk investigation";
-  }
-  if (hasFinance && hasDelivery) {
-    return "Finance and delivery risk investigation";
-  }
-  if (hasFinance && hasTicket) {
-    return "Finance and ticket risk investigation";
-  }
-  if (hasDelivery && hasTicket) {
-    return "Delivery and ticket risk investigation";
-  }
-  if (hasFinance) {
-    return "Financial risk investigation";
-  }
-  if (hasDelivery) {
-    return "Delivery risk investigation";
-  }
-  if (hasTicket) {
-    return "Ticket risk investigation";
+  if (presentLabels.length === 0) {
+    return "Agent investigation";
   }
 
-  return "Agent investigation";
+  if (presentLabels.length === 1) {
+    const label = presentLabels[0]!;
+    const adjective = label === "finance" ? "Financial" : capitalize(label);
+    return `${adjective} risk investigation`;
+  }
+
+  return `${capitalize(joinWithAnd(presentLabels))} risk investigation`;
+}
+
+function capitalize(value: string): string {
+  return value.length === 0 ? value : value[0]!.toUpperCase() + value.slice(1);
 }
 
 function confidenceLabel(confidence: number): "low" | "medium" | "high" {

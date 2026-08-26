@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type { IntelligenceFinding } from "@signaldesk/intelligence";
 import type {
+  AgentCapability,
   AgentCard,
   AgentTask,
   AgentTaskResult,
@@ -13,12 +14,29 @@ export interface SpecialistInput {
   readonly findings: readonly IntelligenceFinding[];
 }
 
-export type SpecialistDomain = "finance" | "delivery" | "ticket";
+export type SpecialistDomain = string;
+
+/**
+ * One real domain to investigate, data-driven rather than hardcoded (ADR
+ * 0064, generalizing the original fixed finance/delivery/ticket triad).
+ * `domain` is a plain, caller-chosen label (used only for the Work Mat step
+ * map and `onSpecialistSettled`'s notifications, never persisted or shown
+ * as a specialist/model identity) — the app layer (`run-agent-investigation.ts`)
+ * owns the real registry of which domains exist and which real finding
+ * type/capability each maps to; this coordinator just executes whatever
+ * list it's given.
+ */
+export interface SpecialistDomainRequest {
+  readonly domain: SpecialistDomain;
+  readonly capability: AgentCapability;
+  readonly objective: string;
+  readonly findings: readonly IntelligenceFinding[];
+}
 
 /**
  * Fires the moment one domain's own dispatch settles (success or failure),
- * independent of the other two — the Work Mat's real per-step progress
- * signal (docs/adr/0063-agent-investigation-progress.md), not a fabricated
+ * independent of the others — the Work Mat's real per-step progress signal
+ * (docs/adr/0063-agent-investigation-progress.md), not a fabricated
  * stagger. Optional and purely observational: nothing about dispatch
  * behavior changes if a caller omits it, and this coordinator still takes
  * no persistence dependency of its own — the callback is just a plain
@@ -99,147 +117,94 @@ async function dispatchOrFail(
 }
 
 /**
+ * Picks an agent for one domain, preferring a backend distinct from every
+ * domain already assigned earlier in this same run — but the exclusion is
+ * best-effort, not a hard requirement: with only two real `AGENT_REGISTRY`
+ * entries, once both are already assigned to earlier domains, every domain
+ * after that must still fall back to a shared backend rather than being
+ * starved to zero candidates (see docs/adr/0020-agent-fabric.md's "still
+ * runs for real... on zero external credentials" claim — this fallback is
+ * what makes that true regardless of how many domains are in play).
+ */
+function selectAgentForDomain(
+  capability: AgentCapability,
+  availability: AgentAvailability,
+  alreadyAssigned: readonly string[],
+): AgentCard | null {
+  try {
+    return alreadyAssigned.length > 0
+      ? selectAgent(capability, availability, { exclude: alreadyAssigned })
+      : selectAgent(capability, availability);
+  } catch {
+    if (alreadyAssigned.length === 0) {
+      return null;
+    }
+
+    try {
+      return selectAgent(capability, availability);
+    } catch {
+      return null;
+    }
+  }
+}
+
+/**
  * The Agent Fabric's one real collaboration pattern (`PARALLEL_SPECIALISTS`):
- * fans out to a finance specialist over real overdue-invoice findings, a
- * delivery specialist over real overdue-task findings, and a ticket
- * specialist over real stuck-support-ticket findings — each domain
- * excluding whichever agent(s) an earlier domain already picked, so they
- * genuinely run on different backends whenever more than one specialist is
- * eligible. With exactly two real registry entries (`AGENT_REGISTRY`), the
- * best case across three domains is two distinct backends, never three —
- * an honest consequence of the existing best-effort doctrine, not a new
- * gap. A domain with no findings, or with no eligible agent, contributes
- * nothing — never a fabricated result — which is why the return array can
- * be shorter than 3.
+ * fans out to one specialist per real domain in `domains`, each excluding
+ * whichever agent(s) an earlier domain already picked (best-effort — see
+ * `selectAgentForDomain`), so distinct domains genuinely run on different
+ * backends whenever more than one specialist is eligible. A domain with no
+ * findings, or with no eligible agent, contributes nothing — never a
+ * fabricated result — which is why the return array can be shorter than
+ * `domains.length`.
+ *
+ * Generalized from a hardcoded finance/delivery/ticket triad to an
+ * arbitrary domain list (ADR 0064) — the mechanism now supports any number
+ * of real domains the caller registers (`run-agent-investigation.ts` owns
+ * that real registry), without this coordinator knowing what any of them
+ * mean. This still isn't a model dynamically deciding what to investigate:
+ * the domain set itself remains a fixed, code-owned list per ADR 0020's
+ * "not a bigger type system" doctrine — only the *count* of domains that
+ * list can hold grew from exactly 3 to however many are registered.
  */
 export async function runParallelSpecialists(
-  financeInput: SpecialistInput,
-  deliveryInput: SpecialistInput,
-  ticketInput: SpecialistInput,
+  domains: readonly SpecialistDomainRequest[],
   availability: AgentAvailability,
   dispatch: SpecialistDispatch,
   onSpecialistSettled?: OnSpecialistSettled,
 ): Promise<readonly AgentTaskResult[]> {
-  let financeAgent: AgentCard | null = null;
-
-  if (financeInput.findings.length > 0) {
-    try {
-      financeAgent = selectAgent("interpret_financial_risk", availability);
-    } catch {
-      financeAgent = null;
-      onSpecialistSettled?.("finance", null);
-    }
-  }
-
-  let deliveryAgent: AgentCard | null = null;
-
-  if (deliveryInput.findings.length > 0) {
-    try {
-      // Prefer a different backend than finance picked, but exclusion is
-      // best-effort: when only one real agent is eligible at all (the
-      // common "no ANTHROPIC_API_KEY" case), both domains must still run
-      // on it rather than delivery being starved to zero candidates. See
-      // docs/adr/0020-agent-fabric.md's "still runs for real... on zero
-      // external credentials" claim — this is what makes it true.
-      deliveryAgent = financeAgent
-        ? selectAgent("interpret_delivery_risk", availability, {
-            exclude: [financeAgent.id],
-          })
-        : selectAgent("interpret_delivery_risk", availability);
-    } catch {
-      try {
-        deliveryAgent = selectAgent("interpret_delivery_risk", availability);
-      } catch {
-        deliveryAgent = null;
-        onSpecialistSettled?.("delivery", null);
-      }
-    }
-  }
-
-  let ticketAgent: AgentCard | null = null;
-
-  if (ticketInput.findings.length > 0) {
-    // Same best-effort-exclusion doctrine as delivery above, extended to a
-    // third domain: prefer a backend distinct from *both* finance and
-    // delivery, but with only two real registry entries that preference
-    // can never actually be satisfied once both are already assigned — the
-    // fallback below still guarantees ticket runs for real rather than
-    // being starved to zero candidates.
-    const exclude = [financeAgent?.id, deliveryAgent?.id].filter(
-      (id): id is string => id !== undefined,
-    );
-
-    try {
-      ticketAgent =
-        exclude.length > 0
-          ? selectAgent("interpret_ticket_risk", availability, { exclude })
-          : selectAgent("interpret_ticket_risk", availability);
-    } catch {
-      try {
-        ticketAgent = selectAgent("interpret_ticket_risk", availability);
-      } catch {
-        ticketAgent = null;
-        onSpecialistSettled?.("ticket", null);
-      }
-    }
-  }
-
+  const assignedAgentIds: string[] = [];
   const dispatches: Promise<AgentTaskResult>[] = [];
 
-  function dispatchAndNotify(
-    domain: SpecialistDomain,
-    task: AgentTask,
-    agent: AgentCard,
-    findings: readonly IntelligenceFinding[],
-  ): Promise<AgentTaskResult> {
-    return dispatchOrFail(task, agent, findings, dispatch).then((result) => {
-      onSpecialistSettled?.(domain, result);
-      return result;
-    });
-  }
+  for (const request of domains) {
+    if (request.findings.length === 0) {
+      continue;
+    }
 
-  if (financeAgent) {
-    dispatches.push(
-      dispatchAndNotify(
-        "finance",
-        buildTask(
-          "interpret_financial_risk",
-          "Interpret current financial risk from real overdue-invoice findings.",
-          financeInput.findings,
-        ),
-        financeAgent,
-        financeInput.findings,
-      ),
+    const agent = selectAgentForDomain(
+      request.capability,
+      availability,
+      assignedAgentIds,
     );
-  }
 
-  if (deliveryAgent) {
-    dispatches.push(
-      dispatchAndNotify(
-        "delivery",
-        buildTask(
-          "interpret_delivery_risk",
-          "Interpret current delivery risk from real overdue-task findings.",
-          deliveryInput.findings,
-        ),
-        deliveryAgent,
-        deliveryInput.findings,
-      ),
+    if (!agent) {
+      onSpecialistSettled?.(request.domain, null);
+      continue;
+    }
+
+    assignedAgentIds.push(agent.id);
+
+    const task = buildTask(
+      request.capability,
+      request.objective,
+      request.findings,
     );
-  }
 
-  if (ticketAgent) {
     dispatches.push(
-      dispatchAndNotify(
-        "ticket",
-        buildTask(
-          "interpret_ticket_risk",
-          "Interpret current ticket risk from real stuck support-ticket findings.",
-          ticketInput.findings,
-        ),
-        ticketAgent,
-        ticketInput.findings,
-      ),
+      dispatchOrFail(task, agent, request.findings, dispatch).then((result) => {
+        onSpecialistSettled?.(request.domain, result);
+        return result;
+      }),
     );
   }
 

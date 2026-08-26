@@ -10,14 +10,15 @@ import { agentCardSchema, type AgentCard } from "@signaldesk/schemas";
  * `ANTHROPIC_API_KEY` is configured — see `apps/web/app/_lib/agent-fabric.ts`)
  * and an always-available deterministic one, so `runParallelSpecialists`
  * has something real to dispatch to even with zero external credentials.
- * Both declare all real capabilities (financial/delivery/ticket risk
- * interpretation, plus draft_customer_reply and, as of ADR 0057, the four
- * sibling drafting capabilities for QuickBooks/Asana/HubSpot/Zendesk —
- * ADR 0020's own named next step was "a second real specialist
- * capability... not a bigger type system", and each new draft-then-approve
- * action extends that same doctrine to a capability whose result feeds an
- * external write once approved) — the specialist *count* stays at two;
- * only the capability *count* per specialist grows when a new one is added.
+ * Both declare all real capabilities (financial/delivery/ticket/lead/
+ * goal-variance risk interpretation — the last two added by ADR 0064,
+ * generalizing what was a hardcoded 3-domain fan-out — plus draft_customer_reply
+ * and, as of ADR 0057, the four sibling drafting capabilities for
+ * QuickBooks/Asana/HubSpot/Zendesk — ADR 0020's own named next step was "a
+ * second real specialist capability... not a bigger type system", and each
+ * new capability extends that same doctrine) — the specialist *count* stays
+ * at two; only the capability *count* per specialist grows when a new one
+ * is added.
  */
 const RAW_AGENT_REGISTRY: readonly AgentCard[] = [
   {
@@ -25,11 +26,13 @@ const RAW_AGENT_REGISTRY: readonly AgentCard[] = [
     provider: "anthropic",
     displayName: "Claude specialist",
     description:
-      "Interprets real financial, delivery, and ticket findings, and drafts customer replies, invoice reminders, task nudges, and deal notes, using a Claude-backed model. Available only when ANTHROPIC_API_KEY is configured.",
+      "Interprets real financial, delivery, ticket, lead, and goal-variance findings, and drafts customer replies, invoice reminders, task nudges, and deal notes, using a Claude-backed model. Available only when ANTHROPIC_API_KEY is configured.",
     capabilities: [
       "interpret_financial_risk",
       "interpret_delivery_risk",
       "interpret_ticket_risk",
+      "interpret_lead_risk",
+      "interpret_goal_variance",
       "draft_customer_reply",
       "draft_invoice_reminder",
       "draft_task_nudge",
@@ -42,6 +45,7 @@ const RAW_AGENT_REGISTRY: readonly AgentCard[] = [
       "ticket_findings",
       "message_findings",
       "lead_findings",
+      "goal_findings",
     ],
     riskLevel: "moderate",
     canRead: true,
@@ -61,6 +65,8 @@ const RAW_AGENT_REGISTRY: readonly AgentCard[] = [
       "interpret_financial_risk",
       "interpret_delivery_risk",
       "interpret_ticket_risk",
+      "interpret_lead_risk",
+      "interpret_goal_variance",
       "draft_customer_reply",
       "draft_invoice_reminder",
       "draft_task_nudge",
@@ -73,6 +79,7 @@ const RAW_AGENT_REGISTRY: readonly AgentCard[] = [
       "ticket_findings",
       "message_findings",
       "lead_findings",
+      "goal_findings",
     ],
     riskLevel: "low",
     canRead: true,
