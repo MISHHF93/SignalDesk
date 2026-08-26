@@ -308,7 +308,17 @@ describe("fetchAsanaTasks", () => {
     expect(new URL(url).searchParams.get("offset")).toBe("cursor-abc");
   });
 
-  it("sends modified_since alongside completed_since when provided, for incremental runs", async () => {
+  it("regression: real gap found by review — sets completed_since to the same cursor as modified_since on an incremental run, not a hardcoded now", async () => {
+    // completed_since=now used to stay hardcoded even when modifiedSince
+    // was supplied, which meant a task that transitioned to completed
+    // since the last sync was invisible to every future incremental
+    // fetch (excluded by completed_since=now) — the same structural gap
+    // already found and fixed for Jira's statusCategory != Done via a
+    // second closed-issue pass. Asana's completed_since composes more
+    // directly: setting it to the same cursor as modified_since means
+    // the query returns "incomplete tasks, or tasks completed at/after
+    // the cursor," correctly surfacing a newly-completed task in the
+    // same single query.
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { data: [] }));
 
     await fetchAsanaTasks(
@@ -322,7 +332,7 @@ describe("fetchAsanaTasks", () => {
     const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
     const params = new URL(url).searchParams;
     expect(params.get("modified_since")).toBe("2026-08-19T00:00:00.000Z");
-    expect(params.get("completed_since")).toBe("now");
+    expect(params.get("completed_since")).toBe("2026-08-19T00:00:00.000Z");
   });
 
   it("omits modified_since when not provided, matching a plain initial sync", async () => {

@@ -190,6 +190,47 @@ export async function ingestJiraIssue(
   });
 }
 
+/**
+ * Transitions a stored task to `completed: true`, matched by its own
+ * connector/external id rather than this app's internal `Task.id` — the
+ * same shape `updateInvoiceStatusBySourceRecord` (`invoices.ts`) uses for
+ * Xero/QuickBooks' closed-invoice second pass. Real gap found by review:
+ * `fetchJiraIssues`'s `statusCategory != Done` filter is a hard exclusion
+ * — a Jira issue that closes is invisible to every future incremental
+ * fetch, so `ingestJiraIssue`'s normal append-only re-observe path can
+ * never see the transition on its own. `sync-jira.ts`'s second pass
+ * (`fetchJiraClosedIssues`) calls this directly instead. One-directional
+ * by design (only ever `false -> true`) — Jira's regular
+ * `statusCategory != Done` pass already re-observes a genuinely reopened
+ * issue the normal way, since a reopened issue is `!= Done` again and
+ * naturally reappears in that query.
+ */
+export async function markTaskCompletedBySourceRecord(
+  pool: DatabasePool,
+  organizationId: string,
+  sourceSystem: string,
+  externalRecordId: string,
+): Promise<boolean> {
+  return withTenantContext(pool, organizationId, async (client) => {
+    const result = await client.query(
+      `update tasks set completed = true
+       where organization_id = $1
+         and completed = false
+         and source_record_id = (
+           select id from source_records
+           where organization_id = $1
+             and source_system = $2
+             and external_record_id = $3
+           order by observed_at desc
+           limit 1
+         )`,
+      [organizationId, sourceSystem, externalRecordId],
+    );
+
+    return (result.rowCount ?? 0) > 0;
+  });
+}
+
 interface TaskWithSourceRow {
   readonly id: string;
   readonly organization_id: string;

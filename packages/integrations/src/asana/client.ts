@@ -245,9 +245,32 @@ const TASK_OPT_FIELDS =
  * selected yet, so it queries by the connected user's own assignee gid
  * (from the OAuth token response, not a guessed "me" literal — that
  * shorthand isn't documented for this endpoint) across each of their
- * workspaces (`fetchAsanaWorkspaces`). `completed_since=now` is Asana's own
- * documented idiom for "incomplete tasks" (tasks completed before `now`
- * are excluded; anything still open is returned regardless of age).
+ * workspaces (`fetchAsanaWorkspaces`).
+ *
+ * `completed_since` is Asana's own documented idiom for "tasks that are
+ * either incomplete, or that have been completed since this time" — on an
+ * initial sync (no `modifiedSince`), this is set to `"now"`, meaning
+ * "incomplete tasks only" (nothing could have been completed after the
+ * request instant), which keeps that first pull bounded to currently-open
+ * work rather than every task ever completed in the workspace's history.
+ *
+ * Real bug found by review: on an incremental run, this used to stay
+ * hardcoded at `"now"` even though `modifiedSince` was supplied — which
+ * meant a task that transitioned to completed since the last sync was
+ * invisible to every future incremental fetch (excluded by
+ * `completed_since=now`, the exact structural gap already found and fixed
+ * for Jira's `statusCategory != Done` via a second closed-issue pass).
+ * Asana's parameter composes more directly than Jira's: setting
+ * `completed_since=modifiedSince` too means the query now returns
+ * "incomplete tasks, or tasks completed at/after the cursor" — and since
+ * `modified_since` already restricts the whole result to only records
+ * touched since the cursor (completing a task always updates
+ * `modified_at`), this single query correctly surfaces a newly-completed
+ * task without a second pass, while still excluding tasks completed
+ * before the cursor. `ingestAsanaTask`'s append-only insert then does the
+ * rest — a re-observed task with `completed: true` becomes the current
+ * row via the existing `distinct on (source_system, external_record_id)
+ * order by observed_at desc` dedup, no separate update-in-place needed.
  *
  * `modifiedSince`, when supplied, adds Asana's own `modified_since` filter
  * (verified against developers.asana.com/reference/gettasks this session,
@@ -269,7 +292,7 @@ export async function fetchAsanaTasks(
   const url = new URL(`${API_BASE_URL}/tasks`);
   url.searchParams.set("assignee", assigneeGid);
   url.searchParams.set("workspace", workspaceGid);
-  url.searchParams.set("completed_since", "now");
+  url.searchParams.set("completed_since", modifiedSince ?? "now");
   url.searchParams.set("opt_fields", TASK_OPT_FIELDS);
   url.searchParams.set("limit", String(TASK_PAGE_SIZE));
   if (offset) {

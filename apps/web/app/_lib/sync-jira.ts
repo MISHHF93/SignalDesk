@@ -1,5 +1,6 @@
 import {
   detectJiraIssueDefaultedFields,
+  fetchJiraClosedIssues,
   fetchJiraIssues,
   mapJiraIssueToSourceTaskRecord,
   refreshJiraAccessToken,
@@ -11,6 +12,7 @@ import {
   getJiraTokens,
   ingestJiraIssue,
   listRecentSyncJobsForConnection,
+  markTaskCompletedBySourceRecord,
   startSyncJob,
   storeJiraTokens,
   withAdvisoryLock,
@@ -39,6 +41,12 @@ export interface JiraSyncResult {
    * `defaultedNameCount`: logged for visibility, deliberately never folded
    * into `skipped`, since the record still ingested successfully. */
   readonly defaultedNameCount: number;
+  /** Tasks observed as closed (`statusCategory = Done`) since the
+   * previous cursor and transitioned to `completed: true` — always 0 on
+   * an initial sync (nothing has been observed as open yet to
+   * transition), mirroring `XeroSyncResult.closed`/
+   * `QuickBooksSyncResult.closed` exactly. */
+  readonly closed: number;
 }
 
 /**
@@ -139,7 +147,21 @@ export async function ensureFreshJiraAccessToken(
  * one `cloudId` is the whole real query scope). Wraps the run in a real
  * `sync_jobs` row (`entityType: "task"`): an initial sync (no prior
  * cursor) pulls every open issue; an incremental run adds
- * `AND updated > "<jql-date-literal>"` to the same query.
+ * `AND updated >= "<jql-date-literal>"` to the same query.
+ *
+ * Real gap found by review: `statusCategory != Done` is a hard exclusion
+ * with no way to compose "OR recently closed" without an unbounded
+ * full-site refetch — a Jira issue that closes was invisible to every
+ * future incremental fetch, so it stayed `completed: false` in this app
+ * forever, surfacing indefinitely in `listOverdueTasks` as stuck work
+ * that was actually finished. Fixed the same way Xero/QuickBooks' own
+ * closed-invoice case was: on an incremental run (a non-null
+ * `cursorBefore`), a second pass fetches issues that reached
+ * `statusCategory = Done` since that cursor
+ * (`fetchJiraClosedIssues`) and transitions each to `completed: true`
+ * via `markTaskCompletedBySourceRecord` — an initial sync (no prior
+ * cursor) skips this pass, since nothing has been observed as open yet
+ * to transition.
  */
 export async function syncJiraIssues(
   pool: DatabasePool,
@@ -171,6 +193,7 @@ export async function syncJiraIssues(
   let ingested = 0;
   let skipped = 0;
   let defaultedNameCount = 0;
+  let closed = 0;
   let maxCursor: string | null = cursorBefore;
   let pageToken: string | null = null;
 
@@ -245,6 +268,42 @@ export async function syncJiraIssues(
 
       pageToken = issuePage.nextPageToken;
     }
+
+    if (cursorBefore) {
+      let closedPageToken: string | null = null;
+
+      for (let page = 0; page < MAX_ISSUE_PAGES; page += 1) {
+        const closedPage = await fetchJiraClosedIssues(
+          accessToken,
+          cloudId,
+          cursorBefore,
+          closedPageToken,
+        );
+
+        for (const rawIssue of closedPage.issues as readonly JiraIssue[]) {
+          if (!maxCursor || rawIssue.fields.updated > maxCursor) {
+            maxCursor = rawIssue.fields.updated;
+          }
+
+          const wasUpdated = await markTaskCompletedBySourceRecord(
+            pool,
+            organizationId,
+            "jira",
+            rawIssue.id,
+          );
+
+          if (wasUpdated) {
+            closed += 1;
+          }
+        }
+
+        if (!closedPage.nextPageToken) {
+          break;
+        }
+
+        closedPageToken = closedPage.nextPageToken;
+      }
+    }
   } catch (error) {
     await failSyncJob(pool, organizationId, job.id, {
       itemsIngested: ingested,
@@ -286,5 +345,5 @@ export async function syncJiraIssues(
     );
   }
 
-  return { ingested, skipped, defaultedNameCount };
+  return { ingested, skipped, defaultedNameCount, closed };
 }

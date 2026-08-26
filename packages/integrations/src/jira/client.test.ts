@@ -4,6 +4,7 @@ import {
   buildJiraAuthorizationUrl,
   exchangeJiraAuthorizationCode,
   fetchJiraAccessibleResources,
+  fetchJiraClosedIssues,
   fetchJiraIssues,
   JIRA_SCOPES,
   refreshJiraAccessToken,
@@ -312,6 +313,97 @@ describe("fetchJiraIssues", () => {
 
     await expect(
       fetchJiraIssues("bad-token", "cloud-abc", null),
+    ).rejects.toThrow(/Jira issues fetch failed/);
+  });
+});
+
+describe("fetchJiraClosedIssues", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("regression: real gap found by review — queries statusCategory = Done, the closed-issue counterpart fetchJiraIssues can never surface", async () => {
+    // fetchJiraIssues' statusCategory != Done filter is a hard exclusion
+    // with no way to compose "OR recently closed" without an unbounded
+    // full-site refetch — a Jira issue that closes was invisible to
+    // every future incremental fetch under that filter alone. This is
+    // the same real "did an open issue close?" second-pass query
+    // fetchXeroPaidInvoices already provides for Xero.
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        issues: [
+          {
+            id: "10001",
+            key: "ENG-1",
+            fields: {
+              summary: "Fix the thing",
+              status: { name: "Done" },
+              assignee: { accountId: "acc-62", displayName: "Jamie Rivera" },
+              duedate: "2026-09-01",
+              updated: "2026-08-18T13:56:00.000+0000",
+            },
+          },
+        ],
+        isLast: true,
+      }),
+    );
+
+    const page = await fetchJiraClosedIssues(
+      "access-token",
+      "cloud-abc",
+      "2026-08-01T09:05:00.000Z",
+    );
+
+    expect(page.issues).toHaveLength(1);
+    expect(page.nextPageToken).toBeNull();
+
+    const [calledUrl] = fetchMock.mock.calls[0] as [string];
+    expect(calledUrl).toContain(
+      "https://api.atlassian.com/ex/jira/cloud-abc/rest/api/3/search/jql",
+    );
+    const decoded = decodeURIComponent(calledUrl).replace(/\+/g, " ");
+    expect(decoded).toContain(
+      'statusCategory = Done AND updated >= "2026-08-01 09:05" ORDER BY updated ASC',
+    );
+  });
+
+  it("passes nextPageToken through on a subsequent page request", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, { issues: [], isLast: false, nextPageToken: "tok-2" }),
+    );
+
+    const page = await fetchJiraClosedIssues(
+      "access-token",
+      "cloud-abc",
+      "2026-08-01T09:05:00.000Z",
+      "tok-1",
+    );
+
+    expect(page.nextPageToken).toBe("tok-2");
+    const [calledUrl] = fetchMock.mock.calls[0] as [string];
+    expect(calledUrl).toContain("nextPageToken=tok-1");
+  });
+
+  it("throws on a non-ok response", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(401, { errorMessages: ["Unauthorized"] }),
+    );
+
+    await expect(
+      fetchJiraClosedIssues(
+        "bad-token",
+        "cloud-abc",
+        "2026-08-01T09:05:00.000Z",
+      ),
     ).rejects.toThrow(/Jira issues fetch failed/);
   });
 });

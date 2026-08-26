@@ -285,17 +285,12 @@ function formatJqlDateTime(iso: string): string {
  * boundary for that — safe here since `ingestJiraIssue`'s idempotency key
  * already includes `sourceVersion` (`packages/persistence/src/tasks.ts`).
  */
-export async function fetchJiraIssues(
+async function requestJiraIssueSearch(
   accessToken: string,
   cloudId: string,
-  sinceIso?: string | null,
+  jql: string,
   pageToken?: string | null,
 ): Promise<JiraIssuePage> {
-  const sinceClause = sinceIso
-    ? ` AND updated >= "${formatJqlDateTime(sinceIso)}"`
-    : "";
-  const jql = `statusCategory != Done${sinceClause} ORDER BY updated ASC`;
-
   const url = new URL(
     `https://api.atlassian.com/ex/jira/${encodeURIComponent(cloudId)}/rest/api/3/search/jql`,
   );
@@ -324,4 +319,40 @@ export async function fetchJiraIssues(
     issues: payload.issues ?? [],
     nextPageToken: payload.isLast ? null : (payload.nextPageToken ?? null),
   };
+}
+
+export async function fetchJiraIssues(
+  accessToken: string,
+  cloudId: string,
+  sinceIso?: string | null,
+  pageToken?: string | null,
+): Promise<JiraIssuePage> {
+  const sinceClause = sinceIso
+    ? ` AND updated >= "${formatJqlDateTime(sinceIso)}"`
+    : "";
+  const jql = `statusCategory != Done${sinceClause} ORDER BY updated ASC`;
+
+  return requestJiraIssueSearch(accessToken, cloudId, jql, pageToken);
+}
+
+/**
+ * Fetches one page of issues that reached `statusCategory = Done` at or
+ * after `sinceIso`, oldest-modified-first — the real "did an open issue
+ * close?" signal `sync-jira.ts`'s second sync pass uses to transition a
+ * stored task to `completed: true`. Mirrors `fetchXeroPaidInvoices`'s
+ * role exactly: `fetchJiraIssues`'s own `statusCategory != Done` filter is
+ * a hard exclusion with no way to compose "OR recently closed" without
+ * either an unbounded full-site refetch or this separate, equally-bounded
+ * query — `sinceIso` is required (never optional) since this pass only
+ * ever runs on an incremental sync, when a prior cursor genuinely exists.
+ */
+export async function fetchJiraClosedIssues(
+  accessToken: string,
+  cloudId: string,
+  sinceIso: string,
+  pageToken?: string | null,
+): Promise<JiraIssuePage> {
+  const jql = `statusCategory = Done AND updated >= "${formatJqlDateTime(sinceIso)}" ORDER BY updated ASC`;
+
+  return requestJiraIssueSearch(accessToken, cloudId, jql, pageToken);
 }

@@ -8,6 +8,7 @@ import {
   ingestAsanaTask,
   ingestJiraIssue,
   listOverdueTasks,
+  markTaskCompletedBySourceRecord,
 } from "../src/tasks";
 import { withTenantContext } from "../src/tenant-context";
 import {
@@ -409,6 +410,107 @@ describe.skipIf(!process.env.DATABASE_URL)(
       );
 
       expect(taskRow?.owner_membership_id).not.toBeNull();
+    });
+  },
+);
+
+// Exercises markTaskCompletedBySourceRecord against the live database —
+// mirrors invoices.test.ts's own updateInvoiceStatusBySourceRecord suite.
+// Real gap found by review: fetchJiraIssues' statusCategory != Done
+// filter is a hard exclusion, so a closed Jira issue was invisible to
+// every future incremental fetch and stayed completed: false in this app
+// forever. sync-jira.ts's second pass (fetchJiraClosedIssues) calls this
+// directly to transition it.
+describe.skipIf(!process.env.DATABASE_URL)(
+  "markTaskCompletedBySourceRecord (live database)",
+  () => {
+    let pool: DatabasePool;
+
+    beforeAll(() => {
+      pool = getTestPool();
+    });
+
+    afterAll(async () => {
+      await pool.end();
+    });
+
+    it("transitions a task to completed, keyed by its source record", async () => {
+      const org = await seedOrganization(pool);
+      const integration = await seedIntegration(pool, org.id, {
+        sourceSystem: "jira",
+      });
+      const job = await seedSyncJob(
+        pool,
+        org.id,
+        integration.id,
+        "jira",
+        "task",
+      );
+      const input = jiraFixtureInput(job.id);
+      await ingestJiraIssue(pool, org.id, integration.id, input);
+
+      const wasUpdated = await markTaskCompletedBySourceRecord(
+        pool,
+        org.id,
+        "jira",
+        input.externalRecordId,
+      );
+
+      expect(wasUpdated).toBe(true);
+
+      const completed = await withTenantContext(
+        pool,
+        org.id,
+        async (client) => {
+          const result = await client.query<{ completed: boolean }>(
+            `select t.completed from tasks t
+             join source_records sr on sr.id = t.source_record_id
+             where sr.external_record_id = $1`,
+            [input.externalRecordId],
+          );
+          return result.rows[0]?.completed;
+        },
+      );
+
+      expect(completed).toBe(true);
+    });
+
+    it("is a no-op (returns false) when the task is already completed", async () => {
+      const org = await seedOrganization(pool);
+      const integration = await seedIntegration(pool, org.id, {
+        sourceSystem: "jira",
+      });
+      const job = await seedSyncJob(
+        pool,
+        org.id,
+        integration.id,
+        "jira",
+        "task",
+      );
+      const input = jiraFixtureInput(job.id, { completed: true });
+      await ingestJiraIssue(pool, org.id, integration.id, input);
+
+      const wasUpdated = await markTaskCompletedBySourceRecord(
+        pool,
+        org.id,
+        "jira",
+        input.externalRecordId,
+      );
+
+      expect(wasUpdated).toBe(false);
+    });
+
+    it("returns false for an unknown source record", async () => {
+      const org = await seedOrganization(pool);
+
+      const wasUpdated = await markTaskCompletedBySourceRecord(
+        pool,
+        org.id,
+        "jira",
+        `jira-issue-${randomUUID()}`,
+      );
+
+      expect(wasUpdated).toBe(false);
     });
   },
 );
