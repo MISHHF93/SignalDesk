@@ -3315,6 +3315,10 @@ input {
   color: var(--ember-ink);
 }
 
+.cardActionStatus-pending {
+  color: var(--muted);
+}
+
 .cardActionStatusLink {
   color: inherit;
   font-weight: 600;

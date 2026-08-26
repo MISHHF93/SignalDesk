@@ -118,6 +118,21 @@ export function CsvInvoiceImportForm({
 
       {fileName ? <p className="csvImportFileName">{fileName}</p> : null}
 
+      {/* Real gap found by review: the Preview/Import buttons below only
+          render while `stage === "idle"`/`"previewed"` respectively — the
+          instant each one's handler flips `stage` to `"previewing"`/
+          `"importing"`, that same condition goes false and the whole
+          block (button included) disappears until the result lands,
+          leaving the panel looking frozen with zero pending feedback for
+          the entire request. This status line is not gated on `stage`
+          the same way, so it stays visible for exactly the window the
+          buttons are hidden. */}
+      {stage === "previewing" || stage === "importing" ? (
+        <p className="cardActionStatus cardActionStatus-pending" role="status">
+          {stage === "previewing" ? "Previewing…" : "Importing…"}
+        </p>
+      ) : null}
+
       {csvText && stage === "idle" ? (
         <Button
           variant="secondary"
@@ -148,17 +163,28 @@ export function CsvInvoiceImportForm({
               </ul>
             ) : null}
             {previewResult.validRowCount > 0 ? (
+              // This button (and the block containing it) only ever
+              // renders while `stage === "previewed"` — the instant
+              // `handleImport` flips `stage` to `"importing"`, this whole
+              // block stops rendering, so an `isPending`-driven label
+              // here would be dead code. The status line above (rendered
+              // exactly during `stage === "importing"`) is what actually
+              // shows pending feedback for this action.
               <Button onClick={handleImport} disabled={isPending}>
-                {isPending
-                  ? "Importing…"
-                  : `Import ${previewResult.validRowCount} row${previewResult.validRowCount === 1 ? "" : "s"}`}
+                Import {previewResult.validRowCount} row
+                {previewResult.validRowCount === 1 ? "" : "s"}
               </Button>
             ) : null}
           </div>
         ) : (
-          <p className="csvImportError" role="alert">
-            {previewResult.error}
-          </p>
+          <div className="csvImportResult">
+            <p className="csvImportError" role="alert">
+              {previewResult.error}
+            </p>
+            <Button variant="ghost" onClick={handleReset}>
+              Try again
+            </Button>
+          </div>
         )
       ) : null}
 
@@ -196,9 +222,14 @@ export function CsvInvoiceImportForm({
             </Button>
           </div>
         ) : (
-          <p className="csvImportError" role="alert">
-            {importResult.error}
-          </p>
+          <div className="csvImportResult">
+            <p className="csvImportError" role="alert">
+              {importResult.error}
+            </p>
+            <Button variant="ghost" onClick={handleReset}>
+              Try again
+            </Button>
+          </div>
         )
       ) : null}
     </div>
