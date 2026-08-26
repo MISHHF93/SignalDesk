@@ -232,7 +232,15 @@ export interface JiraIssue {
   readonly fields: {
     readonly summary: string;
     readonly status?: { readonly name?: string };
-    readonly assignee?: { readonly displayName?: string } | null;
+    // `accountId` is always present on a real assignee — Atlassian's
+    // privacy settings can withhold `displayName`, never `accountId`
+    // itself (confirmed against Atlassian's user-privacy docs) — carried
+    // through so mapper.ts can build an id-based placeholder for a
+    // redacted name instead of collapsing it to "unassigned".
+    readonly assignee?: {
+      readonly accountId: string;
+      readonly displayName?: string;
+    } | null;
     /** Date-only (`yyyy-MM-dd`), absent when no due date is set. */
     readonly duedate?: string | null;
     /** `yyyy-MM-ddTHH:mm:ss.SSS+ZZZZ` — parses correctly with plain

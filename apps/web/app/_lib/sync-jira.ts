@@ -1,4 +1,5 @@
 import {
+  detectJiraIssueDefaultedFields,
   fetchJiraIssues,
   mapJiraIssueToSourceTaskRecord,
   refreshJiraAccessToken,
@@ -32,6 +33,12 @@ const TOKEN_REFRESH_LOCK_RETRY_DELAY_MS = 300;
 export interface JiraSyncResult {
   readonly ingested: number;
   readonly skipped: number;
+  /** Issues whose assignee had a real, non-null account but a redacted
+   * `displayName` and fell back to a placeholder
+   * (`detectJiraIssueDefaultedFields`) — mirrors `sync-asana.ts`'s own
+   * `defaultedNameCount`: logged for visibility, deliberately never folded
+   * into `skipped`, since the record still ingested successfully. */
+  readonly defaultedNameCount: number;
 }
 
 /**
@@ -163,6 +170,7 @@ export async function syncJiraIssues(
 
   let ingested = 0;
   let skipped = 0;
+  let defaultedNameCount = 0;
   let maxCursor: string | null = cursorBefore;
   let pageToken: string | null = null;
 
@@ -184,6 +192,10 @@ export async function syncJiraIssues(
 
         if (mapped === null) {
           continue;
+        }
+
+        if (detectJiraIssueDefaultedFields(rawIssue).length > 0) {
+          defaultedNameCount += 1;
         }
 
         let taskRecord: ReturnType<typeof parseSourceTaskRecord>;
@@ -261,5 +273,18 @@ export async function syncJiraIssues(
     );
   }
 
-  return { ingested, skipped };
+  if (defaultedNameCount > 0) {
+    logger.log(
+      "warn",
+      `Jira sync: ${defaultedNameCount} issue(s) had a redacted assignee name and fell back to a placeholder.`,
+      {
+        operation: "sync_jira.issue_defaulted_name",
+        connectorSlug: "jira",
+        organizationId,
+        correlationId: integrationId,
+      },
+    );
+  }
+
+  return { ingested, skipped, defaultedNameCount };
 }

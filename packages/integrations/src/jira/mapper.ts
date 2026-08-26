@@ -4,6 +4,44 @@ import { endOfDateOnlyDayUtc } from "@signaldesk/domain";
 
 import type { JiraIssue } from "./client";
 
+// A real, non-null assignee whose `displayName` is redacted (Atlassian's
+// documented per-user privacy setting can withhold `displayName`/
+// `emailAddress` while still returning `accountId`) is a genuinely
+// different case from the issue honestly having no assignee at all
+// (`assignee === null`). Collapsing both into the same `null` output
+// silently turns a real, owned issue into one that reads as unowned
+// everywhere downstream (`overdue-task.ts`'s owner fallback, the "who
+// owns it?" question this app exists to answer) — the same bug class
+// already found and fixed for Asana's `resolveAsanaAssigneeName`/Zendesk's
+// `resolveZendeskUserName`. Falls back to a placeholder carrying the real
+// id instead.
+function resolveJiraAssigneeName(
+  assignee: JiraIssue["fields"]["assignee"],
+): string | null {
+  if (!assignee) {
+    return null;
+  }
+
+  return assignee.displayName?.trim() || `Jira user ${assignee.accountId}`;
+}
+
+function isJiraAssigneeNameUnresolvable(issue: JiraIssue): boolean {
+  return !!issue.fields.assignee && !issue.fields.assignee.displayName?.trim();
+}
+
+/**
+ * Reports which critical fields this issue would need a fallback for,
+ * without performing the mapping itself — same schema-drift-visibility
+ * extension point as `detectAsanaTaskDefaultedFields`/
+ * `detectHubSpotDealDefaultedFields`. Deliberately additive; never
+ * changes mapping behavior itself.
+ */
+export function detectJiraIssueDefaultedFields(
+  issue: JiraIssue,
+): readonly string[] {
+  return isJiraAssigneeNameUnresolvable(issue) ? ["assignee.displayName"] : [];
+}
+
 /**
  * Maps a Jira Issue onto the shape `parseSourceTaskRecord`
  * (`@signaldesk/schemas`) expects. Mirrors
@@ -34,7 +72,7 @@ export function mapJiraIssueToSourceTaskRecord(
   return {
     id: randomUUID(),
     name: issue.fields.summary,
-    assigneeName: issue.fields.assignee?.displayName?.trim() || null,
+    assigneeName: resolveJiraAssigneeName(issue.fields.assignee),
     // duedate is date-only ("yyyy-MM-dd", no time) — end-of-day UTC, not
     // JS's own UTC-midnight default. See endOfDateOnlyDayUtc's own doc
     // comment (@signaldesk/domain) for why.

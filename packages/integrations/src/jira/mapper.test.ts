@@ -6,7 +6,10 @@ import { describe, expect, it } from "vitest";
 import { parseSourceTaskRecord } from "@signaldesk/schemas";
 import { randomUUID } from "node:crypto";
 
-import { mapJiraIssueToSourceTaskRecord } from "./mapper";
+import {
+  detectJiraIssueDefaultedFields,
+  mapJiraIssueToSourceTaskRecord,
+} from "./mapper";
 import type { JiraIssue } from "./client";
 
 const NOW = new Date("2026-08-18T14:00:00.000Z");
@@ -18,7 +21,7 @@ function issue(overrides: Partial<JiraIssue["fields"]> = {}): JiraIssue {
     fields: {
       summary: "Fix the thing",
       status: { name: "In Progress" },
-      assignee: { displayName: "Jamie Rivera" },
+      assignee: { accountId: "acc-62", displayName: "Jamie Rivera" },
       duedate: "2026-09-01",
       updated: "2026-08-18T13:56:00.000+0000",
       ...overrides,
@@ -90,5 +93,60 @@ describe("mapJiraIssueToSourceTaskRecord", () => {
     ) as Record<string, unknown>;
 
     expect(record.completed).toBe(false);
+  });
+
+  it("regression: real gap found by review — falls back to an id-based placeholder, not null, when a real assignee's displayName is redacted", () => {
+    // Atlassian's per-user privacy settings can withhold displayName
+    // while still returning accountId — collapsing that into the same
+    // null as a genuinely unassigned issue silently turns a real, owned
+    // issue into one that reads as unowned. Same bug class already fixed
+    // for Asana's resolveAsanaAssigneeName/Zendesk's resolveZendeskUserName.
+    const record = mapJiraIssueToSourceTaskRecord(
+      {
+        ...issue(),
+        fields: { ...issue().fields, assignee: { accountId: "acc-62" } },
+      },
+      NOW,
+    ) as Record<string, unknown>;
+
+    expect(record.assigneeName).toBe("Jira user acc-62");
+    expect(record.assigneeName).not.toBeNull();
+  });
+
+  it("falls back to the same placeholder when the assignee's displayName is blank rather than absent", () => {
+    const record = mapJiraIssueToSourceTaskRecord(
+      {
+        ...issue(),
+        fields: {
+          ...issue().fields,
+          assignee: { accountId: "acc-62", displayName: "   " },
+        },
+      },
+      NOW,
+    ) as Record<string, unknown>;
+
+    expect(record.assigneeName).toBe("Jira user acc-62");
+  });
+
+  it("detectJiraIssueDefaultedFields reports nothing for a real, complete issue", () => {
+    expect(detectJiraIssueDefaultedFields(issue())).toEqual([]);
+  });
+
+  it("detectJiraIssueDefaultedFields does NOT flag a missing assignee — a normal, honest state for an unassigned issue, not schema drift", () => {
+    expect(
+      detectJiraIssueDefaultedFields({
+        ...issue(),
+        fields: { ...issue().fields, assignee: null },
+      }),
+    ).toEqual([]);
+  });
+
+  it("detectJiraIssueDefaultedFields flags an assignee present with no resolvable displayName as defaulted", () => {
+    expect(
+      detectJiraIssueDefaultedFields({
+        ...issue(),
+        fields: { ...issue().fields, assignee: { accountId: "acc-62" } },
+      }),
+    ).toEqual(["assignee.displayName"]);
   });
 });
