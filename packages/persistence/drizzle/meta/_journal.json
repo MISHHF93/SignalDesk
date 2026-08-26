@@ -463,6 +463,13 @@
       "when": 1787694700000,
       "tag": "0067_tasks_tenant_update_policy",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1787694800000,
+      "tag": "0068_revoke_unused_app_runtime_write_grants",
+      "breakpoints": true
     }
   ]
 }

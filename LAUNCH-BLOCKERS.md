@@ -1,5 +1,34 @@
 # Launch blockers
 
+- **Update (2026-08-26, third pass)**: Two further, real actions this
+  pass, both against the live dev Supabase project, both requested and
+  confirmed by the owner first. First: the 32,183 accumulated test
+  organizations named in the pass below were real and disposable —
+  verified every single one matched the exact synthetic slug pattern
+  (`org-<hex>`) `seedOrganization`/guest-provisioning generate (zero
+  exceptions on a direct check), confirmed production is unaffected
+  (separate project, checked directly, 0 organizations), then cleared
+  them: `audit_events` has a RESTRICT foreign key to `organizations` by
+  design (append-only), so it was cleared first, then `organizations`
+  itself, letting the existing `ON DELETE CASCADE` chain clean up every
+  dependent table. Second: the same systematic grant-vs-policy
+  cross-check that found the `tasks` bug below was re-run against every
+  table, surfacing the identical latent shape on five more —
+  `app_runtime` held `UPDATE` grants (and, for `users`, `INSERT` too) on
+  `leads`/`messages`/`source_records`/`support_tickets`/`users` with no
+  matching RLS policy anywhere, dead and unused (confirmed: no code
+  issues any of these statements; the real, already-working
+  anonymize-on-delete flow updates these same tables through a
+  different, RLS-bypassing role, `organization_data_steward`, so it
+  never depended on this). Rather than add speculative policies for
+  operations that don't exist, revoked the unused grants instead
+  (`0068_revoke_unused_app_runtime_write_grants.sql`, applied to both
+  dev and production) — this doesn't remove any real capability, it
+  closes the exact footgun that already caused the `tasks` bug once.
+  One existing test asserted the old, weaker "RLS silently drops the row"
+  behavior for `source_records`; updated to assert the new, stronger
+  "permission denied" failure instead (matching `audit_events`'s own
+  already-established pattern) — 571/571 persistence tests green after.
 - **Update (2026-08-26, continued)**: A full `pnpm check` re-run against
   the real dev database surfaced one genuine, previously-undetected
   data-integrity bug — now found, fixed, and verified, not just

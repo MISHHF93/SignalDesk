@@ -75,15 +75,18 @@ describe.skipIf(!process.env.DATABASE_URL)(
       });
     });
 
-    describe("append-only tables (no UPDATE policy at all yet)", () => {
+    describe("append-only tables (no UPDATE grant at all)", () => {
       // source_records currently has only source_records_tenant_select and
-      // source_records_tenant_insert (see 0003_harden_tenant_provenance.sql):
-      // with no UPDATE policy, RLS filters out every row before an UPDATE
-      // statement can match anything, so the immutability trigger on this
-      // table is defense-in-depth for a future audited retention procedure
-      // rather than the thing actually blocking writes today. This asserts
-      // today's real behavior: zero rows affected, not an error.
-      it("cannot modify a source_record at all (RLS has no UPDATE policy for this table)", async () => {
+      // source_records_tenant_insert (see 0003_harden_tenant_provenance.sql).
+      // Migration 0068 additionally revoked app_runtime's own UPDATE grant on
+      // this table entirely -- it was dead grant surface (no RLS UPDATE
+      // policy existed for it either, and no code anywhere issued this
+      // statement), the exact same latent shape that made
+      // tasks_tenant_update's absence a silent no-op bug (migration 0067)
+      // before it was ever exercised. Now this fails the same loud,
+      // permission-denied way audit_events already does below, rather than
+      // silently affecting zero rows.
+      it("cannot modify a source_record at all (no UPDATE grant on the table)", async () => {
         const org = await seedOrganization(pool);
         const integration = await seedIntegration(pool, org.id);
         const record = await seedSourceRecord(
@@ -93,19 +96,14 @@ describe.skipIf(!process.env.DATABASE_URL)(
           integration.sourceSystem,
         );
 
-        const affectedRows = await withTenantContext(
-          pool,
-          org.id,
-          async (client) => {
-            const result = await client.query(
+        await expect(
+          withTenantContext(pool, org.id, async (client) => {
+            await client.query(
               "update source_records set raw_payload_sha256 = repeat('0', 64) where id = $1",
               [record.id],
             );
-            return result.rowCount;
-          },
-        );
-
-        expect(affectedRows).toBe(0);
+          }),
+        ).rejects.toThrow(/permission denied/i);
       });
     });
 
