@@ -6,13 +6,17 @@ import {
   composeCards,
   reconcileSpecialistResults,
   runParallelSpecialists,
+  type SpecialistDomain,
 } from "@signaldesk/application";
 import { prioritizeFindings } from "@signaldesk/intelligence";
 import {
+  appendInvestigationSteps,
   completeAgentCollaboration,
+  completeInvestigationStep,
   createDatabasePool,
   recordAuditEvent,
   startAgentCollaboration,
+  startInvestigationStep,
   withAdvisoryLock,
   type DatabasePool,
 } from "@signaldesk/persistence";
@@ -23,6 +27,7 @@ import { availabilityFor, providerFor } from "../_lib/agent-fabric";
 import { createAgentGatewayService } from "../_lib/agent-gateway";
 import { describeActionError } from "../_lib/describe-action-error";
 import { classifyEvidenceSufficiency } from "../_lib/evidence-sufficiency";
+import { logger } from "../_lib/logger";
 import { checkRateLimit } from "../_lib/rate-limit";
 import { getCurrentOrganization } from "../_lib/session";
 import { getTodaysAttention } from "../_lib/todays-attention";
@@ -34,6 +39,31 @@ function getPool(): DatabasePool {
   return pool;
 }
 
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The Work Mat's step-progress tracking (docs/adr/0063-agent-investigation-progress.md)
+ * is a real, but secondary, write — a failure here must never take down the
+ * investigation itself, which worked before this feature existed and must
+ * keep working exactly the same if a step-tracking write ever fails. Only
+ * the incremental UI experience degrades; the final result is unaffected.
+ */
+async function recordStepSafely(
+  organizationId: string,
+  promise: Promise<unknown>,
+): Promise<void> {
+  try {
+    await promise;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    logger.log("warn", `Investigation step tracking failed: ${message}`, {
+      operation: "agent.investigation.step_tracking",
+      organizationId,
+    });
+  }
+}
+
 /**
  * The Agent Fabric's one real trigger: "investigate risk" in the command
  * bar (see `matchAgentInvestigate`, deterministic-provider.ts) reaches here.
@@ -43,9 +73,27 @@ function getPool(): DatabasePool {
  * there's nothing real to do: the kill switch, an empty domain, and a
  * reconciler abstention all return a real message rather than a fabricated
  * card.
+ *
+ * `investigationId` is generated client-side (the Work Mat component, one
+ * `crypto.randomUUID()` call) and becomes this collaboration's own primary
+ * key — the one thing that lets the client start polling
+ * `agent_investigation_steps` for real progress the instant it fires this
+ * action, without a first round trip just to learn an id this
+ * single-return-value Server Action otherwise couldn't hand back until the
+ * whole investigation was already done (docs/adr/0063-agent-investigation-progress.md).
+ * Validated up front rather than trusted: RLS and this row's own
+ * organization-scoped uniqueness constraint are the real safety boundary,
+ * but a clear "invalid id" is a better failure than an obscure Postgres
+ * type error for a malformed value.
  */
-export async function runAgentInvestigationAction(): Promise<RunAgentInvestigationActionResult> {
+export async function runAgentInvestigationAction(
+  investigationId: string,
+): Promise<RunAgentInvestigationActionResult> {
   try {
+    if (!UUID_PATTERN.test(investigationId)) {
+      return { ok: false, error: "Invalid investigation id." };
+    }
+
     const session = await getCurrentOrganization();
 
     if (!session) {
@@ -160,6 +208,7 @@ export async function runAgentInvestigationAction(): Promise<RunAgentInvestigati
           db,
           session.organizationId,
           {
+            id: investigationId,
             userId: session.userId,
             pattern: "parallel_specialists",
             objective:
@@ -167,6 +216,53 @@ export async function runAgentInvestigationAction(): Promise<RunAgentInvestigati
             correlationId: randomUUID(),
             idempotencyKey: randomUUID(),
           },
+        );
+
+        // The Work Mat's step plan — one label per domain that actually has
+        // real findings to check (never a fabricated fixed list), plus the
+        // reconciliation step every real run reaches. Declared all up front,
+        // 'pending', so the client sees the whole real plan immediately and
+        // fills in status as each step genuinely starts/settles.
+        const domainStepIndex = new Map<SpecialistDomain, number>();
+        const stepLabels: string[] = [];
+
+        if (financeFindings.length > 0) {
+          domainStepIndex.set("finance", stepLabels.length);
+          stepLabels.push("Checking overdue invoices…");
+        }
+        if (deliveryFindings.length > 0) {
+          domainStepIndex.set("delivery", stepLabels.length);
+          stepLabels.push("Checking overdue tasks…");
+        }
+        if (ticketFindings.length > 0) {
+          domainStepIndex.set("ticket", stepLabels.length);
+          stepLabels.push("Checking stuck support tickets…");
+        }
+
+        const reconcileStepIndex = stepLabels.length;
+        stepLabels.push("Reconciling findings…");
+
+        await recordStepSafely(
+          session.organizationId,
+          appendInvestigationSteps(
+            db,
+            session.organizationId,
+            collaboration.id,
+            stepLabels,
+          ),
+        );
+        await Promise.all(
+          [...domainStepIndex.values()].map((index) =>
+            recordStepSafely(
+              session.organizationId,
+              startInvestigationStep(
+                db,
+                session.organizationId,
+                collaboration.id,
+                index,
+              ),
+            ),
+          ),
         );
 
         const gateway = createAgentGatewayService({
@@ -183,6 +279,36 @@ export async function runAgentInvestigationAction(): Promise<RunAgentInvestigati
           { findings: ticketFindings },
           availabilityFor(),
           gateway.dispatch,
+          (domain, result) => {
+            const index = domainStepIndex.get(domain);
+
+            if (index === undefined) {
+              return;
+            }
+
+            void recordStepSafely(
+              session.organizationId,
+              completeInvestigationStep(
+                db,
+                session.organizationId,
+                collaboration.id,
+                index,
+                result !== null && result.status !== "failed"
+                  ? "done"
+                  : "failed",
+              ),
+            );
+          },
+        );
+
+        await recordStepSafely(
+          session.organizationId,
+          startInvestigationStep(
+            db,
+            session.organizationId,
+            collaboration.id,
+            reconcileStepIndex,
+          ),
         );
 
         const { finding: reconciled, contradictionsDetected } =
@@ -191,6 +317,17 @@ export async function runAgentInvestigationAction(): Promise<RunAgentInvestigati
             ...deliveryFindings,
             ...ticketFindings,
           ]);
+
+        await recordStepSafely(
+          session.organizationId,
+          completeInvestigationStep(
+            db,
+            session.organizationId,
+            collaboration.id,
+            reconcileStepIndex,
+            reconciled ? "done" : "failed",
+          ),
+        );
 
         await completeAgentCollaboration(
           db,

@@ -35,6 +35,7 @@ import {
   useBusinessSnapshot,
   type SnapshotCard,
 } from "../_lib/use-business-snapshot";
+import { useInvestigationSteps } from "../_lib/use-investigation-steps";
 import { formatRelativeTime } from "../_cards/format";
 import { renderCard } from "../_cards/registry";
 import { Button } from "./button";
@@ -260,6 +261,16 @@ export function CommandCenterBoard({
   const { snapshot: polledSnapshot, error: pollError } = useBusinessSnapshot({
     pollIntervalMs: POLL_INTERVAL_MS,
   });
+  // The Work Mat's real step-progress view
+  // (docs/adr/0063-agent-investigation-progress.md): set the instant
+  // "investigate risk" fires (the client-generated id also becomes
+  // runAgentInvestigationAction's own collaboration primary key), cleared
+  // the instant that action resolves — investigationSteps polls for real
+  // progress only in between.
+  const [activeInvestigationId, setActiveInvestigationId] = useState<
+    string | null
+  >(null);
+  const investigationSteps = useInvestigationSteps(activeInvestigationId);
   // "Draft for this Matter" batch trigger's own status per cluster key
   // (`groupCardsIntoClusters`'s `CardCluster.key`) — a plain client-side
   // in-flight/done marker, not persisted, mirroring how each individual
@@ -458,19 +469,32 @@ export function CommandCenterBoard({
           return;
         }
 
-        const investigation = await runAgentInvestigationAction();
+        // Generated here, not by the server: this is what lets
+        // investigationSteps start polling for real progress the instant
+        // the action is fired, rather than only after it resolves (a
+        // single-return-value Server Action has no earlier moment to hand
+        // an id back).
+        const investigationId = crypto.randomUUID();
+        setActiveInvestigationId(investigationId);
 
-        if (!investigation.ok) {
-          setStatusMessage(`Investigation failed. ${investigation.error}`);
+        try {
+          const investigation =
+            await runAgentInvestigationAction(investigationId);
+
+          if (!investigation.ok) {
+            setStatusMessage(`Investigation failed. ${investigation.error}`);
+            return;
+          }
+
+          if (investigation.card) {
+            handleInvestigationCardProduced(investigation.card);
+          }
+
+          setStatusMessage(investigation.message);
           return;
+        } finally {
+          setActiveInvestigationId(null);
         }
-
-        if (investigation.card) {
-          handleInvestigationCardProduced(investigation.card);
-        }
-
-        setStatusMessage(investigation.message);
-        return;
       }
 
       setStatusMessage("That command isn't supported yet.");
@@ -485,6 +509,28 @@ export function CommandCenterBoard({
         onSubmitCommand={handleSubmitCommand}
         aiInvestigationAvailable={aiInvestigationAvailable}
       />
+
+      {/* The Work Mat's real step-by-step progress
+          (docs/adr/0063-agent-investigation-progress.md) — one agent
+          identity's own quiet, business-language steps, never a raw
+          tool-call log or named specialist identities (ADR 0020). Shown
+          only while activeInvestigationId is set (between firing the
+          command and that action resolving) and only once the first real
+          step row has actually landed — never a fabricated placeholder
+          list. */}
+      {activeInvestigationId && investigationSteps.length > 0 ? (
+        <ul className="workMatSteps" aria-label="Investigation progress">
+          {investigationSteps.map((step) => (
+            <li
+              key={step.stepIndex}
+              className={`workMatStep workMatStep-${step.status}`}
+            >
+              <span className="workMatStepIndicator" aria-hidden="true" />
+              {step.label}
+            </li>
+          ))}
+        </ul>
+      ) : null}
 
       {pollError ? (
         <p className="liveStatusNotice liveStatusNotice-paused" role="status">

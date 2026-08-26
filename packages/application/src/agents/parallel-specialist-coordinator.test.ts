@@ -265,4 +265,106 @@ describe("runParallelSpecialists", () => {
     const statuses = results.map((r) => r.status).sort();
     expect(statuses).toEqual(["completed", "completed", "failed"]);
   });
+
+  it("notifies onSpecialistSettled for each domain the moment its own dispatch settles", async () => {
+    const dispatch = vi.fn(
+      async (
+        task: AgentTask,
+        agent: AgentCard,
+        findings: readonly IntelligenceFinding[],
+      ) => stubResult(task.id, agent, findings),
+    );
+    const onSpecialistSettled = vi.fn();
+
+    await runParallelSpecialists(
+      { findings: [invoiceFinding()] },
+      { findings: [taskFinding()] },
+      { findings: [ticketFinding()] },
+      ALL_AVAILABLE,
+      dispatch,
+      onSpecialistSettled,
+    );
+
+    expect(onSpecialistSettled).toHaveBeenCalledTimes(3);
+    const notifiedDomains = onSpecialistSettled.mock.calls.map(
+      (call) => call[0],
+    );
+    expect(notifiedDomains.sort()).toEqual(["delivery", "finance", "ticket"]);
+    for (const call of onSpecialistSettled.mock.calls) {
+      expect((call[1] as AgentTaskResult).status).toBe("completed");
+    }
+  });
+
+  it("notifies onSpecialistSettled with null for a domain that has findings but no eligible agent", async () => {
+    const dispatch = vi.fn(
+      async (
+        task: AgentTask,
+        agent: AgentCard,
+        findings: readonly IntelligenceFinding[],
+      ) => stubResult(task.id, agent, findings),
+    );
+    const onSpecialistSettled = vi.fn();
+
+    await runParallelSpecialists(
+      { findings: [invoiceFinding()] },
+      { findings: [taskFinding()] },
+      { findings: [ticketFinding()] },
+      NONE_AVAILABLE,
+      dispatch,
+      onSpecialistSettled,
+    );
+
+    expect(onSpecialistSettled).toHaveBeenCalledTimes(3);
+    expect(onSpecialistSettled).toHaveBeenCalledWith("finance", null);
+    expect(onSpecialistSettled).toHaveBeenCalledWith("delivery", null);
+    expect(onSpecialistSettled).toHaveBeenCalledWith("ticket", null);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("notifies onSpecialistSettled with a failed result when dispatch throws", async () => {
+    const dispatch = vi.fn(async () => {
+      throw new Error("provider exploded");
+    });
+    const onSpecialistSettled = vi.fn();
+
+    await runParallelSpecialists(
+      { findings: [invoiceFinding()] },
+      { findings: [] },
+      { findings: [] },
+      ALL_AVAILABLE,
+      dispatch,
+      onSpecialistSettled,
+    );
+
+    expect(onSpecialistSettled).toHaveBeenCalledTimes(1);
+    const [domain, result] = onSpecialistSettled.mock.calls[0]!;
+    expect(domain).toBe("finance");
+    expect((result as AgentTaskResult).status).toBe("failed");
+  });
+
+  it("never calls onSpecialistSettled for a domain with no findings", async () => {
+    const dispatch = vi.fn(
+      async (
+        task: AgentTask,
+        agent: AgentCard,
+        findings: readonly IntelligenceFinding[],
+      ) => stubResult(task.id, agent, findings),
+    );
+    const onSpecialistSettled = vi.fn();
+
+    await runParallelSpecialists(
+      { findings: [] },
+      { findings: [taskFinding()] },
+      { findings: [] },
+      ALL_AVAILABLE,
+      dispatch,
+      onSpecialistSettled,
+    );
+
+    expect(onSpecialistSettled).toHaveBeenCalledTimes(1);
+    expect(onSpecialistSettled).toHaveBeenCalledWith(
+      "delivery",
+      expect.objectContaining({ status: "completed" }),
+    );
+  });
 });

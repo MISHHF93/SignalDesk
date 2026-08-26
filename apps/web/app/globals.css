@@ -3170,6 +3170,64 @@ input {
   margin: -0.4rem 0 0.9rem;
 }
 
+/* The Work Mat's real step-by-step progress list
+   (docs/adr/0063-agent-investigation-progress.md) — quiet, business-
+   language steps, deliberately styled like the rest of this app's status
+   language (the same severity/tech-status tokens every other status
+   signal already uses) rather than a distinct "AI console" look, per ADR
+   0020's "never a visible swarm" constraint. */
+.workMatSteps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: -0.4rem 0 0.9rem;
+  padding: 0;
+  list-style: none;
+}
+
+.workMatStep {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--faint);
+  font-size: 0.82rem;
+}
+
+.workMatStepIndicator {
+  width: 0.5rem;
+  height: 0.5rem;
+  flex: 0 0 auto;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+}
+
+.workMatStep-running {
+  color: var(--ink);
+}
+
+.workMatStep-running .workMatStepIndicator {
+  background: var(--mint-ink);
+  animation: skeletonPulse 1.6s var(--motion-ease) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workMatStep-running .workMatStepIndicator {
+    animation: none;
+  }
+}
+
+.workMatStep-done .workMatStepIndicator {
+  background: var(--tech-status-good-ink);
+}
+
+.workMatStep-failed {
+  color: var(--severity-high-ink);
+}
+
+.workMatStep-failed .workMatStepIndicator {
+  background: var(--severity-high-ink);
+}
+
 .liveStatusNotice {
   margin: -0.4rem 0 0.9rem;
   color: var(--faint);

@@ -28,6 +28,16 @@ export interface DraftedContent {
 }
 
 export interface StartAgentCollaborationInput {
+  /** Caller-supplied primary key — omit to let the column default apply
+   * (`gen_random_uuid()`), the original behavior every existing caller still
+   * gets. The Work Mat's polling flow (run-agent-investigation.ts) is the
+   * one real caller that sets this: the client generates the id itself so
+   * it can start polling for step progress the instant it fires the
+   * investigation, without a first round trip just to learn an id. Safe
+   * because it only ever becomes this one row's own primary key — RLS and
+   * the `organization_id`-scoped foreign keys on every child table still
+   * govern everything a caller could do with it. */
+  readonly id?: string;
   readonly userId: string;
   readonly pattern: AgentCollaborationPattern;
   readonly objective: string;
@@ -199,7 +209,7 @@ export async function startAgentCollaboration(
        ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        returning ${COLLABORATION_COLUMNS}`,
       [
-        randomUUID(),
+        input.id ?? randomUUID(),
         organizationId,
         membershipId,
         input.pattern,

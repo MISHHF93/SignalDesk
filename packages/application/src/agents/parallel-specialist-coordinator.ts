@@ -13,6 +13,25 @@ export interface SpecialistInput {
   readonly findings: readonly IntelligenceFinding[];
 }
 
+export type SpecialistDomain = "finance" | "delivery" | "ticket";
+
+/**
+ * Fires the moment one domain's own dispatch settles (success or failure),
+ * independent of the other two — the Work Mat's real per-step progress
+ * signal (docs/adr/0063-agent-investigation-progress.md), not a fabricated
+ * stagger. Optional and purely observational: nothing about dispatch
+ * behavior changes if a caller omits it, and this coordinator still takes
+ * no persistence dependency of its own — the callback is just a plain
+ * function reference the caller (run-agent-investigation.ts) supplies.
+ */
+export interface OnSpecialistSettled {
+  /** `result` is `null` for a domain that had real findings but no eligible
+   * agent to interpret them (the same best-effort-eligibility outcome
+   * `runParallelSpecialists`'s own doc comment already discloses) — a real,
+   * honest settlement, not a dispatch that ran and failed. */
+  (domain: SpecialistDomain, result: AgentTaskResult | null): void;
+}
+
 /**
  * The real trust boundary this coordinator dispatches through — injected
  * so packages/application never gains a persistence or provider dependency
@@ -99,6 +118,7 @@ export async function runParallelSpecialists(
   ticketInput: SpecialistInput,
   availability: AgentAvailability,
   dispatch: SpecialistDispatch,
+  onSpecialistSettled?: OnSpecialistSettled,
 ): Promise<readonly AgentTaskResult[]> {
   let financeAgent: AgentCard | null = null;
 
@@ -107,6 +127,7 @@ export async function runParallelSpecialists(
       financeAgent = selectAgent("interpret_financial_risk", availability);
     } catch {
       financeAgent = null;
+      onSpecialistSettled?.("finance", null);
     }
   }
 
@@ -130,6 +151,7 @@ export async function runParallelSpecialists(
         deliveryAgent = selectAgent("interpret_delivery_risk", availability);
       } catch {
         deliveryAgent = null;
+        onSpecialistSettled?.("delivery", null);
       }
     }
   }
@@ -157,15 +179,29 @@ export async function runParallelSpecialists(
         ticketAgent = selectAgent("interpret_ticket_risk", availability);
       } catch {
         ticketAgent = null;
+        onSpecialistSettled?.("ticket", null);
       }
     }
   }
 
   const dispatches: Promise<AgentTaskResult>[] = [];
 
+  function dispatchAndNotify(
+    domain: SpecialistDomain,
+    task: AgentTask,
+    agent: AgentCard,
+    findings: readonly IntelligenceFinding[],
+  ): Promise<AgentTaskResult> {
+    return dispatchOrFail(task, agent, findings, dispatch).then((result) => {
+      onSpecialistSettled?.(domain, result);
+      return result;
+    });
+  }
+
   if (financeAgent) {
     dispatches.push(
-      dispatchOrFail(
+      dispatchAndNotify(
+        "finance",
         buildTask(
           "interpret_financial_risk",
           "Interpret current financial risk from real overdue-invoice findings.",
@@ -173,14 +209,14 @@ export async function runParallelSpecialists(
         ),
         financeAgent,
         financeInput.findings,
-        dispatch,
       ),
     );
   }
 
   if (deliveryAgent) {
     dispatches.push(
-      dispatchOrFail(
+      dispatchAndNotify(
+        "delivery",
         buildTask(
           "interpret_delivery_risk",
           "Interpret current delivery risk from real overdue-task findings.",
@@ -188,14 +224,14 @@ export async function runParallelSpecialists(
         ),
         deliveryAgent,
         deliveryInput.findings,
-        dispatch,
       ),
     );
   }
 
   if (ticketAgent) {
     dispatches.push(
-      dispatchOrFail(
+      dispatchAndNotify(
+        "ticket",
         buildTask(
           "interpret_ticket_risk",
           "Interpret current ticket risk from real stuck support-ticket findings.",
@@ -203,7 +239,6 @@ export async function runParallelSpecialists(
         ),
         ticketAgent,
         ticketInput.findings,
-        dispatch,
       ),
     );
   }

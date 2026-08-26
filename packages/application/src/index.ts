@@ -74,7 +74,9 @@ export {
 } from "./agents/agent-router";
 export {
   runParallelSpecialists,
+  type OnSpecialistSettled,
   type SpecialistDispatch,
+  type SpecialistDomain,
   type SpecialistInput,
 } from "./agents/parallel-specialist-coordinator";
 export {

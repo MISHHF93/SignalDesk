@@ -85,8 +85,9 @@ export type RunAgentInvestigationActionResult =
     }
   | { readonly ok: false; readonly error: string };
 
-export type RunAgentInvestigationAction =
-  () => Promise<RunAgentInvestigationActionResult>;
+export type RunAgentInvestigationAction = (
+  investigationId: string,
+) => Promise<RunAgentInvestigationActionResult>;
 
 export type ApproveAgentActionProposalActionResult =
   | { readonly ok: true; readonly taskId: string; readonly created: boolean }

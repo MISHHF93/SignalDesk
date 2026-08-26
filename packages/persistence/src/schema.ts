@@ -1896,6 +1896,88 @@ export const agentDelegationGrants = pgTable(
   ],
 );
 
+// The Work Mat's real, incrementally-updated progress record (ADR 0020's
+// amendment, docs/adr/0063-agent-investigation-progress.md) — an ordered
+// child of one collaboration, written as runParallelSpecialists actually
+// progresses rather than only after the fact. Deliberately a fourth child
+// table alongside agent_task_results/agent_delegation_grants rather than a
+// new top-level session concept: agent_collaborations already IS the
+// session record (status/outcome/idempotency all live there), so this only
+// adds the step-by-step visibility that row never captured. label is a
+// plain business-language sentence ("Checking overdue invoices…"), never a
+// raw tool/model identifier — the same "show your work, never the swarm"
+// constraint agent_collaborations.pattern already keeps invisible to the
+// end user.
+export const agentInvestigationSteps = pgTable(
+  "agent_investigation_steps",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    collaborationId: uuid("collaboration_id").notNull(),
+    stepIndex: integer("step_index").notNull(),
+    label: text("label").notNull(),
+    status: text("status").notNull().default("pending"),
+    startedAt: timestamp("started_at", { mode: "date", withTimezone: true }),
+    completedAt: timestamp("completed_at", {
+      mode: "date",
+      withTimezone: true,
+    }),
+    ...timestamps,
+  },
+  (table) => [
+    unique("agent_investigation_steps_org_id_id_unique").on(
+      table.organizationId,
+      table.id,
+    ),
+    unique("agent_investigation_steps_collaboration_index_unique").on(
+      table.organizationId,
+      table.collaborationId,
+      table.stepIndex,
+    ),
+    foreignKey({
+      name: "agent_investigation_steps_org_collaboration_fk",
+      columns: [table.organizationId, table.collaborationId],
+      foreignColumns: [
+        agentCollaborations.organizationId,
+        agentCollaborations.id,
+      ],
+    })
+      .onUpdate("restrict")
+      .onDelete("restrict"),
+    // Backs the poll route's `where organization_id = $1 and
+    // collaboration_id = $2 order by step_index` — the read this whole
+    // table exists to serve, every 1-2s, for as long as an investigation
+    // stays running.
+    index("agent_investigation_steps_org_collaboration_index").on(
+      table.organizationId,
+      table.collaborationId,
+    ),
+    check(
+      "agent_investigation_steps_status_allowed",
+      sql`${table.status} in ('pending', 'running', 'done', 'failed')`,
+    ),
+    check(
+      "agent_investigation_steps_label_not_blank",
+      sql`length(btrim(${table.label})) > 0`,
+    ),
+    check(
+      "agent_investigation_steps_step_index_not_negative",
+      sql`${table.stepIndex} >= 0`,
+    ),
+    // Mirrors agent_collaborations_completion_consistent's own temporal
+    // shape: pending has neither timestamp; running has started but not
+    // completed; done/failed have both.
+    check(
+      "agent_investigation_steps_timestamps_consistent",
+      sql`(${table.status} = 'pending' and ${table.startedAt} is null and ${table.completedAt} is null) or
+          (${table.status} = 'running' and ${table.startedAt} is not null and ${table.completedAt} is null) or
+          (${table.status} in ('done', 'failed') and ${table.startedAt} is not null and ${table.completedAt} is not null)`,
+    ),
+  ],
+);
+
 // The Safe Action pattern's second real write path (ADR 0056), alongside
 // internal_tasks — but this one's real side effect happens outside this
 // database, so status is a durable lifecycle ('pending' -> 'sent'/'failed')

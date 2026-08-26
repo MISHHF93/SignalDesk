@@ -128,7 +128,9 @@ describe("runAgentInvestigationAction", () => {
   it("returns early with no session", async () => {
     mockedGetCurrentOrganization.mockResolvedValue(null);
 
-    const result = await runAgentInvestigationAction();
+    const result = await runAgentInvestigationAction(
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({ ok: false, error: "Sign in to do this." });
     expect(mockedCheckRateLimit).not.toHaveBeenCalled();
@@ -138,7 +140,9 @@ describe("runAgentInvestigationAction", () => {
     mockedGetCurrentOrganization.mockResolvedValue(SESSION);
     mockedIsAgentFabricEnabled.mockReturnValue(false);
 
-    const result = await runAgentInvestigationAction();
+    const result = await runAgentInvestigationAction(
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({
       ok: true,
@@ -164,7 +168,9 @@ describe("runAgentInvestigationAction", () => {
       retryAfterSeconds: 125,
     });
 
-    const result = await runAgentInvestigationAction();
+    const result = await runAgentInvestigationAction(
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({
       ok: false,
@@ -182,7 +188,9 @@ describe("runAgentInvestigationAction", () => {
     mockedGetCurrentOrganization.mockResolvedValue(SESSION);
     mockedClassifyEvidenceSufficiency.mockReturnValue("missing");
 
-    const result = await runAgentInvestigationAction();
+    const result = await runAgentInvestigationAction(
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({
       ok: true,
@@ -203,7 +211,9 @@ describe("runAgentInvestigationAction", () => {
     mockedGetCurrentOrganization.mockResolvedValue(SESSION);
     mockedClassifyEvidenceSufficiency.mockReturnValue("stale");
 
-    const result = await runAgentInvestigationAction();
+    const result = await runAgentInvestigationAction(
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({
       ok: true,
@@ -223,7 +233,9 @@ describe("runAgentInvestigationAction", () => {
     mockedGetCurrentOrganization.mockResolvedValue(SESSION);
     mockedWithAdvisoryLock.mockResolvedValue(null);
 
-    const result = await runAgentInvestigationAction();
+    const result = await runAgentInvestigationAction(
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({
       ok: true,
@@ -247,7 +259,9 @@ describe("runAgentInvestigationAction", () => {
       contradictionsDetected: false,
     });
 
-    const result = await runAgentInvestigationAction();
+    const result = await runAgentInvestigationAction(
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({
       ok: true,
@@ -280,7 +294,9 @@ describe("runAgentInvestigationAction", () => {
       typeof composeCards
     >);
 
-    const result = await runAgentInvestigationAction();
+    const result = await runAgentInvestigationAction(
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({
       ok: true,
@@ -303,7 +319,9 @@ describe("runAgentInvestigationAction", () => {
     mockedGetCurrentOrganization.mockResolvedValue(SESSION);
     mockedGetTodaysAttention.mockRejectedValue(new Error("db unavailable"));
 
-    const result = await runAgentInvestigationAction();
+    const result = await runAgentInvestigationAction(
+      "11111111-1111-1111-1111-111111111111",
+    );
 
     expect(result).toEqual({ ok: false, error: "db unavailable" });
   });
