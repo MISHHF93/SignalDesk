@@ -1,15 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../_lib/session");
+vi.mock("../_lib/rate-limit");
 vi.mock("@signaldesk/persistence");
 
 import { revokeOrganizationInvite } from "@signaldesk/persistence";
 
+import { checkRateLimit } from "../_lib/rate-limit";
 import { getCurrentOrganization } from "../_lib/session";
 import { revokeInviteAction } from "./revoke-invite";
 
 const mockedGetCurrentOrganization = vi.mocked(getCurrentOrganization);
 const mockedRevokeOrganizationInvite = vi.mocked(revokeOrganizationInvite);
+const mockedCheckRateLimit = vi.mocked(checkRateLimit);
 
 const OWNER_SESSION = {
   organizationId: "org-1",
@@ -22,6 +25,26 @@ const OWNER_SESSION = {
 describe("revokeInviteAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedCheckRateLimit.mockResolvedValue({
+      allowed: true,
+      retryAfterSeconds: 0,
+    });
+  });
+
+  it("refuses at the rate limit", async () => {
+    mockedGetCurrentOrganization.mockResolvedValue(OWNER_SESSION);
+    mockedCheckRateLimit.mockResolvedValue({
+      allowed: false,
+      retryAfterSeconds: 3600,
+    });
+
+    const result = await revokeInviteAction("invite-1");
+
+    expect(result).toEqual({
+      ok: false,
+      error: "Too many requests. Try again shortly.",
+    });
+    expect(mockedRevokeOrganizationInvite).not.toHaveBeenCalled();
   });
 
   it("returns early with no session", async () => {

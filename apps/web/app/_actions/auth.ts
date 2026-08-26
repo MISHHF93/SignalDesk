@@ -1,7 +1,6 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { headers } from "next/headers";
 
 import { createDatabasePool, type DatabasePool } from "@signaldesk/persistence";
 
@@ -10,6 +9,7 @@ import type { OAuthProviderId } from "../_lib/oauth-providers";
 import { isOAuthProviderEnabled } from "../_lib/oauth-providers";
 import { safeNextPath } from "../_lib/safe-next-path";
 import { checkRateLimit, getClientIp } from "../_lib/rate-limit";
+import { getRequestOrigin } from "../_lib/request-origin";
 
 let pool: DatabasePool | undefined;
 
@@ -166,7 +166,14 @@ export async function requestPasswordResetAction(
     };
   }
 
-  const origin = (await headers()).get("origin") ?? "";
+  // A validated origin, not the raw `Origin` request header — this becomes
+  // a real link Supabase emails to whatever address was requested, so it
+  // must never trust an attacker-suppliable value directly (the same
+  // host-header-injection defense `getRequestOrigin` already applies for
+  // `invite-member.ts`'s emailed accept link; a spoofed origin here would
+  // be a real account-takeover vector, not just a phishing one, since the
+  // recovery code itself would be redirected off-domain).
+  const origin = await getRequestOrigin();
   const supabase = await createClient();
   await supabase.auth.resetPasswordForEmail(email, {
     redirectTo: `${origin}/auth/callback?next=${encodeURIComponent("/login/reset/confirm")}`,
@@ -268,7 +275,10 @@ export async function signInWithOAuthAction(
     return { error: "This sign-in method is not yet connected." };
   }
 
-  const origin = (await headers()).get("origin") ?? "";
+  // Same validated-origin defense as requestPasswordResetAction above —
+  // this becomes the redirect target the OAuth provider sends the user's
+  // browser back to with a real authorization code.
+  const origin = await getRequestOrigin();
   const supabase = await createClient();
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider,

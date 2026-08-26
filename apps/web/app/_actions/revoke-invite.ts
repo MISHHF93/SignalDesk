@@ -7,6 +7,7 @@ import {
 } from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
+import { checkRateLimit } from "../_lib/rate-limit";
 import { getCurrentOrganization } from "../_lib/session";
 
 let pool: DatabasePool | undefined;
@@ -40,6 +41,17 @@ export async function revokeInviteAction(
         ok: false,
         error: "Only an owner or admin can revoke an invite.",
       };
+    }
+
+    const rateLimit = await checkRateLimit(
+      getPool(),
+      `revoke-invite:${session.organizationId}`,
+      20,
+      60 * 60 * 1000,
+    );
+
+    if (!rateLimit.allowed) {
+      return { ok: false, error: "Too many requests. Try again shortly." };
     }
 
     await revokeOrganizationInvite(getPool(), session.organizationId, inviteId);
