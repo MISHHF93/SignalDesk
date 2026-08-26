@@ -125,6 +125,15 @@ export function AgentRecommendationCard({
   function handleApprove() {
     if (sendActionType) {
       if (!sendAction) {
+        // Real gap found by review: this used to return silently — a
+        // completely invisible no-op if this card's proposal type ever
+        // reached here without its matching approve action wired (e.g. a
+        // connector not configured for this org). Reachable only via a
+        // call site with partial wiring; page.tsx itself wires all five
+        // unconditionally today. Defense in depth, not a currently
+        // triggerable path.
+        setStatus("error");
+        setMessage("This action isn't available right now.");
         return;
       }
 
@@ -151,6 +160,8 @@ export function AgentRecommendationCard({
     }
 
     if (!approveAgentActionProposalAction) {
+      setStatus("error");
+      setMessage("This action isn't available right now.");
       return;
     }
 
@@ -184,6 +195,8 @@ export function AgentRecommendationCard({
 
   function handleDismiss() {
     if (!dismissAgentActionProposalAction) {
+      setStatus("error");
+      setMessage("This action isn't available right now.");
       return;
     }
 
