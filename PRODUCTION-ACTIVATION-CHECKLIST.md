@@ -84,18 +84,24 @@ honestly `BLOCKED` on Stage 3's real credentials. No connector is marked
 
 ## Stage 5 — Error monitoring, wired through a provider-neutral boundary
 
-Added this pass, independent of which vendor is eventually chosen —
 `packages/application/src/observability/error-reporter.ts` (a real
 `ErrorReporter` interface + a console-based default implementation,
 mirroring the exact `AIProvider` seam pattern already proven for AI
-providers) — wired into the top-level Server Action error path and
-`instrumentation.ts`. Swapping in a real vendor later
-(Sentry/equivalent) is a single-file adapter, not an architecture change.
+providers) — wired into the top-level Server Action error path
+(`describe-action-error.ts`). The real Sentry adapter this stage used to
+list as remaining engineering work is now built and unit-tested
+(`createSentryErrorReporter`, `packages/application/src/observability/sentry-error-reporter.ts`,
+3 tests) — `apps/web/app/_lib/error-reporter.ts` resolves to it
+automatically whenever `SENTRY_DSN` is set, following the exact same
+"unset credential ⇒ feature inert" convention as `ANTHROPIC_API_KEY`
+(unset today, so every environment including this one still uses the
+console reporter, zero behavior change). Nothing left here is
+buildable from this repository — only the owner action remains.
 
-- [ ] Owner picks a vendor, creates an account/project.
-- [ ] Implement one adapter (e.g. `SentryErrorReporter`) against the
-      already-real `ErrorReporter` interface and set its DSN/config as an
-      env var.
+- [ ] Owner picks a vendor (Sentry, given the adapter above already
+      targets it), creates an account/project, gets its DSN.
+- [ ] Set `SENTRY_DSN` as a production env var. No further code change
+      needed — the app-layer resolver picks it up automatically.
 
 ## Stage 6 — Stripe live mode, only after the product path works
 

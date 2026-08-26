@@ -456,6 +456,13 @@
       "when": 1787694600000,
       "tag": "0066_agent_investigation_steps",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1787694700000,
+      "tag": "0067_tasks_tenant_update_policy",
+      "breakpoints": true
     }
   ]
 }

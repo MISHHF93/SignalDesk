@@ -119,7 +119,16 @@ describe.skipIf(!process.env.DATABASE_URL)(
         sourceFindingIds: [],
       });
 
-      const ids = await listOrganizationsNeedingDailyBrief(pool, 1000);
+      // A fixed cap (e.g. 1000) would silently exclude these two
+      // freshly-seeded organizations once the shared dev database's real
+      // active-organization count (accumulated across many live-database
+      // test runs, with nothing in this suite ever cleaning it up) grows
+      // past it — exactly the unbounded-scan bug this function's own
+      // ordering exists to prevent, just resurfacing one layer up in this
+      // test's own cap. Sizing the cap from the real current count keeps
+      // the assertion meaningful regardless of how large that count gets.
+      const max = (await listActiveOrganizationIds(pool)).length + 10;
+      const ids = await listOrganizationsNeedingDailyBrief(pool, max);
       const neverBriefedIndex = ids.indexOf(neverBriefed);
       const alreadyBriefedIndex = ids.indexOf(alreadyBriefed);
 
@@ -148,7 +157,10 @@ describe.skipIf(!process.env.DATABASE_URL)(
         sourceFindingIds: [],
       });
 
-      const ids = await listOrganizationsNeedingDailyBrief(pool, 1000);
+      // Same reasoning as the previous test — size the cap from the real
+      // current count rather than a fixed guess.
+      const max = (await listActiveOrganizationIds(pool)).length + 10;
+      const ids = await listOrganizationsNeedingDailyBrief(pool, max);
 
       expect(ids.indexOf(briefedLongAgo)).toBeLessThan(
         ids.indexOf(briefedRecently),
@@ -174,7 +186,13 @@ describe.skipIf(!process.env.DATABASE_URL)(
         );
       });
 
-      const ids = await listOrganizationsNeedingDailyBrief(pool, 1000);
+      // A fixed cap can't distinguish "excluded by the deactivated_at
+      // filter" from "excluded by running out of room" once the real
+      // active-organization count exceeds it — size the cap from the
+      // real active count (which itself already excludes this
+      // organization) so this assertion actually proves exclusion.
+      const max = (await listActiveOrganizationIds(pool)).length + 10;
+      const ids = await listOrganizationsNeedingDailyBrief(pool, max);
 
       expect(ids).not.toContain(organizationId);
     });

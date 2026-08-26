@@ -1,5 +1,42 @@
 # Launch blockers
 
+- **Update (2026-08-26, continued)**: A full `pnpm check` re-run against
+  the real dev database surfaced one genuine, previously-undetected
+  data-integrity bug — now found, fixed, and verified, not just
+  documented. `markTaskCompletedBySourceRecord` (`tasks.ts`, the Jira
+  closed-issue second sync pass) has been issuing real
+  `update tasks set completed = true where ...` statements since it was
+  added, but `public.tasks` was missing its `tasks_tenant_update` RLS
+  policy — present on `invoices` (fixed once already, migration 0036) but
+  never added here, since nothing updated a task at the time `tasks` was
+  created (migration 0030). With RLS forced and no permissive UPDATE
+  policy, every one of those statements has always silently matched zero
+  rows: a Jira issue closing has never actually marked its task complete
+  in this database, dev or production, despite everything else in that
+  sync path being real, tested, and live-verified. Reproduced
+  deterministically against a fresh org/task on the real dev database,
+  confirmed via `pg_policy` that `tasks` carried only `{insert, select}`
+  policies (no `update`), fixed with a new additive migration
+  (`0067_tasks_tenant_update_policy.sql`, mirroring `invoices_tenant_update`
+  exactly), applied to both the real dev and production Supabase
+  projects via `apply_migration`, and confirmed fixed by re-running the
+  previously-failing test (now green, 15/15 in `tasks.test.ts`). A
+  second, unrelated test failure in the same run
+  (`scheduled-jobs.test.ts`, `listOrganizationsNeedingDailyBrief`'s
+  fair-rotation ordering tests) turned out to be pure test fragility, not
+  a product bug: the dev database has accumulated 32,183 organizations
+  across many sessions' worth of live-database test runs with nothing
+  ever cleaning them up, so the tests' hardcoded `max=1000` cap excluded
+  their own freshly-seeded organizations before the ordering assertion
+  ever got a chance to run (production, checked the same way, has 0 —
+  this never touches real customer risk). Fixed by sizing the cap from
+  the real current active-organization count instead of a fixed guess;
+  the dev database's own test-data accumulation is a real, disclosed,
+  separate hygiene item — not fixed here, since bulk-deleting 32k rows
+  from a live Supabase project is the kind of action worth the owner's
+  own sign-off rather than an autonomous call. Separately, P0 #3's
+  "solvable autonomously by Claude" half is now actually done: see its
+  entry below.
 - **Update (2026-08-24)**: `SIGNALDESK_SYSTEM_CERTIFICATION.md`'s full
   6-phase certification + adversarial red-team pass (Passes 1-7,
   including a later continuation session that added five real connector
@@ -87,21 +124,27 @@
 ### 3. No real error-monitoring vendor wired in
 
 - **Subsystem**: `packages/application/src/observability/error-reporter.ts`
-  (the real, provider-neutral `ErrorReporter` interface, added this
-  pass — mirrors the exact `AIProvider` seam pattern) — routed through
+  (the real, provider-neutral `ErrorReporter` interface — mirrors the
+  exact `AIProvider` seam pattern) — routed through
   `describe-action-error.ts`, the one shared helper nearly every Server
   Action's catch block already calls, so every one of those already
-  reports through this seam. Only a console-based default implementation
-  exists; no real vendor is wired in.
-- **Owner action**: pick a vendor (Sentry's Next.js SDK is the path of
-  least friction for this exact stack), create a project, get a DSN.
-- **Solvable autonomously by Claude, once the DSN exists**: implementing
-  one adapter (e.g. `SentryErrorReporter`) against the already-real
-  `ErrorReporter` interface is a single new file, not an architecture
-  change.
-- **Why still P0**: until a real vendor is wired in, production errors
-  still only surface as Vercel's own function logs — the seam existing
-  doesn't yet mean anyone is notified of a real incident.
+  reports through this seam.
+- **Resolved this pass**: the engineering half of this item —
+  `createSentryErrorReporter`
+  (`packages/application/src/observability/sentry-error-reporter.ts`, 3
+  unit tests) is a real, working `@sentry/node`-backed adapter.
+  `apps/web/app/_lib/error-reporter.ts` now resolves to it automatically
+  whenever `SENTRY_DSN` is set, following the exact "unset credential ⇒
+  feature inert" convention `agent-config.ts` already established for
+  `ANTHROPIC_API_KEY` — with it unset (true in every environment today),
+  the console-based reporter stays the default, zero behavior change.
+- **Owner action, the only piece left**: pick a vendor (the adapter above
+  already targets Sentry, the path of least friction for this exact
+  stack), create a project, get a DSN, set `SENTRY_DSN` as a production
+  env var. No further code change needed.
+- **Why still P0**: until a real DSN is set, production errors still
+  only surface as Vercel's own function logs — the seam and the adapter
+  existing doesn't yet mean anyone is notified of a real incident.
 
 ### 4. ~~Vercel project not yet created / configured~~ — RESOLVED 2026-08-23
 
@@ -179,6 +222,32 @@ stripe-billing-config.ts`.
   production webhook endpoint in the Stripe dashboard.
 - **Shortest path**: a real test-mode-to-live-mode checkout dry run
   before flipping any real customer's card at risk.
+
+### 6. Production database has zero backup/disaster-recovery coverage — new finding, 2026-08-26
+
+- **Subsystem**: the Supabase organization (`qqmwladucvpnwwztvdgk`) that owns
+  both the dev (`wbrcifdvzkwxpgzxfegc`) and **production**
+  (`qkmiafzljcsaihcnywqj`) projects.
+- **How this was found**: attempting a real backup/restore drill (branching
+  the dev project to prove restore works without touching real data).
+  `create_branch` failed with `PaymentRequiredException: Branching is
+supported only on the Pro plan or above` — this organization is on
+  Supabase's Free plan. Free-tier projects have no point-in-time recovery
+  and no automated backups at all, for either project.
+- **Why P0, not P2**: this is not "no drill has been run yet" — it's that
+  production has no recovery path of any kind for real customer data today.
+  A bad migration, a bug, or a compromised credential could destroy data
+  permanently with nothing to restore from. This sits squarely inside
+  CLAUDE.md's own top-priority concern (data integrity), independent of
+  every credential-gated item above.
+- **Owner action**: upgrade the Supabase organization to at least the Pro
+  plan (Supabase's own pricing, not this app — roughly $25/mo base at time
+  of writing) — a real spend decision only the account owner can authorize.
+- **Shortest path**: upgrade the plan, confirm PITR/scheduled backups are
+  enabled for the production project specifically, then run the
+  branch-based restore drill this pass attempted (safe, non-destructive,
+  ~$0.01344/hour while the branch exists) to prove it for real rather than
+  trusting the dashboard toggle alone.
 
 ## P1 — needed for a trustworthy, complete launch
 

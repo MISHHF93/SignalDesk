@@ -77,6 +77,7 @@ export {
   type OnSpecialistSettled,
   type SpecialistDispatch,
   type SpecialistDomain,
+  type SpecialistDomainRequest,
   type SpecialistInput,
 } from "./agents/parallel-specialist-coordinator";
 export {
@@ -97,6 +98,10 @@ export {
   type ErrorReporter,
   type ErrorReportContext,
 } from "./observability/error-reporter";
+export {
+  createSentryErrorReporter,
+  type SentryErrorReporterOptions,
+} from "./observability/sentry-error-reporter";
 export {
   createConsoleLogger,
   type LogContext,

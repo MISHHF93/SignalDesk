@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.120.0",
+    "@sentry/node": "10.71.0",
     "@signaldesk/domain": "workspace:*",
     "@signaldesk/intelligence": "workspace:*",
     "@signaldesk/schemas": "workspace:*",

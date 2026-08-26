@@ -73,14 +73,15 @@ all: a display string and a comma-separated feature list.
 
 ## Secret-exposure audit (done this pass, not assumed)
 
-- Grepped every `NEXT_PUBLIC_` usage in `apps/web` — the only five are
+- Re-grepped 2026-08-26: six now, not the five this section previously
+  said (a real drift, corrected rather than repeated) —
   `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`,
   `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `NEXT_PUBLIC_APP_NAME`,
-  `NEXT_PUBLIC_ENABLED_OAUTH_PROVIDERS` — all five are meant to be public
-  (a publishable/anon key, a display name, a comma-separated feature list),
-  none is a secret. Re-grepped 2026-08-23 to confirm this list hasn't
-  drifted since this session's many later changes to `apps/web` — it
-  hasn't; still exactly these five.
+  `NEXT_PUBLIC_ENABLED_OAUTH_PROVIDERS`, and the new
+  `NEXT_PUBLIC_APP_URL` (added this pass, backs `metadataBase`/`robots.ts`/
+  `sitemap.ts`). All six are meant to be public (a publishable/anon key, a
+  display name, a comma-separated feature list, the app's own origin URL),
+  none is a secret.
 - Every OAuth client secret, `STRIPE_SECRET_KEY`, `ANTHROPIC_API_KEY`,
   `RESEND_API_KEY`, `DATABASE_URL`, and `STRIPE_WEBHOOK_SECRET` is read
   only in server-only modules (`_lib/*-config.ts`, Server Actions, Route
@@ -161,12 +162,22 @@ https://your-deploy.vercel.app` — no local server is spawned in this
 
 ## Error monitoring / structured logging
 
-**Honest current state: neither exists yet.** No Sentry/OpenTelemetry/
-Datadog/equivalent APM is wired into this codebase (verified — no such
-package in any `package.json`, no instrumentation calls beyond
-`instrumentation.ts`'s own startup env validation). Errors currently
-surface only as: Vercel's own function logs (stdout/stderr, retained per
-Vercel's plan-dependent retention window), `describeActionError`'s
+**Corrected 2026-08-26 — this section was stale.** Structured logging is
+now real, not missing: every Route Handler, disconnect action, and sync
+function reports through the same `Logger`/`ErrorReporter` seam
+(`packages/application/src/observability/`) Server Actions already used
+(ADR 0061) — only two documented exceptions remain (a browser-side error
+boundary, one cross-package-dependency line). **Error monitoring's
+engineering half is now real too**: a Sentry adapter
+(`createSentryErrorReporter`, `sentry-error-reporter.ts`, 3 unit tests)
+implements the `ErrorReporter` interface every one of those logs routes
+through, auto-selected by `apps/web/app/_lib/error-reporter.ts` whenever
+`SENTRY_DSN` is set — same "unset ⇒ inert" convention as every other
+credential. **Still genuinely missing**: the DSN itself — unset in every
+environment today, so the console-based default is still what actually
+runs. Until a real `SENTRY_DSN` is set, errors currently surface only as:
+Vercel's own function logs (stdout/stderr, retained per Vercel's
+plan-dependent retention window), `describeActionError`'s
 user-facing messages, and `audit_events`/`internal_cost_events` rows for
 the specific domains that already write them. This is a real gap for
 running a production launch blind to error rates/latency regressions —
