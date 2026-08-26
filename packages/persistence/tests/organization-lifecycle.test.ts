@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { startAgentCollaboration } from "../src/agent-collaborations";
 import type { DatabasePool } from "../src/client";
+import { beginCustomerEmailReplySend } from "../src/customer-email-replies";
 import { ingestGmailMessage } from "../src/gmail-sync";
 import { ingestQuickBooksInvoice } from "../src/invoices";
 import {
@@ -15,6 +17,7 @@ import {
   getTestPool,
   seedIntegration,
   seedMembership,
+  seedMessage,
   seedOrganization,
   seedSourceRecord,
   seedSyncJob,
@@ -469,6 +472,63 @@ describe.skipIf(!process.env.DATABASE_URL)(
           ),
       );
       expect(Number(messageCount.rows[0]?.count)).toBe(1);
+    });
+
+    it("regression: real gap found by review — scrubs customer_email_replies.to_email but preserves the row and its provenance link", async () => {
+      // anonymize_organization predates customer_email_replies (0059) —
+      // a customer requesting "erase my data" would still have a real
+      // recipient email address sitting in the database afterward.
+      const { organizationId, userId } = await seedMembership(pool);
+      const integration = await seedIntegration(pool, organizationId, {
+        sourceSystem: "gmail",
+      });
+      const sourceRecord = await seedSourceRecord(
+        pool,
+        organizationId,
+        integration.id,
+        integration.sourceSystem,
+      );
+      const message = await seedMessage(pool, organizationId, sourceRecord.id);
+      const idempotencyKey = `anonymize-email-reply-${randomUUID()}`;
+      const collaboration = await startAgentCollaboration(
+        pool,
+        organizationId,
+        {
+          userId,
+          pattern: "single_specialist",
+          objective: "Draft a reply to this message.",
+          correlationId: `${idempotencyKey}:collaboration`,
+          idempotencyKey: `${idempotencyKey}:collaboration`,
+          messageId: message.id,
+        },
+      );
+      const send = await beginCustomerEmailReplySend(pool, organizationId, {
+        userId,
+        agentCollaborationId: collaboration.id,
+        messageId: message.id,
+        toEmail: "jane@clientco.com",
+        subject: "Re: Question about my order",
+        body: "Your order ships tomorrow.",
+        idempotencyKey: `${idempotencyKey}:send`,
+      });
+
+      await anonymizeOrganization(pool, organizationId);
+
+      const [replyRow] = await withTenantContext(
+        pool,
+        organizationId,
+        (client) =>
+          client
+            .query<{ to_email: string; subject: string }>(
+              `select to_email, subject from customer_email_replies where id = $1`,
+              [send.id],
+            )
+            .then((result) => result.rows),
+      );
+      expect(replyRow?.to_email).toBe("deleted@deleted.invalid");
+      // subject (free-text) stays untouched — same disclosed limitation
+      // as messages/support_tickets' own free-text fields.
+      expect(replyRow?.subject).toBe("Re: Question about my order");
     });
 
     it("leaves audit events and source records untouched", async () => {
