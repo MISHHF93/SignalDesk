@@ -202,6 +202,7 @@ export async function syncQuickBooksInvoices(
     integrationId,
     1,
     "invoice",
+    true,
   );
   const cursorBefore = previousJob?.cursorAfter ?? null;
   const job = await startSyncJob(
@@ -410,6 +411,7 @@ export async function syncQuickBooksPayments(
     integrationId,
     1,
     "payment",
+    true,
   );
   const cursorBefore = previousJob?.cursorAfter ?? null;
   const job = await startSyncJob(

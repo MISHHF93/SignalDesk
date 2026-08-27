@@ -174,6 +174,7 @@ export async function syncHubSpotDeals(
     integrationId,
     1,
     "lead",
+    true,
   );
   const cursorBefore = previousJob?.cursorAfter ?? null;
   const job = await startSyncJob(

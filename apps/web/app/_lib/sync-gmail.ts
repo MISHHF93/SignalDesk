@@ -203,6 +203,7 @@ export async function syncGmailMessages(
     integrationId,
     1,
     "message",
+    true,
   );
   const cursorBefore = previousJob?.cursorAfter ?? null;
   const job = await startSyncJob(

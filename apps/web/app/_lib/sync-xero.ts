@@ -168,6 +168,7 @@ export async function syncXeroInvoices(
     integrationId,
     1,
     "invoice",
+    true,
   );
   const cursorBefore = previousJob?.cursorAfter ?? null;
   const job = await startSyncJob(

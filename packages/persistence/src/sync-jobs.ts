@@ -223,6 +223,27 @@ const DEFAULT_RECENT_SYNC_JOBS_LIMIT = 5;
  * indistinguishable by `(organizationId, integrationId)` alone. Omitted
  * (health's own use case), this returns the most recent runs across every
  * entity type. Capped like every other "real set" list in this app.
+ *
+ * `onlySucceeded` (default `false`, `computeConnectorHealth`'s own case —
+ * it deliberately wants every status to derive real health/freshness)
+ * exists for the cursor-lookup use case specifically. Real gap found by
+ * review: every connector's cursor lookup used `[previousJob] =
+ * listRecentSyncJobsForConnection(..., entityType)` with no status
+ * filter — ordered by `started_at`, not by which run actually finished
+ * (or finished successfully) most recently. A `'running'` row from a
+ * still-in-flight concurrent sync (a scheduled trigger and a manual "Sync
+ * Now" landing close together), or a `'failed'` row (which always has
+ * `cursor_after = null`, since `failSyncJob`'s input has no such field),
+ * could both be selected as `previousJob`, handing the next run a `null`
+ * or stale `cursorBefore`. For most connectors that only means a
+ * redundant full resync (safe — ingestion is idempotent). For
+ * QuickBooks/Xero specifically, `cursorBefore` also gates a real
+ * closed/paid-invoice status-transition pass (`sync-quickbooks.ts`/
+ * `sync-xero.ts`) — a `null` `cursorBefore` there silently skips
+ * detecting invoices paid since the last real successful sync, leaving
+ * them shown as open/overdue. Passing `onlySucceeded: true` from every
+ * cursor-lookup call site closes this: a still-running or failed job can
+ * never be selected as the cursor source.
  */
 export async function listRecentSyncJobsForConnection(
   pool: DatabasePool,
@@ -230,19 +251,25 @@ export async function listRecentSyncJobsForConnection(
   integrationId: string,
   limit: number = DEFAULT_RECENT_SYNC_JOBS_LIMIT,
   entityType?: SyncJobEntityType,
+  onlySucceeded = false,
 ): Promise<readonly SyncJob[]> {
   return withTenantContext(pool, organizationId, async (client) => {
     const params: unknown[] = [organizationId, integrationId];
     let entityTypeClause = "";
+    let statusClause = "";
 
     if (entityType) {
       params.push(entityType);
       entityTypeClause = ` and entity_type = $${params.length}`;
     }
 
+    if (onlySucceeded) {
+      statusClause = ` and status = 'succeeded'`;
+    }
+
     const result = await client.query<SyncJobRow>(
       `select ${SYNC_JOB_COLUMNS} from sync_jobs
-       where organization_id = $1 and integration_id = $2${entityTypeClause}
+       where organization_id = $1 and integration_id = $2${entityTypeClause}${statusClause}
        order by started_at desc
        limit ${Math.max(1, Math.floor(limit))}`,
       params,

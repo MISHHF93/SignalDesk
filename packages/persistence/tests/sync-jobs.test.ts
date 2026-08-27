@@ -231,6 +231,120 @@ describe.skipIf(!process.env.DATABASE_URL)("sync jobs (live database)", () => {
     expect(latestPaymentJob?.cursorAfter).toBe("payment-cursor-1");
   });
 
+  it("regression: onlySucceeded skips a still-running concurrent job and returns the last real successful cursor", async () => {
+    // Real bug found by review: every connector's cursor lookup used to
+    // order purely by started_at with no status filter, so a concurrent
+    // sync still in 'running' (a scheduled trigger landing close to a
+    // manual "Sync Now") could be picked as the cursor source instead of
+    // the last real successful run — handing the next run a null
+    // cursorAfter and, for QuickBooks/Xero specifically, silently
+    // skipping their closed/paid-invoice status-transition pass.
+    const org = await seedOrganization(pool);
+    const integration = await seedIntegration(pool, org.id, {
+      sourceSystem: "quickbooks",
+    });
+
+    const succeededJob = await startSyncJob(
+      pool,
+      org.id,
+      integration.id,
+      "quickbooks",
+      "invoice",
+      "initial",
+      null,
+    );
+    await completeSyncJob(pool, org.id, succeededJob.id, {
+      itemsIngested: 1,
+      itemsSkipped: 0,
+      cursorAfter: "real-succeeded-cursor",
+    });
+
+    // A concurrent run starts after the succeeded one, and is still
+    // 'running' (never completed or failed) when the lookup happens.
+    await startSyncJob(
+      pool,
+      org.id,
+      integration.id,
+      "quickbooks",
+      "invoice",
+      "manual",
+      "real-succeeded-cursor",
+    );
+
+    const [unfiltered] = await listRecentSyncJobsForConnection(
+      pool,
+      org.id,
+      integration.id,
+      1,
+      "invoice",
+    );
+    const [onlySucceeded] = await listRecentSyncJobsForConnection(
+      pool,
+      org.id,
+      integration.id,
+      1,
+      "invoice",
+      true,
+    );
+
+    // Without the filter, the still-running job (more recently started)
+    // wins and carries no cursor yet — exactly the bug.
+    expect(unfiltered?.status).toBe("running");
+    expect(unfiltered?.cursorAfter).toBeNull();
+    // With it, the real last-successful cursor is returned instead.
+    expect(onlySucceeded?.status).toBe("succeeded");
+    expect(onlySucceeded?.cursorAfter).toBe("real-succeeded-cursor");
+  });
+
+  it("regression: onlySucceeded skips a failed job (which always has a null cursor) too", async () => {
+    const org = await seedOrganization(pool);
+    const integration = await seedIntegration(pool, org.id, {
+      sourceSystem: "xero",
+    });
+
+    const succeededJob = await startSyncJob(
+      pool,
+      org.id,
+      integration.id,
+      "xero",
+      "invoice",
+      "initial",
+      null,
+    );
+    await completeSyncJob(pool, org.id, succeededJob.id, {
+      itemsIngested: 1,
+      itemsSkipped: 0,
+      cursorAfter: "real-succeeded-cursor",
+    });
+
+    const failedJob = await startSyncJob(
+      pool,
+      org.id,
+      integration.id,
+      "xero",
+      "invoice",
+      "manual",
+      "real-succeeded-cursor",
+    );
+    await failSyncJob(pool, org.id, failedJob.id, {
+      itemsIngested: 0,
+      itemsSkipped: 0,
+      errorMessage: "Xero API returned 500",
+    });
+
+    const [onlySucceeded] = await listRecentSyncJobsForConnection(
+      pool,
+      org.id,
+      integration.id,
+      1,
+      "invoice",
+      true,
+    );
+
+    expect(onlySucceeded?.status).toBe("succeeded");
+    expect(onlySucceeded?.cursorAfter).toBe("real-succeeded-cursor");
+  });
+
   it("marks the connection degraded when a completed job skipped records", async () => {
     const org = await seedOrganization(pool);
     const integration = await seedIntegration(pool, org.id, {

@@ -178,6 +178,7 @@ export async function syncJiraIssues(
     integrationId,
     1,
     "task",
+    true,
   );
   const cursorBefore = previousJob?.cursorAfter ?? null;
   const job = await startSyncJob(

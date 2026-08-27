@@ -160,6 +160,7 @@ export async function syncZendeskTickets(
     integrationId,
     1,
     "support_ticket",
+    true,
   );
   const cursorBefore = previousJob?.cursorAfter ?? null;
   const job = await startSyncJob(

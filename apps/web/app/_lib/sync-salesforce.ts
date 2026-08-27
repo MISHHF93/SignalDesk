@@ -208,6 +208,7 @@ export async function syncSalesforceOpportunities(
     integrationId,
     1,
     "lead",
+    true,
   );
   const cursorBefore = previousJob?.cursorAfter ?? null;
   const job = await startSyncJob(

@@ -159,6 +159,7 @@ export async function syncAsanaTasks(
     integrationId,
     1,
     "task",
+    true,
   );
   const cursorBefore = previousJob?.cursorAfter ?? null;
   const job = await startSyncJob(
