@@ -3,7 +3,12 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { DatabasePool } from "../src/client";
-import { provisionIdentityAndOrganization } from "../src/identity";
+import {
+  completeDeferredIdentityProvisioning,
+  provisionIdentityAndOrganization,
+  provisionPendingIdentity,
+  resolveOrganizationForIdentity,
+} from "../src/identity";
 import {
   createOrganizationInvite,
   listOrganizationInvites,
@@ -273,6 +278,216 @@ describe.skipIf(!process.env.DATABASE_URL)(
 
       const preview = await validateInviteToken(pool, token);
       expect(preview).toBeNull();
+    });
+
+    // P1 fix (ISSUES-REMAINING.md, drizzle/0071): a pending invite used to
+    // be marked 'accepted' the instant a signup was submitted, before
+    // email confirmation — permanently burning it even if that signup was
+    // never confirmed. These exercise the real deferred path directly,
+    // the same way the tests above exercise provisionIdentityAndOrganization
+    // directly rather than the auth.users trigger itself (no ordinary way
+    // to simulate Supabase Auth's own confirmation UPDATE from here).
+    describe("deferred invite acceptance (post-confirmation)", () => {
+      it("regression: an abandoned signup never consumes the invite — it stays pending for the real invitee", async () => {
+        const inviter = await seedMembership(pool);
+        const email = `deferred-${randomUUID()}@example.test`;
+        const { token } = await createOrganizationInvite(
+          pool,
+          inviter.organizationId,
+          inviter.userId,
+          { email, role: "member" },
+        );
+
+        // Mirrors what handle_new_auth_user() now does for an unconfirmed
+        // signup carrying an invite token: create only the user row.
+        await provisionPendingIdentity(pool, {
+          identityProvider: "test",
+          identityProviderSubject: `subject-${randomUUID()}`,
+          displayName: "Never Confirmed",
+          primaryEmail: email,
+        });
+
+        // The real, load-bearing assertion: the invite is untouched —
+        // still pending, still usable — because confirmation never
+        // happened. This is exactly the state the old, unfixed trigger
+        // could never reach: it accepted the invite unconditionally at
+        // signup time, before any confirmation.
+        const preview = await validateInviteToken(pool, token);
+        expect(preview).not.toBeNull();
+        expect(preview?.email).toBe(email);
+      });
+
+      it("confirming a deferred signup with a still-valid invite joins the SAME organization, mirroring immediate acceptance", async () => {
+        const inviter = await seedMembership(pool);
+        const email = `deferred-confirmed-${randomUUID()}@example.test`;
+        const subject = `subject-${randomUUID()}`;
+        const { token } = await createOrganizationInvite(
+          pool,
+          inviter.organizationId,
+          inviter.userId,
+          { email, role: "admin" },
+        );
+
+        const userId = await provisionPendingIdentity(pool, {
+          identityProvider: "test",
+          identityProviderSubject: subject,
+          displayName: "Confirms Later",
+          primaryEmail: email,
+        });
+
+        // Mirrors what handle_auth_user_confirmed() does on the real
+        // email_confirmed_at transition.
+        await completeDeferredIdentityProvisioning(pool, {
+          userId,
+          inviteToken: token,
+          displayName: "Confirms Later",
+        });
+
+        const membership = await resolveOrganizationForIdentity(
+          pool,
+          "test",
+          subject,
+        );
+
+        expect(membership).toEqual({
+          organizationId: inviter.organizationId,
+          userId,
+          role: "admin",
+          status: "active",
+        });
+
+        const preview = await validateInviteToken(pool, token);
+        expect(preview).toBeNull(); // accepted, no longer a valid pending token
+      });
+
+      it("confirming a deferred signup whose invite expired before confirmation falls back to a solo organization, not a broken no-org state", async () => {
+        const inviter = await seedMembership(pool);
+        const email = `deferred-expired-${randomUUID()}@example.test`;
+        const subject = `subject-${randomUUID()}`;
+        const { token } = await createOrganizationInvite(
+          pool,
+          inviter.organizationId,
+          inviter.userId,
+          { email, role: "member" },
+        );
+
+        const userId = await provisionPendingIdentity(pool, {
+          identityProvider: "test",
+          identityProviderSubject: subject,
+          displayName: "Too Slow",
+          primaryEmail: email,
+        });
+
+        // The invite expires (or is revoked) in the window between
+        // signup and confirmation — a real, reachable case this fix must
+        // not leave the now-confirmed user stranded with no organization.
+        await withTenantContext(
+          pool,
+          inviter.organizationId,
+          async (client) => {
+            await client.query(
+              `update organization_invites set expires_at = now() - interval '1 minute' where token = $1`,
+              [token],
+            );
+          },
+        );
+
+        await completeDeferredIdentityProvisioning(pool, {
+          userId,
+          inviteToken: token,
+          displayName: "Too Slow",
+        });
+
+        const membership = await resolveOrganizationForIdentity(
+          pool,
+          "test",
+          subject,
+        );
+
+        expect(membership?.organizationId).not.toBe(inviter.organizationId);
+        expect(membership?.role).toBe("owner");
+        expect(membership?.status).toBe("active");
+      });
+
+      it("regression: is idempotent — completing an already-provisioned user's confirmation a second time is a safe no-op, not a duplicate organization", async () => {
+        const email = `deferred-idempotent-${randomUUID()}@example.test`;
+        const subject = `subject-${randomUUID()}`;
+
+        const userId = await provisionPendingIdentity(pool, {
+          identityProvider: "test",
+          identityProviderSubject: subject,
+          displayName: "Double Fire",
+          primaryEmail: email,
+        });
+
+        await completeDeferredIdentityProvisioning(pool, {
+          userId,
+          inviteToken: null,
+          displayName: "Double Fire",
+        });
+
+        const firstMembership = await resolveOrganizationForIdentity(
+          pool,
+          "test",
+          subject,
+        );
+
+        // A second call (e.g. the confirmation trigger somehow firing
+        // twice) must not create a second organization for the same user.
+        await completeDeferredIdentityProvisioning(pool, {
+          userId,
+          inviteToken: null,
+          displayName: "Double Fire",
+        });
+
+        const secondMembership = await resolveOrganizationForIdentity(
+          pool,
+          "test",
+          subject,
+        );
+
+        expect(secondMembership).toEqual(firstMembership);
+      });
+
+      it("a mismatched email at confirmation time still never accepts the invite — falls back to a solo org", async () => {
+        const inviter = await seedMembership(pool);
+        const { token } = await createOrganizationInvite(
+          pool,
+          inviter.organizationId,
+          inviter.userId,
+          {
+            email: `intended-deferred-${randomUUID()}@example.test`,
+            role: "member",
+          },
+        );
+
+        const wrongEmail = `wrong-deferred-${randomUUID()}@example.test`;
+        const subject = `subject-${randomUUID()}`;
+        const userId = await provisionPendingIdentity(pool, {
+          identityProvider: "test",
+          identityProviderSubject: subject,
+          displayName: "Wrong Person",
+          primaryEmail: wrongEmail,
+        });
+
+        await completeDeferredIdentityProvisioning(pool, {
+          userId,
+          inviteToken: token,
+          displayName: "Wrong Person",
+        });
+
+        const membership = await resolveOrganizationForIdentity(
+          pool,
+          "test",
+          subject,
+        );
+
+        expect(membership?.organizationId).not.toBe(inviter.organizationId);
+
+        // The real invitee's own invite is still untouched.
+        const preview = await validateInviteToken(pool, token);
+        expect(preview).not.toBeNull();
+      });
     });
   },
 );

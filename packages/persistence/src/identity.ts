@@ -81,6 +81,66 @@ export async function provisionIdentityAndOrganization(
   return { organizationId: row.organization_id, userId: row.user_id };
 }
 
+/**
+ * Creates just the `users` row for a signup that must defer its real
+ * provisioning decision until email confirmation (drizzle/0071) — a real
+ * invite token on a password signup whose email isn't confirmed yet.
+ * Deliberately does not also create an organization, unlike
+ * `provisionIdentityAndOrganization` — see that migration's own doc
+ * comment for why doing so unconditionally was the actual P1 bug.
+ * `identity.provider`/`.subject` uniquely identify the row
+ * `completeDeferredIdentityProvisioning` later looks up by the same pair.
+ */
+export async function provisionPendingIdentity(
+  pool: DatabasePool,
+  input: Omit<ProvisionIdentityInput, "inviteToken" | "isGuest">,
+): Promise<string> {
+  const result = await pool.query<{ provision_pending_identity: string }>(
+    `select provision_pending_identity($1, $2, $3, $4) as provision_pending_identity`,
+    [
+      input.identityProvider,
+      input.identityProviderSubject,
+      input.displayName,
+      input.primaryEmail,
+    ],
+  );
+
+  const row = result.rows[0];
+
+  if (!row) {
+    throw new Error("provision_pending_identity returned no row");
+  }
+
+  return row.provision_pending_identity;
+}
+
+/**
+ * Completes a deferred signup (see `provisionPendingIdentity` above): joins
+ * a still-valid pending invite or falls back to a solo organization, the
+ * same real decision `provisionIdentityAndOrganization`'s invite branch
+ * always made immediately at signup — just re-evaluated at confirmation
+ * time instead, so an invite an abandoned signup never confirmed stays
+ * pending for the real invitee. Idempotent: a no-op for a user who already
+ * has any membership. In production this runs automatically via the
+ * `on_auth_user_confirmed` trigger on `auth.users`; tests call it directly
+ * for the same reason `provisionIdentityAndOrganization`'s own doc comment
+ * gives — there is no ordinary way to simulate Supabase Auth's own
+ * confirmation UPDATE against `auth.users` from this test environment.
+ */
+export async function completeDeferredIdentityProvisioning(
+  pool: DatabasePool,
+  input: {
+    readonly userId: string;
+    readonly inviteToken?: string | null;
+    readonly displayName: string;
+  },
+): Promise<void> {
+  await pool.query(
+    `select complete_deferred_identity_provisioning($1, $2, $3)`,
+    [input.userId, input.inviteToken ?? null, input.displayName],
+  );
+}
+
 export interface IdentityMembership {
   readonly organizationId: string;
   readonly userId: string;

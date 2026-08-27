@@ -1,0 +1,19 @@
+-- Real gap found by review, same session: migration 0071 added
+-- handle_auth_user_confirmed() but missed the same explicit
+-- revoke-from-public-grant-nowhere-else treatment every other
+-- SECURITY DEFINER function in this codebase gets (0008 already did this
+-- for handle_new_auth_user() itself, with the identical reasoning: a
+-- SECURITY DEFINER function keeps PostgreSQL's default PUBLIC EXECUTE
+-- grant unless explicitly revoked, which Supabase's PostgREST layer turns
+-- into a real, callable REST endpoint -- POST /rest/v1/rpc/
+-- handle_auth_user_confirmed -- for anon and authenticated alike.
+-- Confirmed by mcp__claude_ai_Supabase__get_advisors flagging exactly
+-- this on the dev project immediately after 0071 was applied.
+--
+-- Unlike a plain data-reading function, calling this one directly would
+-- fail at runtime anyway (`new`/`old` are only bound inside a real
+-- trigger invocation), so this was never a working exploit path -- but
+-- leaving any SECURITY DEFINER function world-callable is the wrong
+-- default regardless of whether today's function body happens to error
+-- out, and it breaks this codebase's own consistent, stated convention.
+revoke execute on function public.handle_auth_user_confirmed() from public, anon, authenticated;

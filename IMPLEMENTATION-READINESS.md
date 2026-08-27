@@ -6,7 +6,7 @@
   question, not yet decided" in that backlog's Master product/engineering
   charter entry. Decided here: yes, formalize it, because a real audit
   now has enough real subsystems to be worth auditing.
-- Date: 2026-08-20, rows updated 2026-08-21 where this session had fresh, direct evidence (see the "Third pass" entry below), again 2026-08-23 for the Frontend row's file path and the test-count evidence run (see the "Fourth pass" entry), again 2026-08-26 for a real `pnpm check` run that found and fixed two genuine regressions plus the Connectors/Credential-encryption/Rate-limiting/Observability rows (see the "Fifth pass" entry), again the same day for an owner-requested dev-database cleanup plus a second real RLS grant/policy gap found and fixed (see the "Sixth pass" entry), again 2026-08-27 for the QuickBooks reconciliation cron, guest full-entitlements fix, and connector/OAuth logo re-verification (see the "Seventh pass" entry), again the same day for 4 more stray `console.*` sites, a missing Xero audit-visibility gap, and a confirmed unlocked token-refresh race in 3 more connectors (see the "Eighth pass" entry), and again the same day for an agent-driven sibling-file sweep that found a mismatched doc comment on Gmail's token refresh, a missing retry opt-out on HubSpot's token endpoint, and a missing due-date audit log in Jira/Xero (see the "Ninth pass" entry) — untouched rows are still the second pass's evidence, not re-verified this pass.
+- Date: 2026-08-20, rows updated 2026-08-21 where this session had fresh, direct evidence (see the "Third pass" entry below), again 2026-08-23 for the Frontend row's file path and the test-count evidence run (see the "Fourth pass" entry), again 2026-08-26 for a real `pnpm check` run that found and fixed two genuine regressions plus the Connectors/Credential-encryption/Rate-limiting/Observability rows (see the "Fifth pass" entry), again the same day for an owner-requested dev-database cleanup plus a second real RLS grant/policy gap found and fixed (see the "Sixth pass" entry), again 2026-08-27 for the QuickBooks reconciliation cron, guest full-entitlements fix, and connector/OAuth logo re-verification (see the "Seventh pass" entry), again the same day for 4 more stray `console.*` sites, a missing Xero audit-visibility gap, and a confirmed unlocked token-refresh race in 3 more connectors (see the "Eighth pass" entry), again the same day for an agent-driven sibling-file sweep that found a mismatched doc comment on Gmail's token refresh, a missing retry opt-out on HubSpot's token endpoint, and a missing due-date audit log in Jira/Xero (see the "Ninth pass" entry), and again the same day for the last two open P1 items — one a real fix (deferred invite acceptance), one a stale-doc correction (the Stripe webhook ordering guard already existed) — bringing the open P1 count to zero (see the "Tenth pass" entry) — untouched rows are still the second pass's evidence, not re-verified this pass.
 - Scope: this is a repository-state audit, not a penetration test or a
   compliance certification. It reports what was inspected and what real
   evidence supports each classification — not a claim that SignalDesk has
@@ -317,6 +317,45 @@ the signal the pattern exists to surface elsewhere — deliberately not
 built. `pnpm check` re-run clean after all changes, `DATABASE_URL`
 confirmed loaded: **2,160 tests passing (582 persistence, live)**,
 typecheck/lint/format/db:check/build all clean.
+
+**Tenth pass** (2026-08-27, same day, closed both remaining open P1s from
+`ISSUES-REMAINING.md`, driven directly by the owner's "score higher, we
+need to launch this product" instruction): (1) The Stripe webhook
+out-of-order-delivery item audited first, since it looked like the
+cheaper win — a direct re-read of `updateSubscriptionFromStripe` found the
+exact SQL-layer ordering guard the P1 entry said didn't exist already
+real (migration `0063_subscription_event_ordering.sql`, which predates
+the P1 entry's own "found" date), with a matching regression test already
+passing. Corrected the stale doc entry rather than re-fixing something
+already fixed. (2) The genuinely open item — a pending invite could be
+permanently burned by an unconfirmed signup, since `handle_new_auth_user()`
+accepted it at the `auth.users` INSERT trigger, before Supabase's own
+email confirmation — got the real architectural fix its own P1 entry
+described: invite acceptance deferred to a new `on_auth_user_confirmed`
+trigger firing on the real `email_confirmed_at` transition, via two new
+SECURITY DEFINER functions (`provision_pending_identity`,
+`complete_deferred_identity_provisioning`, migration 0071).
+`provision_identity_and_organization` itself is untouched — every path
+that doesn't need deferring (OAuth, guest sign-in, a project not
+requiring confirmation) still provisions immediately through it, proven
+by the existing `invites.test.ts`/`identity.test.ts` tests passing
+unmodified. A fresh Supabase security-advisor scan immediately after
+applying (1) caught a real gap in the fix itself — the new trigger
+function was missing the standard `revoke execute from public, anon,
+authenticated` every other `SECURITY DEFINER` function here has — closed
+same-session with a second migration (0072) before moving on. 5 new
+live-database tests cover the actual regression (an abandoned signup no
+longer burns the invite), successful deferred acceptance, an
+expired-by-confirmation-time fallback, idempotency, and a mismatched-email
+rejection. Both migrations applied to the dev database only so far —
+**not yet applied to production**, and not end-to-end verified against a
+real Supabase Auth confirmation-email click (no way to simulate that from
+this test environment; documented as the same limitation this codebase's
+existing identity tests already accept for the trigger they stand in
+for). `pnpm check` re-run clean, `DATABASE_URL` confirmed loaded:
+**2,165 tests passing (587 persistence, live)**, typecheck/lint/format/
+db:check/build all clean. ISSUES-REMAINING.md's P1 section now reads
+"None open."
 
 ## What this audit deliberately did not do
 
