@@ -313,7 +313,7 @@ export const syncJobs = pgTable(
     ),
     check(
       "sync_jobs_trigger_allowed",
-      sql`${table.trigger} in ('initial', 'manual', 'webhook')`,
+      sql`${table.trigger} in ('initial', 'manual', 'webhook', 'scheduled_reconciliation')`,
     ),
     check(
       "sync_jobs_entity_type_allowed",

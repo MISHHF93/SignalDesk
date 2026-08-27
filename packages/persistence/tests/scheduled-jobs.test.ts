@@ -6,6 +6,7 @@ import { getPlanByKey } from "../src/plans";
 import {
   listActiveOrganizationIds,
   listOrganizationsNeedingDailyBrief,
+  listQuickBooksIntegrationsNeedingReconciliation,
   listStripeLinkedSubscriptions,
 } from "../src/scheduled-jobs";
 import {
@@ -16,7 +17,9 @@ import { withTenantContext } from "../src/tenant-context";
 import {
   getTestPool,
   queryWithoutTenantContext,
+  seedIntegration,
   seedMembership,
+  seedSyncJob,
 } from "./support";
 
 /**
@@ -341,6 +344,173 @@ describe.skipIf(!process.env.DATABASE_URL)(
       );
 
       expect(result.rows).toHaveLength(0);
+    });
+  },
+);
+
+/**
+ * The QuickBooks webhook reconciliation cron's real integration selection
+ * (migration 0069, ISSUES-REMAINING.md P1 #1) — same design and testing
+ * shape as `listOrganizationsNeedingDailyBrief` above.
+ */
+describe.skipIf(!process.env.DATABASE_URL)(
+  "listQuickBooksIntegrationsNeedingReconciliation (live database)",
+  () => {
+    let pool: DatabasePool;
+
+    beforeAll(() => {
+      pool = getTestPool();
+    });
+
+    afterAll(async () => {
+      await pool.end();
+    });
+
+    it("includes a freshly-seeded active QuickBooks integration", async () => {
+      const { organizationId } = await seedMembership(pool);
+      const realmId = `realm-${organizationId}`;
+      const integration = await seedIntegration(pool, organizationId, {
+        sourceSystem: "quickbooks",
+        externalAccountId: realmId,
+      });
+
+      const rows = await listQuickBooksIntegrationsNeedingReconciliation(
+        pool,
+        1000,
+      );
+
+      expect(rows).toContainEqual({
+        organizationId,
+        integrationId: integration.id,
+        realmId,
+      });
+    });
+
+    it("excludes an integration for a different source system", async () => {
+      const { organizationId } = await seedMembership(pool);
+      await seedIntegration(pool, organizationId, {
+        sourceSystem: "hubspot",
+      });
+
+      const rows = await listQuickBooksIntegrationsNeedingReconciliation(
+        pool,
+        1000,
+      );
+
+      expect(
+        rows.find((row) => row.organizationId === organizationId),
+      ).toBeUndefined();
+    });
+
+    it("excludes a disconnected QuickBooks integration", async () => {
+      const { organizationId } = await seedMembership(pool);
+      const integration = await seedIntegration(pool, organizationId, {
+        sourceSystem: "quickbooks",
+      });
+
+      await withTenantContext(pool, organizationId, async (client) => {
+        await client.query(
+          `update integrations set status = 'disconnected' where id = $1`,
+          [integration.id],
+        );
+      });
+
+      const rows = await listQuickBooksIntegrationsNeedingReconciliation(
+        pool,
+        1000,
+      );
+
+      expect(
+        rows.find((row) => row.integrationId === integration.id),
+      ).toBeUndefined();
+    });
+
+    it("excludes an integration belonging to a deactivated organization", async () => {
+      const { organizationId } = await seedMembership(pool);
+      const integration = await seedIntegration(pool, organizationId, {
+        sourceSystem: "quickbooks",
+      });
+
+      await withTenantContext(pool, organizationId, async (client) => {
+        await client.query(
+          `update organizations set deactivated_at = now() where id = $1`,
+          [organizationId],
+        );
+      });
+
+      const rows = await listQuickBooksIntegrationsNeedingReconciliation(
+        pool,
+        1000,
+      );
+
+      expect(
+        rows.find((row) => row.integrationId === integration.id),
+      ).toBeUndefined();
+    });
+
+    it("respects the max cap", async () => {
+      const org1 = await seedMembership(pool);
+      const org2 = await seedMembership(pool);
+      await seedIntegration(pool, org1.organizationId, {
+        sourceSystem: "quickbooks",
+      });
+      await seedIntegration(pool, org2.organizationId, {
+        sourceSystem: "quickbooks",
+      });
+
+      const rows = await listQuickBooksIntegrationsNeedingReconciliation(
+        pool,
+        1,
+      );
+
+      expect(rows).toHaveLength(1);
+    });
+
+    it("prioritizes a never-synced integration ahead of one synced today", async () => {
+      const { organizationId: neverSynced } = await seedMembership(pool);
+      const neverSyncedIntegration = await seedIntegration(pool, neverSynced, {
+        sourceSystem: "quickbooks",
+      });
+      const { organizationId: alreadySynced } = await seedMembership(pool);
+      const alreadySyncedIntegration = await seedIntegration(
+        pool,
+        alreadySynced,
+        { sourceSystem: "quickbooks" },
+      );
+      await seedSyncJob(
+        pool,
+        alreadySynced,
+        alreadySyncedIntegration.id,
+        "quickbooks",
+        "invoice",
+      );
+
+      // Same reasoning as listOrganizationsNeedingDailyBrief's own
+      // ordering tests above — size the cap from the real current count
+      // rather than a fixed guess, so the shared dev database's own
+      // accumulated test data can't push these two out of the result set
+      // before the ordering assertion gets a chance to run.
+      const max =
+        (
+          await listQuickBooksIntegrationsNeedingReconciliation(
+            pool,
+            1_000_000_000,
+          )
+        ).length + 10;
+      const rows = await listQuickBooksIntegrationsNeedingReconciliation(
+        pool,
+        max,
+      );
+      const neverSyncedIndex = rows.findIndex(
+        (row) => row.integrationId === neverSyncedIntegration.id,
+      );
+      const alreadySyncedIndex = rows.findIndex(
+        (row) => row.integrationId === alreadySyncedIntegration.id,
+      );
+
+      expect(neverSyncedIndex).toBeGreaterThanOrEqual(0);
+      expect(alreadySyncedIndex).toBeGreaterThanOrEqual(0);
+      expect(neverSyncedIndex).toBeLessThan(alreadySyncedIndex);
     });
   },
 );

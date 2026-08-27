@@ -50,6 +50,49 @@ export async function listOrganizationsNeedingDailyBrief(
   return result.rows.map((row) => row.id);
 }
 
+export interface QuickBooksIntegrationNeedingReconciliation {
+  readonly organizationId: string;
+  readonly integrationId: string;
+  readonly realmId: string;
+}
+
+/**
+ * The QuickBooks webhook reconciliation cron's real organization/
+ * integration selection (migration 0069, ISSUES-REMAINING.md P1 #1).
+ * Intuit never retries a webhook this app has already acked 200 for, so
+ * a realm whose inline sync failed mid-webhook has no automatic catch-up
+ * today beyond the next successful webhook or a manual "Sync Now" — this
+ * is that catch-up: a periodic, unconditional re-sync of every active
+ * QuickBooks connection, reusing the exact same
+ * `syncQuickBooksInvoices`/`syncQuickBooksPayments` functions the webhook
+ * and "Sync Now" already call, so a webhook that silently dropped simply
+ * gets caught by the next scheduled pass. Same fair-rotation ordering
+ * `list_organizations_needing_daily_brief` (0065b) already established —
+ * least-recently-synced first, nulls first (never synced ⇒ highest
+ * priority) — so a real connection count exceeding `max` is delayed, not
+ * permanently excluded, the same bug class 0056/0065b already found and
+ * fixed twice elsewhere in this schema.
+ */
+export async function listQuickBooksIntegrationsNeedingReconciliation(
+  pool: DatabasePool,
+  max: number,
+): Promise<readonly QuickBooksIntegrationNeedingReconciliation[]> {
+  const result = await pool.query<{
+    organization_id: string;
+    integration_id: string;
+    realm_id: string;
+  }>(
+    "select organization_id, integration_id, realm_id from public.list_quickbooks_integrations_needing_reconciliation($1)",
+    [max],
+  );
+
+  return result.rows.map((row) => ({
+    organizationId: row.organization_id,
+    integrationId: row.integration_id,
+    realmId: row.realm_id,
+  }));
+}
+
 export interface StripeLinkedSubscription {
   readonly organizationId: string;
   readonly stripeSubscriptionId: string;

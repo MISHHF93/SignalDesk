@@ -30,6 +30,10 @@
     {
       "path": "/api/cron/billing-reconciliation",
       "schedule": "0 5 * * *"
+    },
+    {
+      "path": "/api/cron/quickbooks-reconciliation",
+      "schedule": "0 6 * * *"
     }
   ]
 }

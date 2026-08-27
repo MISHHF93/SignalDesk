@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import type { DatabasePool } from "./client";
 import { withTenantContext } from "./tenant-context";
 
-export type SyncJobTrigger = "initial" | "manual" | "webhook";
+export type SyncJobTrigger =
+  "initial" | "manual" | "webhook" | "scheduled_reconciliation";
 export type SyncJobStatus = "running" | "succeeded" | "failed";
 /** The canonical entity a sync run produced — distinct from
  * `sourceSystem` (FK'd to the connector's own source_system, so it can't
