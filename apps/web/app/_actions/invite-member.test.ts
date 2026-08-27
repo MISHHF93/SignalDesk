@@ -8,10 +8,7 @@ vi.mock("@signaldesk/persistence");
 vi.mock("@signaldesk/integrations/resend");
 
 import { sendEmail } from "@signaldesk/integrations/resend";
-import {
-  createOrganizationInvite,
-  recordAuditEvent,
-} from "@signaldesk/persistence";
+import { createOrganizationInvite } from "@signaldesk/persistence";
 
 import { checkRateLimit } from "../_lib/rate-limit";
 import { getRequestOrigin } from "../_lib/request-origin";
@@ -24,7 +21,6 @@ const mockedCheckRateLimit = vi.mocked(checkRateLimit);
 const mockedGetRequestOrigin = vi.mocked(getRequestOrigin);
 const mockedGetResendConfig = vi.mocked(getResendConfig);
 const mockedCreateOrganizationInvite = vi.mocked(createOrganizationInvite);
-const mockedRecordAuditEvent = vi.mocked(recordAuditEvent);
 const mockedSendEmail = vi.mocked(sendEmail);
 
 const OWNER_SESSION = {
@@ -163,18 +159,6 @@ describe("inviteMemberAction", () => {
       "https://app.example.com/signup?invite=invite-token-1",
     );
     expect(mockedSendEmail).not.toHaveBeenCalled();
-    expect(mockedRecordAuditEvent).toHaveBeenCalledWith(
-      undefined,
-      "org-1",
-      expect.objectContaining({
-        userId: "user-1",
-        eventType: "invite.created",
-        subjectType: "organization_invite",
-        subjectId: "invite-id-1",
-        outcome: "succeeded",
-        metadata: { email: "teammate@example.com", role: "member" },
-      }),
-    );
   });
 
   it("sends a real invite email and confirms it was sent when Resend is configured", async () => {
@@ -199,14 +183,6 @@ describe("inviteMemberAction", () => {
       error: null,
       message: "Invite sent to teammate@example.com.",
     });
-    expect(mockedRecordAuditEvent).toHaveBeenCalledWith(
-      undefined,
-      "org-1",
-      expect.objectContaining({
-        eventType: "invite.created",
-        subjectId: "invite-id-1",
-      }),
-    );
   });
 
   it("returns a description of the failure when invite creation throws", async () => {
@@ -224,6 +200,5 @@ describe("inviteMemberAction", () => {
       error: "duplicate pending invite",
       message: null,
     });
-    expect(mockedRecordAuditEvent).not.toHaveBeenCalled();
   });
 });

@@ -6,7 +6,7 @@
   question, not yet decided" in that backlog's Master product/engineering
   charter entry. Decided here: yes, formalize it, because a real audit
   now has enough real subsystems to be worth auditing.
-- Date: 2026-08-20, rows updated 2026-08-21 where this session had fresh, direct evidence (see the "Third pass" entry below), again 2026-08-23 for the Frontend row's file path and the test-count evidence run (see the "Fourth pass" entry), again 2026-08-26 for a real `pnpm check` run that found and fixed two genuine regressions plus the Connectors/Credential-encryption/Rate-limiting/Observability rows (see the "Fifth pass" entry), again the same day for an owner-requested dev-database cleanup plus a second real RLS grant/policy gap found and fixed (see the "Sixth pass" entry), again 2026-08-27 for the QuickBooks reconciliation cron, guest full-entitlements fix, and connector/OAuth logo re-verification (see the "Seventh pass" entry), again the same day for 4 more stray `console.*` sites, a missing Xero audit-visibility gap, and a confirmed unlocked token-refresh race in 3 more connectors (see the "Eighth pass" entry), again the same day for an agent-driven sibling-file sweep that found a mismatched doc comment on Gmail's token refresh, a missing retry opt-out on HubSpot's token endpoint, and a missing due-date audit log in Jira/Xero (see the "Ninth pass" entry), again the same day for the last two open P1 items — one a real fix (deferred invite acceptance), one a stale-doc correction (the Stripe webhook ordering guard already existed) — bringing the open P1 count to zero (see the "Tenth pass" entry), again the same day for an agent-driven sweep of ~40 Server Action files that found 3 more real sibling-pattern gaps: a real email send with no rate limit, two organization-membership mutations with no audit trail, and a CSV-import action missing half of the sync-observability pattern it otherwise already follows (see the "Eleventh pass" entry), again the same day for a sweep of the Agent Fabric and Intelligence Core packages that found an entirely untested coordinator function and thin test coverage on the two lead-oriented capabilities, while confirming the `canExecute` safety invariant itself is solid (see the "Twelfth pass" entry), again the same day for a sweep of every OAuth callback route, the QuickBooks webhook, and all 3 cron routes — which came back clean across CSRF/PKCE/error-handling/HMAC verification, plus one real timing-side-channel hardening item found and fixed on the cron `CRON_SECRET` check (see the "Thirteenth pass" entry), again the same day for a sweep of every `_components`/`_cards` frontend file — 2 real gaps found and fixed (a missing pending-state on the sign-out button, a silently-dropped batch-task-creation failure), everything else confirmed clean (see the "Fourteenth pass" entry), and again the same day for a sweep of the remaining unaudited packages and API routes that found 2 real `packages/schemas` gaps — an inconsistent field-length bound and two entirely untested source-record schemas on live sync paths, both fixed (see the "Fifteenth pass" entry) — untouched rows are still the second pass's evidence, not re-verified this pass.
+- Date: 2026-08-20, rows updated 2026-08-21 where this session had fresh, direct evidence (see the "Third pass" entry below), again 2026-08-23 for the Frontend row's file path and the test-count evidence run (see the "Fourth pass" entry), again 2026-08-26 for a real `pnpm check` run that found and fixed two genuine regressions plus the Connectors/Credential-encryption/Rate-limiting/Observability rows (see the "Fifth pass" entry), again the same day for an owner-requested dev-database cleanup plus a second real RLS grant/policy gap found and fixed (see the "Sixth pass" entry), again 2026-08-27 for the QuickBooks reconciliation cron, guest full-entitlements fix, and connector/OAuth logo re-verification (see the "Seventh pass" entry), again the same day for 4 more stray `console.*` sites, a missing Xero audit-visibility gap, and a confirmed unlocked token-refresh race in 3 more connectors (see the "Eighth pass" entry), again the same day for an agent-driven sibling-file sweep that found a mismatched doc comment on Gmail's token refresh, a missing retry opt-out on HubSpot's token endpoint, and a missing due-date audit log in Jira/Xero (see the "Ninth pass" entry), again the same day for the last two open P1 items — one a real fix (deferred invite acceptance), one a stale-doc correction (the Stripe webhook ordering guard already existed) — bringing the open P1 count to zero (see the "Tenth pass" entry), again the same day for an agent-driven sweep of ~40 Server Action files that found 3 more real sibling-pattern gaps: a real email send with no rate limit, two organization-membership mutations with no audit trail, and a CSV-import action missing half of the sync-observability pattern it otherwise already follows (see the "Eleventh pass" entry), again the same day for a sweep of the Agent Fabric and Intelligence Core packages that found an entirely untested coordinator function and thin test coverage on the two lead-oriented capabilities, while confirming the `canExecute` safety invariant itself is solid (see the "Twelfth pass" entry), again the same day for a sweep of every OAuth callback route, the QuickBooks webhook, and all 3 cron routes — which came back clean across CSRF/PKCE/error-handling/HMAC verification, plus one real timing-side-channel hardening item found and fixed on the cron `CRON_SECRET` check (see the "Thirteenth pass" entry), again the same day for a sweep of every `_components`/`_cards` frontend file — 2 real gaps found and fixed (a missing pending-state on the sign-out button, a silently-dropped batch-task-creation failure), everything else confirmed clean (see the "Fourteenth pass" entry), and again the same day for a sweep of the remaining unaudited packages and API routes that found 2 real `packages/schemas` gaps — an inconsistent field-length bound and two entirely untested source-record schemas on live sync paths, both fixed (see the "Fifteenth pass" entry), and again the same day for a `packages/persistence` sibling-comparison sweep of the invite/membership write paths that found the invite create/revoke audit events were being recorded outside the state-changing transaction — the one outlier among every sibling write function in the package — fixed to the established same-transaction pattern with a real rollback regression test (see the "Sixteenth pass" entry) — untouched rows are still the second pass's evidence, not re-verified this pass.
 - Scope: this is a repository-state audit, not a penetration test or a
   compliance certification. It reports what was inspected and what real
   evidence supports each classification — not a claim that SignalDesk has
@@ -511,6 +511,39 @@ the existing boundary test updated to match the widened bound; full
 `packages/schemas` suite 186/186 passing. `pnpm check` re-run clean,
 `DATABASE_URL` confirmed loaded: **2,227 tests passing (587 persistence,
 live)**, typecheck/lint/format/db:check/build all clean.
+
+**Sixteenth pass** (2026-08-27, same day, `packages/persistence`
+sibling-comparison sweep of the invite/membership write paths): 1 real
+gap found and fixed. `createOrganizationInvite`/`revokeOrganizationInvite`
+(`packages/persistence/src/invites.ts`) were the one outlier among every
+other "create/update a row and record a real audit event" function in
+this package — `updateOrganizationBusinessProfile`,
+`updateConnectorSettings`, `createGoal`, and `createInternalTask` all
+write their audit event inside the same transaction as the state change
+(`insertAuditEvent(client, ...)`); the invite functions instead relied on
+a separate, non-transactional `recordAuditEvent` call made by the calling
+Server Action _after_ the transaction already committed. Since
+`organization_invites` controls who can join and access a tenant's data,
+this was one of the more security-relevant writes to have left durably
+separable from its own audit trail — a crash or dropped connection
+between the commit and the Server Action's follow-up call would leave a
+real, committed invite (or revocation) with no audit record at all, and
+nothing would ever notice. Fixed to match the established pattern: both
+functions now call `insertAuditEvent` inside their own
+`withTenantContext` closure, so a failure there rolls back the invite
+change too, instead of leaving a committed change unaudited.
+`revokeOrganizationInvite` gained a new required `userId` parameter (it
+previously took none) since a real audit event needs a real actor; the
+two calling Server Actions (`invite-member.ts`, `revoke-invite.ts`) had
+their now-redundant separate `recordAuditEvent` calls removed. 3 new
+live-DB tests added to `packages/persistence/tests/invites.test.ts`,
+including a genuine "rolls back the revocation too when the audit write
+fails" regression test (forces `insertAuditEvent` to throw via a
+nonexistent actor `userId`, then asserts the invite's `status` is still
+`pending` — proving the rollback is real, not just documented). `pnpm
+check` re-run clean, `DATABASE_URL` confirmed loaded: **2,229 tests
+passing (590 persistence, live)**, typecheck/lint/format/db:check/build
+all clean.
 
 ## What this audit deliberately did not do
 

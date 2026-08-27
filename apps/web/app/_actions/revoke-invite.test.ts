@@ -4,10 +4,7 @@ vi.mock("../_lib/session");
 vi.mock("../_lib/rate-limit");
 vi.mock("@signaldesk/persistence");
 
-import {
-  recordAuditEvent,
-  revokeOrganizationInvite,
-} from "@signaldesk/persistence";
+import { revokeOrganizationInvite } from "@signaldesk/persistence";
 
 import { checkRateLimit } from "../_lib/rate-limit";
 import { getCurrentOrganization } from "../_lib/session";
@@ -16,7 +13,6 @@ import { revokeInviteAction } from "./revoke-invite";
 const mockedGetCurrentOrganization = vi.mocked(getCurrentOrganization);
 const mockedRevokeOrganizationInvite = vi.mocked(revokeOrganizationInvite);
 const mockedCheckRateLimit = vi.mocked(checkRateLimit);
-const mockedRecordAuditEvent = vi.mocked(recordAuditEvent);
 
 const OWNER_SESSION = {
   organizationId: "org-1",
@@ -78,7 +74,7 @@ describe("revokeInviteAction", () => {
     },
   );
 
-  it("revokes the invite on the happy path", async () => {
+  it("revokes the invite on the happy path, passing the real actor through for the audit event revokeOrganizationInvite itself records", async () => {
     mockedGetCurrentOrganization.mockResolvedValue(OWNER_SESSION);
     mockedRevokeOrganizationInvite.mockResolvedValue(true);
 
@@ -88,32 +84,8 @@ describe("revokeInviteAction", () => {
     expect(mockedRevokeOrganizationInvite).toHaveBeenCalledWith(
       undefined,
       "org-1",
+      "user-1",
       "invite-1",
-    );
-    expect(mockedRecordAuditEvent).toHaveBeenCalledWith(
-      undefined,
-      "org-1",
-      expect.objectContaining({
-        userId: "user-1",
-        eventType: "invite.revoked",
-        subjectType: "organization_invite",
-        subjectId: "invite-1",
-        outcome: "succeeded",
-        metadata: { revoked: true },
-      }),
-    );
-  });
-
-  it("regression: records an honest no-op, not a fabricated revocation, for an already-accepted/revoked invite — a real gap found by review since this action recorded no audit event at all", async () => {
-    mockedGetCurrentOrganization.mockResolvedValue(OWNER_SESSION);
-    mockedRevokeOrganizationInvite.mockResolvedValue(false);
-
-    await revokeInviteAction("invite-1");
-
-    expect(mockedRecordAuditEvent).toHaveBeenCalledWith(
-      undefined,
-      "org-1",
-      expect.objectContaining({ metadata: { revoked: false } }),
     );
   });
 
@@ -126,6 +98,5 @@ describe("revokeInviteAction", () => {
     const result = await revokeInviteAction("invite-1");
 
     expect(result).toEqual({ ok: false, error: "invite not found" });
-    expect(mockedRecordAuditEvent).not.toHaveBeenCalled();
   });
 });

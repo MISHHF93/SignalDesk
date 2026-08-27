@@ -150,6 +150,7 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const revoked = await revokeOrganizationInvite(
         pool,
         organizationId,
+        userId,
         invite.id,
       );
       expect(revoked).toBe(true);
@@ -161,9 +162,117 @@ describe.skipIf(!process.env.DATABASE_URL)(
       const revokedAgain = await revokeOrganizationInvite(
         pool,
         organizationId,
+        userId,
         invite.id,
       );
       expect(revokedAgain).toBe(false);
+    });
+
+    // Real gap found by review: createOrganizationInvite/
+    // revokeOrganizationInvite used to leave their audit event to a
+    // separate call in the calling Server Action, after this function's
+    // own transaction already committed — unlike this package's
+    // established same-transaction pattern for a policy-relevant write
+    // (updateOrganizationBusinessProfile/updateConnectorSettings/
+    // createGoal). These exercise the real, fixed behavior directly.
+    it("records a real audit event in the same transaction as the invite creation", async () => {
+      const { organizationId, userId } = await seedMembership(pool);
+      const email = `audited-${randomUUID()}@example.test`;
+
+      const { invite } = await createOrganizationInvite(
+        pool,
+        organizationId,
+        userId,
+        { email, role: "admin" },
+      );
+
+      const auditRow = await withTenantContext(
+        pool,
+        organizationId,
+        async (client) => {
+          const result = await client.query(
+            "select event_type, outcome, subject_id from audit_events where event_type = 'invite.created' and subject_id = $1",
+            [invite.id],
+          );
+          return result.rows[0];
+        },
+      );
+
+      expect(auditRow).toEqual({
+        event_type: "invite.created",
+        outcome: "succeeded",
+        subject_id: invite.id,
+      });
+    });
+
+    it("records a real audit event in the same transaction as the invite revocation, with the honest revoked outcome", async () => {
+      const { organizationId, userId } = await seedMembership(pool);
+      const { invite } = await createOrganizationInvite(
+        pool,
+        organizationId,
+        userId,
+        {
+          email: `audited-revoke-${randomUUID()}@example.test`,
+          role: "member",
+        },
+      );
+
+      await revokeOrganizationInvite(pool, organizationId, userId, invite.id);
+
+      const auditRow = await withTenantContext(
+        pool,
+        organizationId,
+        async (client) => {
+          const result = await client.query(
+            "select event_type, outcome, metadata from audit_events where event_type = 'invite.revoked' and subject_id = $1",
+            [invite.id],
+          );
+          return result.rows[0];
+        },
+      );
+
+      expect(auditRow).toEqual({
+        event_type: "invite.revoked",
+        outcome: "succeeded",
+        metadata: { revoked: true },
+      });
+    });
+
+    it("rolls back the revocation too when the audit write fails, rather than leaving an unaudited change committed", async () => {
+      const inviter = await seedMembership(pool);
+      const { invite } = await createOrganizationInvite(
+        pool,
+        inviter.organizationId,
+        inviter.userId,
+        { email: `no-rollback-${randomUUID()}@example.test`, role: "member" },
+      );
+
+      // No real membership exists for this user id in this org, so the
+      // audit insert's own `resolveMembershipId` throws — proving the
+      // revocation above it in the same transaction is rolled back too,
+      // not left committed with a missing audit trail.
+      await expect(
+        revokeOrganizationInvite(
+          pool,
+          inviter.organizationId,
+          "00000000-0000-0000-0000-000000000000",
+          invite.id,
+        ),
+      ).rejects.toThrow(/No membership found/);
+
+      const status = await withTenantContext(
+        pool,
+        inviter.organizationId,
+        async (client) => {
+          const result = await client.query<{ status: string }>(
+            "select status from organization_invites where id = $1",
+            [invite.id],
+          );
+          return result.rows[0]?.status;
+        },
+      );
+
+      expect(status).toBe("pending");
     });
 
     it("accepting a real invite joins the SAME organization with the invited role, not a new one", async () => {

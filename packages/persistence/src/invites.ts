@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import { insertAuditEvent } from "./audit-events";
 import type { DatabasePool } from "./client";
 import { resolveMembershipId } from "./membership";
 import { withTenantContext } from "./tenant-context";
@@ -72,6 +73,19 @@ export interface CreateOrganizationInviteResult {
  * caller's responsibility (the Server Action), not this function's — the
  * same division of labor every other real write in this app already
  * uses (RLS for tenant isolation, application code for role checks).
+ *
+ * Real gap found by review: the audit event for this write used to be
+ * recorded by a separate `recordAuditEvent` call in the calling Server
+ * Action, after this transaction already committed — unlike every other
+ * "create/update a row and record a real audit event" function in this
+ * package (`updateOrganizationBusinessProfile`/`updateConnectorSettings`/
+ * `createGoal`/`createInternalTask`), which all write the audit event
+ * inside the same transaction as the state change. `organization_invites`
+ * controls who can join and access a tenant's data, making this one of
+ * the more security-relevant writes to have left durably separable from
+ * its own audit trail. Fixed to match the established same-transaction
+ * pattern: a failure here rolls back the invite too, instead of leaving
+ * a committed invite with no audit record.
  */
 export async function createOrganizationInvite(
   pool: DatabasePool,
@@ -103,6 +117,15 @@ export async function createOrganizationInvite(
     if (!row) {
       throw new Error("organization_invites insert returned no row");
     }
+
+    await insertAuditEvent(client, organizationId, {
+      userId,
+      eventType: "invite.created",
+      subjectType: "organization_invite",
+      subjectId: row.id,
+      outcome: "succeeded",
+      metadata: { email, role: input.role },
+    });
 
     return { invite: toInvite(row), token };
   });
@@ -144,10 +167,19 @@ export async function listOrganizationInvites(
  * already-accepted/revoked one, never an error, matching this app's
  * general idempotent-write convention. Authorization (only an owner/admin
  * may revoke) is the caller's responsibility, same as creation.
+ *
+ * Real gap found by review: same as `createOrganizationInvite`'s own doc
+ * comment — the audit event used to be recorded by a separate call after
+ * this transaction already committed, unlike this package's established
+ * same-transaction pattern. `userId` is a new required parameter (this
+ * function previously took none) since a real audit event needs a real
+ * actor; the honest `revoked` boolean is recorded either way, not
+ * fabricated as `true` for a no-op on an already-gone invite.
  */
 export async function revokeOrganizationInvite(
   pool: DatabasePool,
   organizationId: string,
+  userId: string,
   inviteId: string,
 ): Promise<boolean> {
   return withTenantContext(pool, organizationId, async (client) => {
@@ -158,7 +190,18 @@ export async function revokeOrganizationInvite(
       [organizationId, inviteId],
     );
 
-    return (result.rowCount ?? 0) > 0;
+    const revoked = (result.rowCount ?? 0) > 0;
+
+    await insertAuditEvent(client, organizationId, {
+      userId,
+      eventType: "invite.revoked",
+      subjectType: "organization_invite",
+      subjectId: inviteId,
+      outcome: "succeeded",
+      metadata: { revoked },
+    });
+
+    return revoked;
   });
 }
 
