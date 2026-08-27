@@ -13,6 +13,7 @@ import {
   listRecentSyncJobsForConnection,
   startSyncJob,
   storeZendeskTokens,
+  withAdvisoryLock,
   type DatabasePool,
   type SyncJobTrigger,
 } from "@signaldesk/persistence";
@@ -28,6 +29,8 @@ import { getZendeskClientCredentials } from "./zendesk-config";
 // stays modest even though per_page can go up to 1,000).
 const MAX_TICKET_PAGES = 20;
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
+const TOKEN_REFRESH_LOCK_MAX_ATTEMPTS = 5;
+const TOKEN_REFRESH_LOCK_RETRY_DELAY_MS = 300;
 
 export interface ZendeskSyncResult {
   readonly ingested: number;
@@ -46,12 +49,23 @@ export interface ZendeskSyncResult {
  * Zendesk access tokens last only 1 hour and rotate the refresh token on
  * every use — both the new access and refresh tokens must be persisted
  * together, the same real behavior Jira's own refresh already handles.
+ *
+ * Real gap found by review: this used to read-check-refresh-store with no
+ * locking at all — the exact race already fixed for QuickBooks/Xero/Jira
+ * (`ensureFreshXeroAccessToken`, `sync-xero.ts`). Zendesk's own
+ * `client.ts` explicitly documents that it rotates the refresh token on
+ * every use, so two concurrent callers (a scheduled sync and a manual
+ * "Sync Now") reading the same near-expiry token could both call
+ * `refreshZendeskAccessToken` with it — only one succeeds, the other gets
+ * a genuine `invalid_grant` instead of retrying cleanly. Fixed with the
+ * same `withAdvisoryLock`-backed retry shape as Xero.
  */
 export async function ensureFreshZendeskAccessToken(
   pool: DatabasePool,
   organizationId: string,
   integrationId: string,
   subdomain: string,
+  attempt = 0,
 ): Promise<string> {
   const tokens = await getZendeskTokens(pool, organizationId, integrationId);
 
@@ -63,19 +77,60 @@ export async function ensureFreshZendeskAccessToken(
     return tokens.accessToken;
   }
 
-  const config = { ...getZendeskClientCredentials(), subdomain };
-  const refreshed = await refreshZendeskAccessToken(
-    config,
-    tokens.refreshToken,
+  const refreshedAccessToken = await withAdvisoryLock(
+    pool,
+    `zendesk-token-refresh:${integrationId}`,
+    async (): Promise<string> => {
+      // Re-read inside the lock — a concurrent caller may have already
+      // refreshed and stored a fresh token while we were waiting to
+      // acquire it.
+      const currentTokens =
+        (await getZendeskTokens(pool, organizationId, integrationId)) ?? tokens;
+
+      if (
+        currentTokens.expiresAt.getTime() - Date.now() >
+        TOKEN_REFRESH_BUFFER_MS
+      ) {
+        return currentTokens.accessToken;
+      }
+
+      const config = { ...getZendeskClientCredentials(), subdomain };
+      const refreshed = await refreshZendeskAccessToken(
+        config,
+        currentTokens.refreshToken,
+      );
+
+      await storeZendeskTokens(pool, organizationId, integrationId, {
+        accessToken: refreshed.accessToken,
+        refreshToken: refreshed.refreshToken,
+        expiresAt: new Date(Date.now() + refreshed.expiresIn * 1000),
+      });
+
+      return refreshed.accessToken;
+    },
   );
 
-  await storeZendeskTokens(pool, organizationId, integrationId, {
-    accessToken: refreshed.accessToken,
-    refreshToken: refreshed.refreshToken,
-    expiresAt: new Date(Date.now() + refreshed.expiresIn * 1000),
-  });
+  if (refreshedAccessToken !== null) {
+    return refreshedAccessToken;
+  }
 
-  return refreshed.accessToken;
+  if (attempt >= TOKEN_REFRESH_LOCK_MAX_ATTEMPTS) {
+    throw new Error(
+      "Could not refresh the Zendesk access token — another refresh for this connection was already in progress.",
+    );
+  }
+
+  await new Promise((resolve) =>
+    setTimeout(resolve, TOKEN_REFRESH_LOCK_RETRY_DELAY_MS),
+  );
+
+  return ensureFreshZendeskAccessToken(
+    pool,
+    organizationId,
+    integrationId,
+    subdomain,
+    attempt + 1,
+  );
 }
 
 /**

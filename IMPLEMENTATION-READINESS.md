@@ -6,7 +6,7 @@
   question, not yet decided" in that backlog's Master product/engineering
   charter entry. Decided here: yes, formalize it, because a real audit
   now has enough real subsystems to be worth auditing.
-- Date: 2026-08-20, rows updated 2026-08-21 where this session had fresh, direct evidence (see the "Third pass" entry below), again 2026-08-23 for the Frontend row's file path and the test-count evidence run (see the "Fourth pass" entry), again 2026-08-26 for a real `pnpm check` run that found and fixed two genuine regressions plus the Connectors/Credential-encryption/Rate-limiting/Observability rows (see the "Fifth pass" entry), again the same day for an owner-requested dev-database cleanup plus a second real RLS grant/policy gap found and fixed (see the "Sixth pass" entry), and again 2026-08-27 for the QuickBooks reconciliation cron, guest full-entitlements fix, and connector/OAuth logo re-verification (see the "Seventh pass" entry) — untouched rows are still the second pass's evidence, not re-verified this pass.
+- Date: 2026-08-20, rows updated 2026-08-21 where this session had fresh, direct evidence (see the "Third pass" entry below), again 2026-08-23 for the Frontend row's file path and the test-count evidence run (see the "Fourth pass" entry), again 2026-08-26 for a real `pnpm check` run that found and fixed two genuine regressions plus the Connectors/Credential-encryption/Rate-limiting/Observability rows (see the "Fifth pass" entry), again the same day for an owner-requested dev-database cleanup plus a second real RLS grant/policy gap found and fixed (see the "Sixth pass" entry), again 2026-08-27 for the QuickBooks reconciliation cron, guest full-entitlements fix, and connector/OAuth logo re-verification (see the "Seventh pass" entry), and again the same day for 4 more stray `console.*` sites, a missing Xero audit-visibility gap, and a confirmed unlocked token-refresh race in 3 more connectors (see the "Eighth pass" entry) — untouched rows are still the second pass's evidence, not re-verified this pass.
 - Scope: this is a repository-state audit, not a penetration test or a
   compliance certification. It reports what was inspected and what real
   evidence supports each classification — not a claim that SignalDesk has
@@ -239,6 +239,48 @@ a negligible performance gain is the wrong trade. `pnpm audit` clean; the
 grant-vs-policy security check (the one that matters) clean. `pnpm check`
 green after each of the three changes: 2,128 tests passing (582
 persistence, live) after (1)+(2); unchanged after (3) (docs/asset-only).
+
+**Eighth pass** (2026-08-27, same day, continued scanning against three
+more cross-connector consistency patterns, each independently verified):
+(1) A fresh sibling-file sweep found 4 more raw `console.*` calls the
+original ADR 0061 logging migration missed (`sync-quickbooks.ts`'s and
+`sync-asana.ts`'s own `console.info`, two `console.error`s in
+`instrumentation.ts`'s startup OAuth-config validation) — all four now
+route through `Logger`, leaving exactly the same two documented
+exceptions (`error.tsx`, one `packages/intelligence` line) the migration
+always intended, not the four-undocumented-extra state this session found
+it actually in. (2) Xero's invoice mapper had the identical
+silently-defaulted-`customerName` fallback HubSpot/QuickBooks/Asana/
+Salesforce/Jira/Zendesk's mappers already surface as a counted, logged
+signal — but, unlike all six of those, never gained the matching
+`detectXeroInvoiceDefaultedFields` audit-visibility function; added, wired
+into `sync-xero.ts`'s existing `defaultedNameCount` pattern exactly.
+(3) Re-opened the token-refresh-race question this file's Sixth/Seventh
+passes never directly addressed: `ensureFreshQuickBooksAccessToken`/
+`ensureFreshXeroAccessToken`/`ensureFreshJiraAccessToken` already use
+`withAdvisoryLock` to close a real read-check-refresh-store race against
+concurrent callers, but Zendesk/HubSpot/Asana's equivalent functions had
+none. Checked each provider's actual documented behavior rather than
+assuming: Zendesk's own `client.ts` already states outright that it
+rotates the refresh token on every use — a confirmed gap, fixed. HubSpot's
+own developer documentation (fetched directly, not assumed from training
+data) states a refresh call "potentially" returns a new refresh token and
+explicitly recommends locking around refreshes for exactly this reason —
+also a confirmed gap, fixed. Asana's documentation, support forum, and
+OAuth client SDKs were checked and found genuinely silent on whether its
+refresh token rotates at all — not claimed as a confirmed gap, but the
+same `withAdvisoryLock` protection was still applied defensively (it costs
+nothing when nothing is rotating, and closes the race if Asana's behavior
+turns out to match the other three). All three fixes follow the exact
+retry-with-backoff shape already established for Xero, with matching new
+test files (`sync-zendesk.test.ts`, `sync-hubspot.test.ts`,
+`sync-asana.test.ts`, 6 tests each, all mocked — no live DB needed). Full
+`pnpm check` re-run clean after all three changes, with `DATABASE_URL`
+confirmed loaded this time (a prior same-session check had silently run
+`packages/persistence` and 7 `apps/web` tests skipped rather than passing
+because this shell lacked it — caught and re-run properly rather than
+left uncorrected): **2,151 tests passing (582 persistence, live)**,
+typecheck/lint/format/db:check/build all clean.
 
 ## What this audit deliberately did not do
 

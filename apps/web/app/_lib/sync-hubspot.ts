@@ -15,6 +15,7 @@ import {
   listRecentSyncJobsForConnection,
   startSyncJob,
   storeHubSpotTokens,
+  withAdvisoryLock,
   type DatabasePool,
   type SyncJobTrigger,
 } from "@signaldesk/persistence";
@@ -29,6 +30,8 @@ import { logger } from "./logger";
 // count.
 const MAX_DEAL_PAGES = 20;
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
+const TOKEN_REFRESH_LOCK_MAX_ATTEMPTS = 5;
+const TOKEN_REFRESH_LOCK_RETRY_DELAY_MS = 300;
 
 export interface HubSpotSyncResult {
   readonly ingested: number;
@@ -48,12 +51,24 @@ export interface HubSpotSyncResult {
  * re-persisting it first if it's expired or expiring within 5 minutes.
  * The OAuth callback never needs this (it always has a freshly-exchanged
  * token) — this exists for "Sync Now", which runs long after connect.
+ *
+ * Real gap found by review: this used to read-check-refresh-store with no
+ * locking at all — the exact race already fixed for QuickBooks/Xero/Jira/
+ * Zendesk (`ensureFreshXeroAccessToken`, `sync-xero.ts`). HubSpot's own
+ * developer documentation confirms a refresh call "potentially" returns a
+ * new refresh token and explicitly recommends locking around refreshes for
+ * this reason — so two concurrent callers (a scheduled sync and a manual
+ * "Sync Now") reading the same near-expiry token could both call
+ * `refreshHubSpotAccessToken` with it, and if HubSpot happens to rotate on
+ * that call, only one succeeds. Fixed with the same
+ * `withAdvisoryLock`-backed retry shape as Xero.
  */
 export async function ensureFreshHubSpotAccessToken(
   pool: DatabasePool,
   organizationId: string,
   integrationId: string,
   origin: string,
+  attempt = 0,
 ): Promise<string> {
   const tokens = await getHubSpotTokens(pool, organizationId, integrationId);
 
@@ -65,19 +80,60 @@ export async function ensureFreshHubSpotAccessToken(
     return tokens.accessToken;
   }
 
-  const config = getHubSpotOAuthConfig(origin);
-  const refreshed = await refreshHubSpotAccessToken(
-    config,
-    tokens.refreshToken,
+  const refreshedAccessToken = await withAdvisoryLock(
+    pool,
+    `hubspot-token-refresh:${integrationId}`,
+    async (): Promise<string> => {
+      // Re-read inside the lock — a concurrent caller may have already
+      // refreshed and stored a fresh token while we were waiting to
+      // acquire it.
+      const currentTokens =
+        (await getHubSpotTokens(pool, organizationId, integrationId)) ?? tokens;
+
+      if (
+        currentTokens.expiresAt.getTime() - Date.now() >
+        TOKEN_REFRESH_BUFFER_MS
+      ) {
+        return currentTokens.accessToken;
+      }
+
+      const config = getHubSpotOAuthConfig(origin);
+      const refreshed = await refreshHubSpotAccessToken(
+        config,
+        currentTokens.refreshToken,
+      );
+
+      await storeHubSpotTokens(pool, organizationId, integrationId, {
+        accessToken: refreshed.accessToken,
+        refreshToken: refreshed.refreshToken,
+        expiresAt: new Date(Date.now() + refreshed.expiresIn * 1000),
+      });
+
+      return refreshed.accessToken;
+    },
   );
 
-  await storeHubSpotTokens(pool, organizationId, integrationId, {
-    accessToken: refreshed.accessToken,
-    refreshToken: refreshed.refreshToken,
-    expiresAt: new Date(Date.now() + refreshed.expiresIn * 1000),
-  });
+  if (refreshedAccessToken !== null) {
+    return refreshedAccessToken;
+  }
 
-  return refreshed.accessToken;
+  if (attempt >= TOKEN_REFRESH_LOCK_MAX_ATTEMPTS) {
+    throw new Error(
+      "Could not refresh the HubSpot access token — another refresh for this connection was already in progress.",
+    );
+  }
+
+  await new Promise((resolve) =>
+    setTimeout(resolve, TOKEN_REFRESH_LOCK_RETRY_DELAY_MS),
+  );
+
+  return ensureFreshHubSpotAccessToken(
+    pool,
+    organizationId,
+    integrationId,
+    origin,
+    attempt + 1,
+  );
 }
 
 /**

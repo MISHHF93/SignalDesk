@@ -14,6 +14,7 @@ import {
   listRecentSyncJobsForConnection,
   startSyncJob,
   storeAsanaTokens,
+  withAdvisoryLock,
   type DatabasePool,
   type SyncJobTrigger,
 } from "@signaldesk/persistence";
@@ -26,6 +27,8 @@ import { logger } from "./logger";
 // Mirrors the OAuth callback's own per-workspace stopgap.
 const MAX_TASK_PAGES_PER_WORKSPACE = 20;
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
+const TOKEN_REFRESH_LOCK_MAX_ATTEMPTS = 5;
+const TOKEN_REFRESH_LOCK_RETRY_DELAY_MS = 300;
 
 export interface AsanaSyncResult {
   readonly ingested: number;
@@ -43,11 +46,26 @@ export interface AsanaSyncResult {
  * re-persisting it first if it's expired or expiring within 5 minutes.
  * Asana access tokens last only ~1 hour, so unlike the OAuth callback
  * (always freshly exchanged), "Sync Now" needs this on nearly every call.
+ *
+ * Real gap found by review: this used to read-check-refresh-store with no
+ * locking at all — the same unlocked shape already fixed for QuickBooks/
+ * Xero/Jira/Zendesk/HubSpot (`ensureFreshXeroAccessToken`,
+ * `sync-xero.ts`). Unlike those, Asana's own documentation, support forum,
+ * and OAuth client SDKs never state outright whether its refresh token
+ * rotates on use — this is deliberately not claimed as confirmed. But the
+ * response this code already persists (`refreshed.refreshToken`) is
+ * whatever value Asana's refresh endpoint returns, which structurally
+ * could be a rotated value; the same `withAdvisoryLock`-backed retry shape
+ * is applied here defensively, since it costs nothing when nothing is
+ * actually rotating (it only serializes the rare case of two callers
+ * refreshing at the same instant) and closes the race if it turns out
+ * Asana does rotate.
  */
 export async function ensureFreshAsanaAccessToken(
   pool: DatabasePool,
   organizationId: string,
   integrationId: string,
+  attempt = 0,
 ): Promise<string> {
   const tokens = await getAsanaTokens(pool, organizationId, integrationId);
 
@@ -59,16 +77,59 @@ export async function ensureFreshAsanaAccessToken(
     return tokens.accessToken;
   }
 
-  const config = getAsanaClientCredentials();
-  const refreshed = await refreshAsanaAccessToken(config, tokens.refreshToken);
+  const refreshedAccessToken = await withAdvisoryLock(
+    pool,
+    `asana-token-refresh:${integrationId}`,
+    async (): Promise<string> => {
+      // Re-read inside the lock — a concurrent caller may have already
+      // refreshed and stored a fresh token while we were waiting to
+      // acquire it.
+      const currentTokens =
+        (await getAsanaTokens(pool, organizationId, integrationId)) ?? tokens;
 
-  await storeAsanaTokens(pool, organizationId, integrationId, {
-    accessToken: refreshed.accessToken,
-    refreshToken: refreshed.refreshToken,
-    expiresAt: new Date(Date.now() + refreshed.expiresIn * 1000),
-  });
+      if (
+        currentTokens.expiresAt.getTime() - Date.now() >
+        TOKEN_REFRESH_BUFFER_MS
+      ) {
+        return currentTokens.accessToken;
+      }
 
-  return refreshed.accessToken;
+      const config = getAsanaClientCredentials();
+      const refreshed = await refreshAsanaAccessToken(
+        config,
+        currentTokens.refreshToken,
+      );
+
+      await storeAsanaTokens(pool, organizationId, integrationId, {
+        accessToken: refreshed.accessToken,
+        refreshToken: refreshed.refreshToken,
+        expiresAt: new Date(Date.now() + refreshed.expiresIn * 1000),
+      });
+
+      return refreshed.accessToken;
+    },
+  );
+
+  if (refreshedAccessToken !== null) {
+    return refreshedAccessToken;
+  }
+
+  if (attempt >= TOKEN_REFRESH_LOCK_MAX_ATTEMPTS) {
+    throw new Error(
+      "Could not refresh the Asana access token — another refresh for this connection was already in progress.",
+    );
+  }
+
+  await new Promise((resolve) =>
+    setTimeout(resolve, TOKEN_REFRESH_LOCK_RETRY_DELAY_MS),
+  );
+
+  return ensureFreshAsanaAccessToken(
+    pool,
+    organizationId,
+    integrationId,
+    attempt + 1,
+  );
 }
 
 /**
@@ -144,8 +205,15 @@ export async function syncAsanaTasks(
             // in Asana. Logged (not counted in `skipped`) so it doesn't
             // fold into `completeSyncJob`'s `itemsSkipped > 0` check and
             // wrongly mark a perfectly healthy connection "degraded".
-            console.info(
+            logger.log(
+              "info",
               `Asana task ${rawTask.gid} has no due date; not ingested.`,
+              {
+                operation: "sync_asana.task_no_due_date",
+                connectorSlug: "asana",
+                organizationId,
+                correlationId: integrationId,
+              },
             );
             continue;
           }
