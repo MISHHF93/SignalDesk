@@ -984,9 +984,13 @@ every invite the organization ever sent. Fixed with a new out-of-band
 migration (`0072b_anonymize_organization_invites.sql`, following
 0054b's/0064b's own established naming and scope convention exactly:
 only the structured identity field is scrubbed via the same
-`'deleted@deleted.invalid'` placeholder, applied to the dev database with
-a clean security-advisor re-scan; production application is a separate,
-explicit decision not yet made). (2) `exportOrganizationData`'s own doc
+`'deleted@deleted.invalid'` placeholder. **Applied to both the dev
+database** (`wbrcifdvzkwxpgzxfegc`) **and production**
+(`qkmiafzljcsaihcnywqj`), owner-approved before the production apply;
+both confirmed via a clean security-advisor re-scan on each (zero
+findings on production) and a direct read of the deployed function body
+on production showing the new `organization_invites` scrub in place.
+(2) `exportOrganizationData`'s own doc
 comment claimed "every real business record this app holds" — no longer
 true: `goals` (0041), `internal_tasks` (0014), and `agent_collaborations`
 (0034) each already had a ready-made, tenant-scoped list function sitting
