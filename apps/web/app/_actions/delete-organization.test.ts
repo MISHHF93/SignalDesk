@@ -216,7 +216,7 @@ describe("deleteOrganizationAction", () => {
     );
   });
 
-  it("records the audit event before anonymizing, and still disconnects every integration even when one connector's remote revocation throws", async () => {
+  it("records the audit event after anonymizing, and still disconnects every integration even when one connector's remote revocation throws", async () => {
     mockedGetCurrentOrganization.mockResolvedValue(OWNER_SESSION);
     mockedListConnectorConnections.mockResolvedValue([
       makeConnection("hubspot"),
@@ -254,7 +254,20 @@ describe("deleteOrganizationAction", () => {
       "org-1",
       "slack-integration",
     );
-    expect(callOrder).toEqual(["audit", "anonymize"]);
+    expect(callOrder).toEqual(["anonymize", "audit"]);
+  });
+
+  it("regression: does not record a false 'organization.deleted: succeeded' audit event when anonymizing itself throws", async () => {
+    mockedGetCurrentOrganization.mockResolvedValue(OWNER_SESSION);
+    mockedListConnectorConnections.mockResolvedValue([]);
+    mockedAnonymizeOrganization.mockRejectedValueOnce(
+      new Error("connection reset"),
+    );
+
+    const result = await deleteOrganizationAction({ error: null });
+
+    expect(result.error).toBeTruthy();
+    expect(mockedRecordAuditEvent).not.toHaveBeenCalled();
   });
 
   it("gates a QuickBooks remote revocation attempt behind isQuickBooksConfigured", async () => {

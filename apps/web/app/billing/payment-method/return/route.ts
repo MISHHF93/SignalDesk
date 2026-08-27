@@ -8,11 +8,12 @@ import {
 import {
   createDatabasePool,
   getOrganizationSubscription,
-  recordAuditEvent,
   type DatabasePool,
 } from "@signaldesk/persistence";
 
 import { errorReporter } from "../../../_lib/error-reporter";
+import { checkRateLimit } from "../../../_lib/rate-limit";
+import { recordAuditEventSafely } from "../../../_lib/safe-audit-event";
 import { getCurrentOrganization } from "../../../_lib/session";
 import { getStripeSecretKey } from "../../../_lib/stripe-billing-config";
 
@@ -32,6 +33,23 @@ function getPool(): DatabasePool {
  * default. A real write triggered by a provider redirect, so this is a
  * Route Handler, matching every OAuth callback in this app, rather than a
  * page component silently mutating during render.
+ *
+ * Two real gaps found by review, both closing this route's own explicit
+ * sibling claim: (1) every one of the 14 OAuth callback routes it names
+ * itself as matching calls `checkRateLimit`; this route called it zero
+ * times despite performing a real Stripe mutation plus a DB write — added,
+ * scoped by organization like the other billing Server Actions
+ * (`change-plan.ts`) rather than by IP like a pre-session OAuth callback,
+ * since a real session already exists here. (2) the audit event sat inside
+ * the same try/catch as `attachDefaultPaymentMethod` using plain
+ * `recordAuditEvent` — the exact shape `recordAuditEventSafely`
+ * (`_lib/safe-audit-event.ts`) exists to fix: a transient failure
+ * recording *this* event would have redirected the user to
+ * `payment_method_failed` even though their card was already attached
+ * successfully. Every billing Server Action with this shape
+ * (`change-plan.ts`/`manage-addon.ts`/`resume-subscription.ts`/
+ * `cancel-subscription.ts`) already uses the safe wrapper; this route
+ * didn't.
  */
 export async function GET(request: Request): Promise<NextResponse> {
   const { searchParams, origin } = new URL(request.url);
@@ -51,8 +69,20 @@ export async function GET(request: Request): Promise<NextResponse> {
     return NextResponse.redirect(`${origin}/login?next=/billing`);
   }
 
+  const db = getPool();
+
+  const rateLimit = await checkRateLimit(
+    db,
+    `payment-method-return:${session.organizationId}`,
+    10,
+    60 * 60 * 1000,
+  );
+
+  if (!rateLimit.allowed) {
+    return redirectTo("payment_method_failed");
+  }
+
   try {
-    const db = getPool();
     const subscription = await getOrganizationSubscription(
       db,
       session.organizationId,
@@ -83,7 +113,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       paymentMethodId,
     });
 
-    await recordAuditEvent(db, session.organizationId, {
+    await recordAuditEventSafely(db, session.organizationId, {
       userId: session.userId,
       eventType: "subscription.payment_method_updated",
       subjectType: "organization_subscription",

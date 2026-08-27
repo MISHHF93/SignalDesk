@@ -287,6 +287,24 @@ async function revokeRemoteAccess(
  * *before* anonymizing — both need the organization's real, non-anonymized
  * state to still be readable. `anonymizeOrganization` itself deliberately
  * does neither of these; see its own doc comment.
+ *
+ * Real gap found by review: the `organization.deleted` audit event used to
+ * be recorded *before* `anonymizeOrganization`, matching every other real
+ * mutation's "record the audit event once the write actually happened"
+ * order in direction only — here the write it was supposed to describe
+ * hadn't happened yet. `anonymizeOrganization` is a real Postgres call, no
+ * more guaranteed to succeed than any other; if it threw, the catch block
+ * below correctly reported a failure to the caller, but the audit event
+ * asserting `organization.deleted: succeeded` had already durably
+ * committed (`recordAuditEvent` is its own separate transaction) and was
+ * never rolled back or corrected — a permanent, false record that a
+ * GDPR/CCPA-shaped erasure request had completed when it had not. Fixed by
+ * recording the event only after anonymization actually succeeds, the same
+ * "audit describes a real, already-happened fact" ordering every
+ * `disconnect-*.ts` action and billing action already uses. The event's
+ * metadata still only reads `activeIntegrations`/`subscription`, both
+ * already resolved into local variables before either call — nothing it
+ * needs was scrubbed by anonymizing first.
  */
 export async function deleteOrganizationAction(
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- useActionState's action signature requires this parameter
@@ -344,6 +362,8 @@ export async function deleteOrganizationAction(
       );
     }
 
+    await anonymizeOrganization(db, session.organizationId);
+
     await recordAuditEvent(db, session.organizationId, {
       userId: session.userId,
       eventType: "organization.deleted",
@@ -357,8 +377,6 @@ export async function deleteOrganizationAction(
         subscriptionCanceled: Boolean(subscription?.stripeSubscriptionId),
       },
     });
-
-    await anonymizeOrganization(db, session.organizationId);
   } catch (error) {
     return {
       error: describeActionError(error, "Failed to delete the organization.", {

@@ -6,7 +6,7 @@
   question, not yet decided" in that backlog's Master product/engineering
   charter entry. Decided here: yes, formalize it, because a real audit
   now has enough real subsystems to be worth auditing.
-- Date: 2026-08-20, rows updated 2026-08-21 where this session had fresh, direct evidence (see the "Third pass" entry below), again 2026-08-23 for the Frontend row's file path and the test-count evidence run (see the "Fourth pass" entry), again 2026-08-26 for a real `pnpm check` run that found and fixed two genuine regressions plus the Connectors/Credential-encryption/Rate-limiting/Observability rows (see the "Fifth pass" entry), again the same day for an owner-requested dev-database cleanup plus a second real RLS grant/policy gap found and fixed (see the "Sixth pass" entry), again 2026-08-27 for the QuickBooks reconciliation cron, guest full-entitlements fix, and connector/OAuth logo re-verification (see the "Seventh pass" entry), again the same day for 4 more stray `console.*` sites, a missing Xero audit-visibility gap, and a confirmed unlocked token-refresh race in 3 more connectors (see the "Eighth pass" entry), again the same day for an agent-driven sibling-file sweep that found a mismatched doc comment on Gmail's token refresh, a missing retry opt-out on HubSpot's token endpoint, and a missing due-date audit log in Jira/Xero (see the "Ninth pass" entry), again the same day for the last two open P1 items — one a real fix (deferred invite acceptance), one a stale-doc correction (the Stripe webhook ordering guard already existed) — bringing the open P1 count to zero (see the "Tenth pass" entry), again the same day for an agent-driven sweep of ~40 Server Action files that found 3 more real sibling-pattern gaps: a real email send with no rate limit, two organization-membership mutations with no audit trail, and a CSV-import action missing half of the sync-observability pattern it otherwise already follows (see the "Eleventh pass" entry), again the same day for a sweep of the Agent Fabric and Intelligence Core packages that found an entirely untested coordinator function and thin test coverage on the two lead-oriented capabilities, while confirming the `canExecute` safety invariant itself is solid (see the "Twelfth pass" entry), again the same day for a sweep of every OAuth callback route, the QuickBooks webhook, and all 3 cron routes — which came back clean across CSRF/PKCE/error-handling/HMAC verification, plus one real timing-side-channel hardening item found and fixed on the cron `CRON_SECRET` check (see the "Thirteenth pass" entry), again the same day for a sweep of every `_components`/`_cards` frontend file — 2 real gaps found and fixed (a missing pending-state on the sign-out button, a silently-dropped batch-task-creation failure), everything else confirmed clean (see the "Fourteenth pass" entry), and again the same day for a sweep of the remaining unaudited packages and API routes that found 2 real `packages/schemas` gaps — an inconsistent field-length bound and two entirely untested source-record schemas on live sync paths, both fixed (see the "Fifteenth pass" entry), and again the same day for a `packages/persistence` sibling-comparison sweep of the invite/membership write paths that found the invite create/revoke audit events were being recorded outside the state-changing transaction — the one outlier among every sibling write function in the package — fixed to the established same-transaction pattern with a real rollback regression test (see the "Sixteenth pass" entry), and again the same day for closing the sibling gap in test coverage across the other 4 "Safe Action" write-path files — zero bugs found, 32 new live-DB tests added across 4 new files (see the "Seventeenth pass" entry) — untouched rows are still the second pass's evidence, not re-verified this pass.
+- Date: 2026-08-20, rows updated 2026-08-21 where this session had fresh, direct evidence (see the "Third pass" entry below), again 2026-08-23 for the Frontend row's file path and the test-count evidence run (see the "Fourth pass" entry), again 2026-08-26 for a real `pnpm check` run that found and fixed two genuine regressions plus the Connectors/Credential-encryption/Rate-limiting/Observability rows (see the "Fifth pass" entry), again the same day for an owner-requested dev-database cleanup plus a second real RLS grant/policy gap found and fixed (see the "Sixth pass" entry), again 2026-08-27 for the QuickBooks reconciliation cron, guest full-entitlements fix, and connector/OAuth logo re-verification (see the "Seventh pass" entry), again the same day for 4 more stray `console.*` sites, a missing Xero audit-visibility gap, and a confirmed unlocked token-refresh race in 3 more connectors (see the "Eighth pass" entry), again the same day for an agent-driven sibling-file sweep that found a mismatched doc comment on Gmail's token refresh, a missing retry opt-out on HubSpot's token endpoint, and a missing due-date audit log in Jira/Xero (see the "Ninth pass" entry), again the same day for the last two open P1 items — one a real fix (deferred invite acceptance), one a stale-doc correction (the Stripe webhook ordering guard already existed) — bringing the open P1 count to zero (see the "Tenth pass" entry), again the same day for an agent-driven sweep of ~40 Server Action files that found 3 more real sibling-pattern gaps: a real email send with no rate limit, two organization-membership mutations with no audit trail, and a CSV-import action missing half of the sync-observability pattern it otherwise already follows (see the "Eleventh pass" entry), again the same day for a sweep of the Agent Fabric and Intelligence Core packages that found an entirely untested coordinator function and thin test coverage on the two lead-oriented capabilities, while confirming the `canExecute` safety invariant itself is solid (see the "Twelfth pass" entry), again the same day for a sweep of every OAuth callback route, the QuickBooks webhook, and all 3 cron routes — which came back clean across CSRF/PKCE/error-handling/HMAC verification, plus one real timing-side-channel hardening item found and fixed on the cron `CRON_SECRET` check (see the "Thirteenth pass" entry), again the same day for a sweep of every `_components`/`_cards` frontend file — 2 real gaps found and fixed (a missing pending-state on the sign-out button, a silently-dropped batch-task-creation failure), everything else confirmed clean (see the "Fourteenth pass" entry), and again the same day for a sweep of the remaining unaudited packages and API routes that found 2 real `packages/schemas` gaps — an inconsistent field-length bound and two entirely untested source-record schemas on live sync paths, both fixed (see the "Fifteenth pass" entry), and again the same day for a `packages/persistence` sibling-comparison sweep of the invite/membership write paths that found the invite create/revoke audit events were being recorded outside the state-changing transaction — the one outlier among every sibling write function in the package — fixed to the established same-transaction pattern with a real rollback regression test (see the "Sixteenth pass" entry), and again the same day for closing the sibling gap in test coverage across the other 4 "Safe Action" write-path files — zero bugs found, 32 new live-DB tests added across 4 new files (see the "Seventeenth pass" entry), and again the same day for 2 more real gaps of the same two bug classes: a false-positive audit record risk on the app's most irreversible write (organization deletion), and a billing route that claimed to match the OAuth-callback sibling pattern but was missing both rate limiting and the safe-audit-event wrapper (see the "Eighteenth pass" entry) — untouched rows are still the second pass's evidence, not re-verified this pass.
 - Scope: this is a repository-state audit, not a penetration test or a
   compliance certification. It reports what was inspected and what real
   evidence supports each classification — not a claim that SignalDesk has
@@ -578,6 +578,48 @@ leftovers, correct external-id field names/types, and no unsafe casts
 beyond the reference's own idioms. `pnpm check` re-run clean,
 `DATABASE_URL` confirmed loaded: **2,261 tests passing (622 persistence,
 live)**, typecheck/lint/format/db:check/build all clean.
+
+**Eighteenth pass** (2026-08-27, same day, a targeted sweep of
+`packages/persistence`'s remaining write functions and the billing/
+payment routes for the same two bug classes just fixed in the Sixteenth
+and Seventeenth passes): 2 real gaps found and fixed, both independently
+verified by direct read before fixing. (1) `deleteOrganizationAction`
+(`apps/web/app/_actions/delete-organization.ts`) — the single most
+irreversible write in the app — recorded its `organization.deleted`
+audit event _before_ calling `anonymizeOrganization`, the opposite
+direction of the Sixteenth pass's invites.ts fix but the same underlying
+defect: `anonymizeOrganization` is a real Postgres call with no stronger
+success guarantee than any other, and if it threw, the catch block
+correctly reported a failure to the caller while the audit event
+asserting `organization.deleted: succeeded` had already durably
+committed (`recordAuditEvent` is its own separate transaction) — a
+permanent, false record that a GDPR/CCPA-shaped erasure request had
+completed when it had not. Fixed by reordering: anonymize first, then
+record the event only once that actually succeeds, matching the "audit
+describes an already-real fact" ordering every `disconnect-*.ts` and
+billing action already uses; verified safe because `anonymize_organization`
+(drizzle/0032) never touches `memberships`, so `insertAuditEvent`'s own
+membership resolution is unaffected by anonymizing first. (2) the Stripe
+"add/update payment method" return route
+(`apps/web/app/billing/payment-method/return/route.ts`) explicitly
+documents itself as matching every OAuth callback route's pattern, but
+diverged from it in two ways real enough to fix: zero rate limiting
+despite triggering a real Stripe mutation plus a DB write (all 14 OAuth
+callbacks rate-limit), and a bare `recordAuditEvent` call inside the same
+try/catch as the real Stripe attach — the exact bug shape
+`recordAuditEventSafely` (`_lib/safe-audit-event.ts`) already exists to
+fix, and every one of the 4 other billing Server Actions with this shape
+already uses it; a transient audit-write failure here would have told the
+user their payment method update failed when it had already actually
+succeeded. Fixed both; this route also had zero test coverage before this
+pass (a real, disclosed gap — no route.ts test file existed for it, nor
+for any of the 14 OAuth callbacks, an unaudited coverage gap noted here
+but not fixed this pass since it's a much larger, separately-scoped
+undertaking). Added a full new test file (7 cases) plus 1 new regression
+test on `delete-organization.test.ts` proving the reorder actually
+prevents the false audit record. `pnpm check` re-run clean, `DATABASE_URL`
+confirmed loaded: **2,269 tests passing (622 persistence, live)**,
+typecheck/lint/format/db:check/build all clean.
 
 ## What this audit deliberately did not do
 
