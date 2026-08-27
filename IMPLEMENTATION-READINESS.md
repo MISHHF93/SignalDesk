@@ -6,7 +6,7 @@
   question, not yet decided" in that backlog's Master product/engineering
   charter entry. Decided here: yes, formalize it, because a real audit
   now has enough real subsystems to be worth auditing.
-- Date: 2026-08-20, rows updated 2026-08-21 where this session had fresh, direct evidence (see the "Third pass" entry below), again 2026-08-23 for the Frontend row's file path and the test-count evidence run (see the "Fourth pass" entry), again 2026-08-26 for a real `pnpm check` run that found and fixed two genuine regressions plus the Connectors/Credential-encryption/Rate-limiting/Observability rows (see the "Fifth pass" entry), again the same day for an owner-requested dev-database cleanup plus a second real RLS grant/policy gap found and fixed (see the "Sixth pass" entry), again 2026-08-27 for the QuickBooks reconciliation cron, guest full-entitlements fix, and connector/OAuth logo re-verification (see the "Seventh pass" entry), again the same day for 4 more stray `console.*` sites, a missing Xero audit-visibility gap, and a confirmed unlocked token-refresh race in 3 more connectors (see the "Eighth pass" entry), again the same day for an agent-driven sibling-file sweep that found a mismatched doc comment on Gmail's token refresh, a missing retry opt-out on HubSpot's token endpoint, and a missing due-date audit log in Jira/Xero (see the "Ninth pass" entry), again the same day for the last two open P1 items — one a real fix (deferred invite acceptance), one a stale-doc correction (the Stripe webhook ordering guard already existed) — bringing the open P1 count to zero (see the "Tenth pass" entry), again the same day for an agent-driven sweep of ~40 Server Action files that found 3 more real sibling-pattern gaps: a real email send with no rate limit, two organization-membership mutations with no audit trail, and a CSV-import action missing half of the sync-observability pattern it otherwise already follows (see the "Eleventh pass" entry), and again the same day for a sweep of the Agent Fabric and Intelligence Core packages that found an entirely untested coordinator function and thin test coverage on the two lead-oriented capabilities, while confirming the `canExecute` safety invariant itself is solid (see the "Twelfth pass" entry) — untouched rows are still the second pass's evidence, not re-verified this pass.
+- Date: 2026-08-20, rows updated 2026-08-21 where this session had fresh, direct evidence (see the "Third pass" entry below), again 2026-08-23 for the Frontend row's file path and the test-count evidence run (see the "Fourth pass" entry), again 2026-08-26 for a real `pnpm check` run that found and fixed two genuine regressions plus the Connectors/Credential-encryption/Rate-limiting/Observability rows (see the "Fifth pass" entry), again the same day for an owner-requested dev-database cleanup plus a second real RLS grant/policy gap found and fixed (see the "Sixth pass" entry), again 2026-08-27 for the QuickBooks reconciliation cron, guest full-entitlements fix, and connector/OAuth logo re-verification (see the "Seventh pass" entry), again the same day for 4 more stray `console.*` sites, a missing Xero audit-visibility gap, and a confirmed unlocked token-refresh race in 3 more connectors (see the "Eighth pass" entry), again the same day for an agent-driven sibling-file sweep that found a mismatched doc comment on Gmail's token refresh, a missing retry opt-out on HubSpot's token endpoint, and a missing due-date audit log in Jira/Xero (see the "Ninth pass" entry), again the same day for the last two open P1 items — one a real fix (deferred invite acceptance), one a stale-doc correction (the Stripe webhook ordering guard already existed) — bringing the open P1 count to zero (see the "Tenth pass" entry), again the same day for an agent-driven sweep of ~40 Server Action files that found 3 more real sibling-pattern gaps: a real email send with no rate limit, two organization-membership mutations with no audit trail, and a CSV-import action missing half of the sync-observability pattern it otherwise already follows (see the "Eleventh pass" entry), again the same day for a sweep of the Agent Fabric and Intelligence Core packages that found an entirely untested coordinator function and thin test coverage on the two lead-oriented capabilities, while confirming the `canExecute` safety invariant itself is solid (see the "Twelfth pass" entry), and again the same day for a sweep of every OAuth callback route, the QuickBooks webhook, and all 3 cron routes — which came back clean across CSRF/PKCE/error-handling/HMAC verification, plus one real timing-side-channel hardening item found and fixed on the cron `CRON_SECRET` check (see the "Thirteenth pass" entry) — untouched rows are still the second pass's evidence, not re-verified this pass.
 - Scope: this is a repository-state audit, not a penetration test or a
   compliance certification. It reports what was inspected and what real
   evidence supports each classification — not a claim that SignalDesk has
@@ -420,6 +420,31 @@ an honest `status: "failed"` result, never an uncaught throw). `pnpm
 check` re-run clean, `DATABASE_URL` confirmed loaded: **2,176 tests
 passing (587 persistence, live)**, typecheck/lint/format/db:check/build
 all clean.
+
+**Thirteenth pass** (2026-08-27, same day, extending the sweep into the
+highest-priority remaining unaudited territory — security-sensitive OAuth
+callback/webhook/cron routes — per this file's own priority order over
+frontend polish): read all 14 OAuth callback routes, the QuickBooks
+webhook route, and all 3 cron routes against 5 real risk dimensions
+(CSRF state validation, PKCE usage, error/redirect handling, webhook HMAC
+verification, cron auth). Result: genuinely clean across all 14 callbacks
+and the webhook route — every one follows the identical, correct pattern,
+and the apparent 8-of-14 PKCE split is a real, sourced provider-capability
+difference (each of the 6 non-PKCE connectors' own `client.ts` documents
+specifically why), not a gap. One real hardening item did surface, judged
+independently rather than purely by sibling comparison (all 3 cron routes
+were consistent with each other, so this wasn't a "one deviates" case):
+all 3 compared their `CRON_SECRET` bearer header with a plain `!==` — a
+real, if narrow, timing side channel on a secret this codebase already
+treats as sensitive elsewhere (`quickbooks-webhook-signature.ts`'s own
+HMAC check already uses `timingSafeEqual`). Extracted one shared
+`verifyCronSecret` helper using the same `timingSafeEqual`-with-length-
+guard pattern, replacing all 3 routes' independently-copied checks — closes
+the side channel and removes a 3-way copy-paste drift risk in one move.
+7 new unit tests; both existing cron route test files' auth-check tests
+re-run unchanged and still green. `pnpm check` re-run clean, `DATABASE_URL`
+confirmed loaded: **2,183 tests passing (587 persistence, live)**,
+typecheck/lint/format/db:check/build all clean.
 
 ## What this audit deliberately did not do
 

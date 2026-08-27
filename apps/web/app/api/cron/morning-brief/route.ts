@@ -8,6 +8,7 @@ import {
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
+import { verifyCronSecret } from "../../../_lib/cron-auth";
 import { errorReporter } from "../../../_lib/error-reporter";
 import type { CurrentSession } from "../../../_lib/session";
 import { getTodaysAttention } from "../../../_lib/todays-attention";
@@ -62,10 +63,12 @@ const MAX_ORGANIZATIONS_PER_RUN = 500;
  * lets a single bad organization abort the whole run.
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const cronSecret = process.env.CRON_SECRET;
-  const authHeader = request.headers.get("authorization");
-
-  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+  if (
+    !verifyCronSecret(
+      request.headers.get("authorization"),
+      process.env.CRON_SECRET,
+    )
+  ) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

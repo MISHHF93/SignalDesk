@@ -16,6 +16,7 @@ import {
   type UpdateSubscriptionFromStripeInput,
 } from "@signaldesk/persistence";
 
+import { verifyCronSecret } from "../../../_lib/cron-auth";
 import { errorReporter } from "../../../_lib/error-reporter";
 import { logger } from "../../../_lib/logger";
 import {
@@ -119,10 +120,12 @@ export function findDrift(
  * actually corrects something.
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const cronSecret = process.env.CRON_SECRET;
-  const authHeader = request.headers.get("authorization");
-
-  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+  if (
+    !verifyCronSecret(
+      request.headers.get("authorization"),
+      process.env.CRON_SECRET,
+    )
+  ) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
