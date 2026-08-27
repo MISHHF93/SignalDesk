@@ -246,8 +246,15 @@ export async function syncQuickBooksInvoices(
           // QuickBooks. Logged (not counted in `skipped`) so it doesn't
           // fold into `completeSyncJob`'s `itemsSkipped > 0` check and
           // wrongly mark a perfectly healthy connection "degraded".
-          console.info(
+          logger.log(
+            "info",
             `QuickBooks invoice ${rawInvoice.Id} has no DueDate; not ingested.`,
+            {
+              operation: "sync_quickbooks.invoice_no_due_date",
+              connectorSlug: "quickbooks",
+              organizationId,
+              correlationId: integrationId,
+            },
           );
           continue;
         }

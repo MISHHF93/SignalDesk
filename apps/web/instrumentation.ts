@@ -1,3 +1,4 @@
+import { logger } from "./app/_lib/logger";
 import { oauthProviders } from "./app/_lib/oauth-providers";
 
 /**
@@ -92,8 +93,10 @@ export function register(): void {
     const hasSecret = Boolean(process.env[secretVar]);
 
     if (hasId !== hasSecret) {
-      console.error(
+      logger.log(
+        "warn",
         `Configuration warning: only one of ${idVar} / ${secretVar} is set. ${providerLabel} will report as unconfigured until both are set — a half-set pair is likely a mistake, not an intentional partial configuration.`,
+        { operation: "startup.oauth_config_validation" },
       );
     }
   }
@@ -112,8 +115,10 @@ export function register(): void {
   );
 
   if (unknownProviderIds.length > 0) {
-    console.error(
+    logger.log(
+      "warn",
       `Configuration warning: NEXT_PUBLIC_ENABLED_OAUTH_PROVIDERS lists unrecognized provider id(s): ${unknownProviderIds.join(", ")}. Valid ids are: ${[...validProviderIds].join(", ")}. An unrecognized id silently never renders a working button — this is very likely a typo.`,
+      { operation: "startup.oauth_config_validation" },
     );
   }
 }

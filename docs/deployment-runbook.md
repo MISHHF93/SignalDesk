@@ -166,8 +166,11 @@ https://your-deploy.vercel.app` — no local server is spawned in this
 now real, not missing: every Route Handler, disconnect action, and sync
 function reports through the same `Logger`/`ErrorReporter` seam
 (`packages/application/src/observability/`) Server Actions already used
-(ADR 0061) — only two documented exceptions remain (a browser-side error
-boundary, one cross-package-dependency line). **Error monitoring's
+(ADR 0061). Corrected again 2026-08-27: a fresh sweep found 4 more raw
+`console.*` sites the original migration missed (two sync functions,
+`instrumentation.ts`'s own startup config warnings) — fixed, leaving
+only two documented exceptions (a browser-side error boundary, one
+cross-package-dependency line). **Error monitoring's
 engineering half is now real too**: a Sentry adapter
 (`createSentryErrorReporter`, `sentry-error-reporter.ts`, 3 unit tests)
 implements the `ErrorReporter` interface every one of those logs routes
