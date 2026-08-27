@@ -58,6 +58,64 @@ describe("leadRiskIntelligence", () => {
       currency: "USD",
     });
     expect(findings[0]?.correlationName).toBe("northstar dental");
+    expect(findings[0]?.owner).toEqual({ id: "user_001", name: "Sarah Chen" });
+    expect(findings[0]?.evidence).toEqual(
+      expect.arrayContaining([expect.objectContaining({ system: "hubspot" })]),
+    );
+    expect(findings[0]?.freshness).toEqual({
+      asOf: new Date("2026-08-18T13:56:00.000Z"),
+      status: "fresh",
+    });
+  });
+
+  it("produces one finding per at-risk lead, evaluating the full candidate set — not just the first — the real fix capability.ts's own doc comment describes", async () => {
+    const findings = await leadRiskIntelligence.evaluate({
+      leads: [
+        lead({ id: "lead_001", companyName: "Northstar Dental" }),
+        lead({ id: "lead_002", companyName: "Acme Robotics" }),
+      ],
+      now: NOW,
+      overdueInvoices: [],
+      connectedIntegrationSlugs: [],
+      highValueThresholdCents: 1_000_000,
+      overdueTasks: [],
+      recentPayments: [],
+      workingDaysBitmask: 0b1111111,
+      timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
+    });
+
+    expect(findings).toHaveLength(2);
+    expect(findings.map((finding) => finding.entity)).toEqual([
+      { kind: "lead", id: "lead_001" },
+      { kind: "lead", id: "lead_002" },
+    ]);
+  });
+
+  it("omits owner entirely, rather than a fabricated null, for a lead with no assigned owner", async () => {
+    const findings = await leadRiskIntelligence.evaluate({
+      leads: [lead({ owner: null })],
+      now: NOW,
+      overdueInvoices: [],
+      connectedIntegrationSlugs: [],
+      highValueThresholdCents: 1_000_000,
+      overdueTasks: [],
+      recentPayments: [],
+      workingDaysBitmask: 0b1111111,
+      timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
+    });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.owner).toBeUndefined();
   });
 
   it("produces no finding when the lead has been contacted", async () => {

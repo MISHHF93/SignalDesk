@@ -77,6 +77,60 @@ describe("ownershipIntelligence", () => {
       "create_internal_task",
     ]);
     expect(findings[0]?.correlationName).toBe("northstar dental");
+    expect(findings[0]?.explanation.observedValue).toBe("No owner assigned.");
+  });
+
+  it("produces one finding per ownerless lead, evaluating the full candidate set — not just the first", async () => {
+    const findings = await ownershipIntelligence.evaluate({
+      leads: [
+        lead({ id: "lead_001", companyName: "Northstar Dental", owner: null }),
+        lead({ id: "lead_002", companyName: "Acme Robotics", owner: null }),
+      ],
+      now: NOW,
+      overdueInvoices: [],
+      connectedIntegrationSlugs: [],
+      highValueThresholdCents: 1_000_000,
+      overdueTasks: [],
+      recentPayments: [],
+      workingDaysBitmask: 0b1111111,
+      timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
+    });
+
+    expect(findings).toHaveLength(2);
+    expect(findings.map((finding) => finding.entity)).toEqual([
+      { kind: "lead", id: "lead_001" },
+      { kind: "lead", id: "lead_002" },
+    ]);
+  });
+
+  it("skips an owned lead but still flags an ownerless one in the same candidate set", async () => {
+    const findings = await ownershipIntelligence.evaluate({
+      leads: [
+        lead({ id: "lead_001" }), // has an owner, per the default fixture
+        lead({ id: "lead_002", owner: null }),
+      ],
+      now: NOW,
+      overdueInvoices: [],
+      connectedIntegrationSlugs: [],
+      highValueThresholdCents: 1_000_000,
+      overdueTasks: [],
+      recentPayments: [],
+      workingDaysBitmask: 0b1111111,
+      timeZone: "UTC",
+      goals: [],
+      businessMetrics: [],
+      recentUnansweredMessages: [],
+      stuckSupportTickets: [],
+      defaultExpectedResponseHours: 24,
+    });
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.entity).toEqual({ kind: "lead", id: "lead_002" });
   });
 
   it("produces no finding for a real organization with no lead yet", async () => {

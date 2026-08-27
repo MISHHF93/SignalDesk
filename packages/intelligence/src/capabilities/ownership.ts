@@ -72,6 +72,7 @@ export const ownershipIntelligence: IntelligenceCapability = {
         },
         explanation: {
           trigger: "No owner is recorded for this lead.",
+          observedValue: "No owner assigned.",
           expectedBaseline: "Every active lead should have an assigned owner.",
           confidence: "high",
         },
