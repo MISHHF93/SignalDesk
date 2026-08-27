@@ -117,7 +117,32 @@ export function mapQuickBooksInvoiceToSourceInvoiceRecord(
  * QuickBooks, so that line's `Amount` is split evenly across its invoices
  * — a documented approximation for a genuinely rare shape, not the
  * previous behavior of repeating the same figure for each.
+ *
+ * Real gap found by review: that even split used to round each invoice's
+ * share independently (`Math.round(amountCents / n)`), which can silently
+ * lose up to `n - 1` cents off the line's real total — $100.00 split
+ * across 3 invoices became 3333+3333+3333 = 9999, one cent short.
+ * `splitCentsEvenly` distributes the exact remainder across the first
+ * `remainder` invoices instead, so the parts always sum back to the real
+ * total cents.
  */
+
+/**
+ * Splits an integer cents amount into `count` non-negative integer parts
+ * that sum back to exactly `totalCents` — unlike dividing and rounding
+ * each share independently, which can lose up to `count - 1` cents to
+ * rounding. The remainder (always `< count`) is distributed one cent at a
+ * time across the first `remainder` parts, so parts differ by at most one
+ * cent from each other.
+ */
+function splitCentsEvenly(totalCents: number, count: number): number[] {
+  const baseCents = Math.floor(totalCents / count);
+  const remainder = totalCents - baseCents * count;
+
+  return Array.from({ length: count }, (_, index) =>
+    index < remainder ? baseCents + 1 : baseCents,
+  );
+}
 
 /**
  * Reports which critical fields this payment would need a fallback for —
@@ -148,13 +173,14 @@ export function mapQuickBooksPaymentToSourcePaymentRecord(
       return [];
     }
 
-    const amountCentsPerInvoice = Math.round(
-      (line.Amount * 100) / invoiceLinks.length,
+    const perInvoiceCents = splitCentsEvenly(
+      Math.round(line.Amount * 100),
+      invoiceLinks.length,
     );
 
-    return invoiceLinks.map((linkedTxn) => ({
+    return invoiceLinks.map((linkedTxn, index) => ({
       externalInvoiceId: linkedTxn.TxnId,
-      amountCents: amountCentsPerInvoice,
+      amountCents: perInvoiceCents[index]!,
     }));
   });
 

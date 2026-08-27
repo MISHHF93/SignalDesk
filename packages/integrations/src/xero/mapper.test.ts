@@ -54,7 +54,7 @@ describe("mapXeroInvoiceToSourceInvoiceRecord", () => {
       customerName: "Acme Robotics",
       amountCents: 184_000,
       currency: "USD",
-      dueAt: "2025-08-30T00:00:00.000Z",
+      dueAt: "2025-08-31T11:59:59.999Z",
       status: "open",
       source: {
         system: "xero",
@@ -117,6 +117,30 @@ describe("mapXeroInvoiceToSourceInvoiceRecord", () => {
     ) as Record<string, unknown>;
 
     expect(record.amountCents).toBe(125_000);
+  });
+
+  it("regression: anchors a date-only DueDate past every real-world timezone's local end-of-day, not plain UTC midnight", () => {
+    // Real bug found by review: this mapper used to hand DueDate's parsed
+    // instant (plain midnight UTC for the calendar date) straight through
+    // as dueAt, unlike every sibling connector with a date-only due field
+    // (QuickBooks/Asana/Jira, all routed through endOfDateOnlyDayUtc).
+    // For a UTC-negative timezone — the US, this app's primary market —
+    // plain midnight UTC on the due date is still the *previous* local
+    // calendar day, so evaluateOverdueInvoice's elapsed-time check could
+    // fire up to a full day before the invoice's real local due date had
+    // even begun.
+    const record = mapXeroInvoiceToSourceInvoiceRecord(
+      invoice(), // DueDate "/Date(1756512000000+0000)/" -> 2025-08-30 UTC
+      NOW,
+    ) as Record<string, unknown>;
+
+    // A business in America/New_York (UTC-4 in August): 2025-08-30 hasn't
+    // even started locally yet at this UTC instant.
+    const stillBeforeLocalDueDate = new Date("2025-08-30T00:01:00.000Z");
+
+    expect(new Date(record.dueAt as string).getTime()).toBeGreaterThan(
+      stillBeforeLocalDueDate.getTime(),
+    );
   });
 });
 

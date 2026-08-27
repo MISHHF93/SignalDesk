@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 
+import { endOfDateOnlyDayUtc } from "@signaldesk/domain";
+
 import type { XeroInvoice } from "./client";
 
 /**
@@ -19,6 +21,19 @@ import type { XeroInvoice } from "./client";
  * (`/Date(1699999999000+0000)/`), not ISO-8601 — `parseXeroDate` extracts
  * the real epoch-milliseconds value directly rather than trying (and
  * failing) to hand the raw string to `new Date(...)`.
+ *
+ * Real gap found by review: `DueDate` is a date-only field (no
+ * time-of-day component — Xero's own wire format always resolves it to
+ * plain midnight UTC for the calendar date), the same shape
+ * `endOfDateOnlyDayUtc`'s own doc comment (`@signaldesk/domain`) already
+ * anchors correctly for QuickBooks/Asana/Jira's equivalent date-only due
+ * fields — but this mapper used to hand the raw parsed instant straight
+ * to `dueAt` with no buffer, the exact over-eager mistake that helper
+ * exists to fix. For any UTC-negative timezone (the US, this app's
+ * primary market), that fired `evaluateOverdueInvoice`'s overdue check up
+ * to a full calendar day before the invoice's real local due date had
+ * even begun. Fixed by re-anchoring through the same helper every other
+ * date-only-due-field connector already uses.
  */
 
 const DEFAULT_CURRENCY = "USD";
@@ -108,7 +123,7 @@ export function mapXeroInvoiceToSourceInvoiceRecord(
       : invoice.Contact.Name!.trim(),
     amountCents: Math.round(invoice.AmountDue * 100),
     currency: DEFAULT_CURRENCY,
-    dueAt: dueAt.toISOString(),
+    dueAt: endOfDateOnlyDayUtc(dueAt.toISOString().slice(0, 10)),
     status: "open",
     source: {
       system: "xero",

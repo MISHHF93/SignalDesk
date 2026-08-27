@@ -267,6 +267,42 @@ describe("mapQuickBooksPaymentToSourcePaymentRecord", () => {
     ]);
   });
 
+  it("regression: distributes the remainder cent(s) rather than losing them when a multi-invoice split doesn't divide evenly", () => {
+    // Real bug found by review: rounding each invoice's share
+    // independently (Math.round(amountCents / n)) could silently lose up
+    // to n - 1 cents off the line's real total — $100.00 split across 3
+    // invoices used to become 3333 + 3333 + 3333 = 9999, one cent short.
+    const record = mapQuickBooksPaymentToSourcePaymentRecord(
+      payment({
+        Line: [
+          {
+            Amount: 100,
+            LinkedTxn: [
+              { TxnId: "148", TxnType: "Invoice" },
+              { TxnId: "149", TxnType: "Invoice" },
+              { TxnId: "150", TxnType: "Invoice" },
+            ],
+          },
+        ],
+      }),
+      NOW,
+    ) as Record<string, unknown>;
+
+    const allocations = record.invoiceAllocations as Array<{
+      externalInvoiceId: string;
+      amountCents: number;
+    }>;
+
+    expect(allocations).toEqual([
+      { externalInvoiceId: "148", amountCents: 3_334 },
+      { externalInvoiceId: "149", amountCents: 3_333 },
+      { externalInvoiceId: "150", amountCents: 3_333 },
+    ]);
+    expect(
+      allocations.reduce((sum, allocation) => sum + allocation.amountCents, 0),
+    ).toBe(10_000);
+  });
+
   it("satisfies the real sourcePaymentRecordSchema boundary, not just this test's assumptions", () => {
     const record = mapQuickBooksPaymentToSourcePaymentRecord(payment(), NOW);
 
