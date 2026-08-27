@@ -9,6 +9,7 @@ import {
   getOrganizationSubscription,
   getPlanByKey,
   provisionIdentityAndOrganization,
+  withTenantContext,
   type DatabasePool,
 } from "@signaldesk/persistence";
 
@@ -148,6 +149,24 @@ describe.skipIf(!process.env.DATABASE_URL)(
       });
 
       return { organizationId, stripeSubscriptionId, stripeCustomerId };
+    }
+
+    async function getSubscriptionAuditEvents(organizationId: string) {
+      return withTenantContext(pool, organizationId, async (client) => {
+        const result = await client.query<{
+          event_type: string;
+          actor_kind: string;
+          outcome: string;
+          metadata: Record<string, unknown>;
+        }>(
+          `select event_type, actor_kind, outcome, metadata
+           from audit_events
+           where organization_id = $1 and subject_type = 'organization_subscription'
+           order by occurred_at asc`,
+          [organizationId],
+        );
+        return result.rows;
+      });
     }
 
     it("rejects a request with an invalid signature", async () => {
@@ -316,6 +335,82 @@ describe.skipIf(!process.env.DATABASE_URL)(
 
       const after = await getOrganizationSubscription(pool, organizationId);
       expect(after?.status).toBe("past_due");
+    });
+
+    it("records a real, integration-attributed audit event when a subscription update is applied", async () => {
+      const { organizationId, stripeSubscriptionId, stripeCustomerId } =
+        await seedSubscribedOrganization();
+      const periodStart = Math.floor(Date.now() / 1000);
+      const event = subscriptionUpdatedEvent({
+        stripeSubscriptionId,
+        stripeCustomerId,
+        status: "active",
+        currentPeriodStart: periodStart,
+        currentPeriodEnd: periodStart + 30 * 24 * 60 * 60,
+      });
+
+      const response = await POST(signedRequest(event));
+      expect(response.status).toBe(200);
+
+      const auditEvents = await getSubscriptionAuditEvents(organizationId);
+      expect(auditEvents).toHaveLength(1);
+      expect(auditEvents[0]).toEqual({
+        event_type: "subscription.synced_from_stripe",
+        actor_kind: "integration",
+        outcome: "succeeded",
+        metadata: { stripeSubscriptionId, status: "active" },
+      });
+    });
+
+    it("records a real, integration-attributed audit event when a payment failure is applied", async () => {
+      const { organizationId, stripeSubscriptionId } =
+        await seedSubscribedOrganization();
+      const event = invoicePaymentFailedEvent(stripeSubscriptionId);
+
+      const response = await POST(signedRequest(event));
+      expect(response.status).toBe(200);
+
+      const auditEvents = await getSubscriptionAuditEvents(organizationId);
+      expect(auditEvents).toHaveLength(1);
+      expect(auditEvents[0]).toEqual({
+        event_type: "subscription.payment_failed",
+        actor_kind: "integration",
+        outcome: "succeeded",
+        metadata: { stripeSubscriptionId },
+      });
+    });
+
+    it("regression: does not record a false audit event for a stale, out-of-order webhook that updateSubscriptionFromStripe correctly rejected", async () => {
+      // Real gap found alongside the missing-audit-event fix itself: an
+      // audit event describes an already-real fact, so a rejected,
+      // out-of-order write (see the "rejects a stale, out-of-order
+      // webhook" regression above) must not get one either — there was no
+      // real subscription change for it to describe.
+      const { organizationId, stripeSubscriptionId, stripeCustomerId } =
+        await seedSubscribedOrganization();
+      const now = Math.floor(Date.now() / 1000);
+
+      const newerEvent = subscriptionUpdatedEvent({
+        stripeSubscriptionId,
+        stripeCustomerId,
+        status: "active",
+        currentPeriodStart: now,
+        currentPeriodEnd: now + 30 * 24 * 60 * 60,
+        created: now,
+      });
+      await POST(signedRequest(newerEvent));
+
+      const staleEvent = invoicePaymentFailedEvent(stripeSubscriptionId, {
+        created: now - 60 * 60,
+      });
+      const staleResponse = await POST(signedRequest(staleEvent));
+      expect(staleResponse.status).toBe(200);
+
+      const auditEvents = await getSubscriptionAuditEvents(organizationId);
+      expect(auditEvents).toHaveLength(1);
+      expect(auditEvents[0]?.event_type).toBe(
+        "subscription.synced_from_stripe",
+      );
     });
   },
 );

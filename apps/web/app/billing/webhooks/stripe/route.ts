@@ -17,6 +17,7 @@ import {
 
 import { errorReporter } from "../../../_lib/error-reporter";
 import { logger } from "../../../_lib/logger";
+import { recordAuditEventSafely } from "../../../_lib/safe-audit-event";
 import {
   getStripeSecretKey,
   getStripeWebhookSecret,
@@ -47,6 +48,22 @@ interface RawInvoice {
  * write if a newer event already recorded fresher state — see that
  * function's own doc comment for why, since Stripe doesn't guarantee
  * webhook delivery order.
+ *
+ * Real gap found by review: this used to record no audit event at all —
+ * the one webhook-driven mutation in the app with no trace in
+ * `audit_events`, unlike its own closest sibling (the QuickBooks webhook's
+ * `sync.completed` event, `actorKind: "integration"`) and every
+ * human-initiated action that mutates this same row
+ * (`cancel-subscription.ts`/`resume-subscription.ts`/`change-plan.ts`).
+ * Recorded only when `updateSubscriptionFromStripe` actually matched a
+ * row — a stale/out-of-order event it correctly rejected is not a real
+ * change to describe. Uses `recordAuditEventSafely`, not a bare call: this
+ * runs inside the same try/catch that returns a 500 (triggering a Stripe
+ * retry) on any throw, and `updateSubscriptionFromStripe`'s own
+ * idempotency guard means a retry after the real update already committed
+ * would return `null` and never get a second chance to record the audit
+ * event — a transient failure recording it must not corrupt an
+ * already-real, already-committed subscription sync.
  */
 async function syncSubscription(
   subscription: RawStripeSubscription,
@@ -67,11 +84,30 @@ async function syncSubscription(
 
   const fields = mapStripeSubscriptionToSyncFields(subscription);
 
-  await updateSubscriptionFromStripe(db, organizationId, subscription.id, {
-    ...fields,
-    status: fields.status as SubscriptionStatus,
-    stripeEventCreatedAt: eventCreatedAt,
-  });
+  const updated = await updateSubscriptionFromStripe(
+    db,
+    organizationId,
+    subscription.id,
+    {
+      ...fields,
+      status: fields.status as SubscriptionStatus,
+      stripeEventCreatedAt: eventCreatedAt,
+    },
+  );
+
+  if (updated) {
+    await recordAuditEventSafely(db, organizationId, {
+      actorKind: "integration",
+      eventType: "subscription.synced_from_stripe",
+      subjectType: "organization_subscription",
+      subjectId: updated.id,
+      outcome: "succeeded",
+      metadata: {
+        stripeSubscriptionId: subscription.id,
+        status: fields.status,
+      },
+    });
+  }
 }
 
 async function handleInvoicePaymentFailed(
@@ -101,10 +137,26 @@ async function handleInvoicePaymentFailed(
     return;
   }
 
-  await updateSubscriptionFromStripe(db, organizationId, invoice.subscription, {
-    status: "past_due",
-    stripeEventCreatedAt: eventCreatedAt,
-  });
+  const updated = await updateSubscriptionFromStripe(
+    db,
+    organizationId,
+    invoice.subscription,
+    {
+      status: "past_due",
+      stripeEventCreatedAt: eventCreatedAt,
+    },
+  );
+
+  if (updated) {
+    await recordAuditEventSafely(db, organizationId, {
+      actorKind: "integration",
+      eventType: "subscription.payment_failed",
+      subjectType: "organization_subscription",
+      subjectId: updated.id,
+      outcome: "succeeded",
+      metadata: { stripeSubscriptionId: invoice.subscription },
+    });
+  }
 }
 
 /**
