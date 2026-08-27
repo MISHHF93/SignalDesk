@@ -603,5 +603,77 @@ describe.skipIf(!process.env.DATABASE_URL)(
 
       expect(subscriptionFromOrgA).toBeNull();
     });
+
+    // Real gap found by review: guest sign-in (ADR 0009) never goes
+    // through real Stripe checkout, so a guest organization never has a
+    // subscription row and would otherwise fall into the exact same
+    // zero-entitlement branch a churned real customer gets — blocking a
+    // guest from connecting a single integration. organizations.is_guest
+    // (migration 0070) is the real, explicit fact that bypasses this.
+    it("grants full, unmetered entitlements to a guest organization with no subscription at all", async () => {
+      const { organizationId } = await seedMembership(pool);
+
+      await withTenantContext(pool, organizationId, async (client) => {
+        await client.query(
+          `update organizations set is_guest = true where id = $1`,
+          [organizationId],
+        );
+      });
+
+      const usage = await getEntitlementUsage(pool, organizationId);
+
+      expect(usage.usersLimit).toBeNull();
+      expect(usage.activeConnectionsLimit).toBeNull();
+      expect(usage.capabilityFlags).toEqual({
+        approvals: true,
+        advancedPolicies: true,
+        customConnectors: true,
+        actionPreparation: true,
+        enterpriseIdentity: true,
+        governanceControls: true,
+        delegatedAutomation: true,
+      });
+      expect(await canAddActiveConnection(pool, organizationId)).toBe(true);
+    });
+
+    it("lets a guest organization connect well past what any real plan's connection limit would allow", async () => {
+      const { organizationId } = await seedMembership(pool);
+
+      await withTenantContext(pool, organizationId, async (client) => {
+        await client.query(
+          `update organizations set is_guest = true where id = $1`,
+          [organizationId],
+        );
+      });
+
+      for (let i = 0; i < 20; i += 1) {
+        await seedIntegration(pool, organizationId, {
+          sourceSystem: `provider-${i}`,
+        });
+      }
+
+      const usage = await getEntitlementUsage(pool, organizationId);
+
+      expect(usage.activeConnectionsUsed).toBe(20);
+      expect(usage.activeConnectionsLimit).toBeNull();
+      expect(await canAddActiveConnection(pool, organizationId)).toBe(true);
+    });
+
+    it("still reports real usage counts for a guest organization, not zero", async () => {
+      const { organizationId } = await seedMembership(pool);
+
+      await withTenantContext(pool, organizationId, async (client) => {
+        await client.query(
+          `update organizations set is_guest = true where id = $1`,
+          [organizationId],
+        );
+      });
+      await seedIntegration(pool, organizationId, { sourceSystem: "hubspot" });
+
+      const usage = await getEntitlementUsage(pool, organizationId);
+
+      expect(usage.usersUsed).toBe(1);
+      expect(usage.activeConnectionsUsed).toBe(1);
+    });
   },
 );

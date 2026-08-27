@@ -81,6 +81,15 @@ export const organizations = pgTable(
     // /integrations Business Data Map. See `industryProfiles` in
     // @signaldesk/integrations for the one real profile.
     industry: text("industry").notNull().default("unspecified"),
+    // Set once, at provisioning time, from Supabase Auth's own
+    // `auth.users.is_anonymous` (never reassigned afterward) — real guest
+    // sign-in (ADR 0009), not a role or a plan. `getEntitlementUsage`
+    // (subscriptions.ts) reads this to grant a guest organization full,
+    // unmetered entitlements for evaluation/demo purposes without a real
+    // Stripe subscription ever existing — the one deliberate exception to
+    // "no subscription row ⇒ zero entitlements," scoped by this real,
+    // explicit fact rather than inferred from the absence of a plan.
+    isGuest: boolean("is_guest").notNull().default(false),
     ...timestamps,
   },
   (table) => [

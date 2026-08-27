@@ -477,6 +477,13 @@
       "when": 1787694900000,
       "tag": "0069_quickbooks_reconciliation_enumeration",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1787695000000,
+      "tag": "0070_guest_full_entitlements",
+      "breakpoints": true
     }
   ]
 }

@@ -26,6 +26,16 @@ export interface ProvisionIdentityInput {
    * parallel function instead.
    */
   readonly inviteToken?: string | null;
+  /**
+   * Mirrors Supabase Auth's own `auth.users.is_anonymous` — real guest
+   * sign-in (ADR 0009), never reassigned after provisioning. `false`
+   * (every existing caller before this) is the function's original,
+   * unchanged behavior. See `organizations.isGuest` (schema.ts) and
+   * `getEntitlementUsage` (subscriptions.ts) for what this actually
+   * gates — full, unmetered entitlements without a real subscription,
+   * scoped by this real fact rather than inferred from having none.
+   */
+  readonly isGuest?: boolean;
 }
 
 export interface ProvisionIdentityResult {
@@ -51,13 +61,14 @@ export async function provisionIdentityAndOrganization(
     user_id: string;
   }>(
     `select organization_id, user_id
-     from provision_identity_and_organization($1, $2, $3, $4, $5)`,
+     from provision_identity_and_organization($1, $2, $3, $4, $5, $6)`,
     [
       input.identityProvider,
       input.identityProviderSubject,
       input.displayName,
       input.primaryEmail,
       input.inviteToken ?? null,
+      input.isGuest ?? false,
     ],
   );
 

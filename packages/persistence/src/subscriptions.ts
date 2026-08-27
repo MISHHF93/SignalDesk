@@ -404,11 +404,66 @@ export interface EntitlementUsage {
  * entitlement. A null limit means negotiated/unbounded (Enterprise, or no
  * subscription row at all yet).
  */
+// Every capability flag any real plan declares today (`plans` seed data)
+// — a guest gets the same ceiling Enterprise does, not a fabricated new
+// tier. Declared here rather than read from the enterprise plan row
+// itself so a guest's access never silently drifts if that plan's own
+// entitlements are edited later — this is a deliberate, independent
+// grant, not a live reference to one customer-facing plan.
+const GUEST_CAPABILITY_FLAGS: Record<string, boolean> = {
+  approvals: true,
+  advancedPolicies: true,
+  customConnectors: true,
+  actionPreparation: true,
+  enterpriseIdentity: true,
+  governanceControls: true,
+  delegatedAutomation: true,
+};
+
 export async function getEntitlementUsage(
   pool: DatabasePool,
   organizationId: string,
 ): Promise<EntitlementUsage> {
   return withTenantContext(pool, organizationId, async (client) => {
+    // Guest sign-in (ADR 0009) never goes through real Stripe checkout —
+    // there is no card, no email, nothing to bill — so a guest organization
+    // never has a real subscription row and would otherwise fall through
+    // to the same zero-entitlement branch below a churned real customer
+    // does. `organizations.isGuest` is a real, explicit fact set once at
+    // provisioning time (never inferred from the absence of a plan), and
+    // is checked first so a guest gets full, unmetered access for
+    // evaluation/demo purposes without fabricating a fake Stripe-shaped
+    // subscription row to get there.
+    const orgResult = await client.query<{ is_guest: boolean }>(
+      `select is_guest from public.organizations where id = $1`,
+      [organizationId],
+    );
+
+    if (orgResult.rows[0]?.is_guest) {
+      const usageResult = await client.query<{
+        users_used: string;
+        active_connections_used: string;
+      }>(
+        `select
+           (select count(*) from public.memberships
+              where organization_id = $1 and status = 'active') as users_used,
+           (select count(*) from public.integrations
+              where organization_id = $1 and status in ('active', 'degraded')) as active_connections_used`,
+        [organizationId],
+      );
+      const usageRow = usageResult.rows[0];
+
+      return {
+        usersUsed: usageRow ? Number(usageRow.users_used) : 0,
+        usersLimit: null,
+        activeConnectionsUsed: usageRow
+          ? Number(usageRow.active_connections_used)
+          : 0,
+        activeConnectionsLimit: null,
+        capabilityFlags: GUEST_CAPABILITY_FLAGS,
+      };
+    }
+
     const result = await client.query<{
       users_used: string;
       active_connections_used: string;
