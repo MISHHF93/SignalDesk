@@ -6,11 +6,17 @@ import type {
   Task,
 } from "@signaldesk/domain";
 
+import type { AgentCollaboration } from "./agent-collaborations";
+import { listRecentAgentCollaborations } from "./agent-collaborations";
 import type { Artifact } from "./artifacts";
 import { listArtifacts } from "./artifacts";
 import type { RecentAuditEvent } from "./audit-events";
 import { listRecentAuditEvents } from "./audit-events";
 import type { DatabasePool } from "./client";
+import type { GoalRecord } from "./goals";
+import { listGoals } from "./goals";
+import type { OpenInternalTask } from "./internal-tasks";
+import { listOpenInternalTasks } from "./internal-tasks";
 import { listAllInvoices } from "./invoices";
 import { listAllLeads } from "./leads";
 import { listAllMessages } from "./messages";
@@ -36,6 +42,20 @@ export interface OrganizationExportSummary {
  * reuses `listRecentAuditEvents`'s existing 10-item cap rather than a
  * separate uncapped query — a known, disclosed limitation for a v1 export,
  * not a full historical audit dump.
+ *
+ * Real gap found by review: this doc comment's own claim ("every real
+ * business record") stopped being true as the schema grew — `goals`
+ * (0041), `internal_tasks` (0014), and `agent_collaborations` (0034) all
+ * predate this fix but were never wired in, despite each already having a
+ * ready-made, tenant-scoped list function sitting unused. ADR 0018
+ * explicitly warned this would recur ("any future entity added to the
+ * Business Graph should extend `anonymize_organization` and
+ * `exportOrganizationData` in the same migration that adds the entity,
+ * not as a follow-up gap") and it was missed a third time; closed here
+ * for these three. The 5 "Safe Action" write-path tables (real customer/
+ * vendor communications this app actually sent) remain a known, disclosed
+ * gap — no export-shaped query function exists for any of them yet, a
+ * larger undertaking than wiring in an existing one.
  */
 export interface OrganizationDataExport {
   readonly exportedAt: Date;
@@ -53,6 +73,17 @@ export interface OrganizationDataExport {
   readonly artifacts: readonly Artifact[];
   readonly recentAuditEvents: readonly RecentAuditEvent[];
   readonly subscription: OrganizationSubscription | null;
+  readonly goals: readonly GoalRecord[];
+  /** Open only — `listOpenInternalTasks`' own real scope, honestly named
+   * to match rather than implying a full historical task list. */
+  readonly openInternalTasks: readonly OpenInternalTask[];
+  /** Newest-first, capped — `listRecentAgentCollaborations`' own real
+   * scope, same "recent, not exhaustive" honesty `recentAuditEvents`
+   * already establishes for this export. Includes real AI-drafted
+   * customer-facing content (`draftedContent`) and investigation
+   * rationale (`reconciledSummary`) tied to this organization's own
+   * leads/invoices/tasks/messages/tickets. */
+  readonly recentAgentCollaborations: readonly AgentCollaboration[];
 }
 
 interface OrganizationSummaryRow {
@@ -110,6 +141,9 @@ export async function exportOrganizationData(
     artifacts,
     recentAuditEvents,
     subscription,
+    goals,
+    openInternalTasks,
+    recentAgentCollaborations,
   ] = await Promise.all([
     getOrganizationExportSummary(pool, organizationId),
     listAllLeads(pool, organizationId),
@@ -120,6 +154,9 @@ export async function exportOrganizationData(
     listArtifacts(pool, organizationId, "daily_brief"),
     listRecentAuditEvents(pool, organizationId),
     getOrganizationSubscription(pool, organizationId),
+    listGoals(pool, organizationId),
+    listOpenInternalTasks(pool, organizationId),
+    listRecentAgentCollaborations(pool, organizationId),
   ]);
 
   return {
@@ -133,6 +170,9 @@ export async function exportOrganizationData(
     artifacts,
     recentAuditEvents,
     subscription,
+    goals,
+    openInternalTasks,
+    recentAgentCollaborations,
   };
 }
 

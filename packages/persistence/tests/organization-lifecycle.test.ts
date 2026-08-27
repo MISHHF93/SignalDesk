@@ -5,7 +5,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startAgentCollaboration } from "../src/agent-collaborations";
 import type { DatabasePool } from "../src/client";
 import { beginCustomerEmailReplySend } from "../src/customer-email-replies";
+import { createGoal } from "../src/goals";
 import { ingestGmailMessage } from "../src/gmail-sync";
+import { createInternalTask } from "../src/internal-tasks";
+import { createOrganizationInvite } from "../src/invites";
 import { ingestQuickBooksInvoice } from "../src/invoices";
 import {
   anonymizeOrganization,
@@ -241,6 +244,62 @@ describe.skipIf(!process.env.DATABASE_URL)(
       expect(exportData.messages[0]).not.toHaveProperty("bodyPreview");
       expect(exportData.supportTickets).toHaveLength(1);
       expect(exportData.supportTickets[0]?.subject).toBe("Cannot log in");
+    });
+
+    it("regression: real gap found by review — includes goals, open internal tasks, and recent agent collaborations", async () => {
+      // exportOrganizationData predates goals (0041), internal_tasks
+      // (0014), and agent_collaborations (0034) — a customer requesting
+      // "export my data" would not see any of their own set business
+      // goals, open internal tasks, or AI-drafted content/investigation
+      // rationale, despite each already having a ready-made,
+      // tenant-scoped list function that was simply never wired in.
+      const { organizationId, userId } = await seedMembership(pool);
+
+      await createGoal(pool, organizationId, {
+        userId,
+        metricId: "accounts_receivable",
+        name: "Keep A/R under $50k",
+        comparisonOperator: "at_most",
+        targetValue: 50_000,
+        currency: "USD",
+        idempotencyKey: `goal-${randomUUID()}`,
+      });
+
+      await createInternalTask(pool, organizationId, userId, {
+        title: "Follow up with Acme Robotics",
+        idempotencyKey: `task-${randomUUID()}`,
+      });
+
+      const sourceRecord = await seedSourceRecord(
+        pool,
+        organizationId,
+        (await seedIntegration(pool, organizationId, { sourceSystem: "gmail" }))
+          .id,
+        "gmail",
+      );
+      const message = await seedMessage(pool, organizationId, sourceRecord.id);
+      const idempotencyKey = `export-collab-${randomUUID()}`;
+      await startAgentCollaboration(pool, organizationId, {
+        userId,
+        pattern: "single_specialist",
+        objective: "Draft a reply to this message.",
+        correlationId: idempotencyKey,
+        idempotencyKey,
+        messageId: message.id,
+      });
+
+      const exportData = await exportOrganizationData(pool, organizationId);
+
+      expect(exportData.goals).toHaveLength(1);
+      expect(exportData.goals[0]?.name).toBe("Keep A/R under $50k");
+      expect(exportData.openInternalTasks).toHaveLength(1);
+      expect(exportData.openInternalTasks[0]?.title).toBe(
+        "Follow up with Acme Robotics",
+      );
+      expect(exportData.recentAgentCollaborations).toHaveLength(1);
+      expect(exportData.recentAgentCollaborations[0]?.objective).toBe(
+        "Draft a reply to this message.",
+      );
     });
   },
 );
@@ -529,6 +588,38 @@ describe.skipIf(!process.env.DATABASE_URL)(
       // subject (free-text) stays untouched — same disclosed limitation
       // as messages/support_tickets' own free-text fields.
       expect(replyRow?.subject).toBe("Re: Question about my order");
+    });
+
+    it("regression: real gap found by review — scrubs organization_invites.email but preserves the row", async () => {
+      // anonymize_organization predates organization_invites (0046) — a
+      // customer requesting "erase my data" would still have a real,
+      // third-party email address (often belonging to someone who never
+      // signed up and has no users row of their own) sitting in the
+      // database afterward, indefinitely.
+      const { organizationId, userId } = await seedMembership(pool);
+      const { invite } = await createOrganizationInvite(
+        pool,
+        organizationId,
+        userId,
+        { email: "invitee@example.test", role: "member" },
+      );
+
+      await anonymizeOrganization(pool, organizationId);
+
+      const [inviteRow] = await withTenantContext(
+        pool,
+        organizationId,
+        (client) =>
+          client
+            .query<{ email: string; role: string }>(
+              `select email, role from organization_invites where id = $1`,
+              [invite.id],
+            )
+            .then((result) => result.rows),
+      );
+      expect(inviteRow?.email).toBe("deleted@deleted.invalid");
+      // role/status/token stay untouched — not PII.
+      expect(inviteRow?.role).toBe("member");
     });
 
     it("leaves audit events and source records untouched", async () => {
