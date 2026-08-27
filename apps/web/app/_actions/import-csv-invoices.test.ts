@@ -11,6 +11,7 @@ import {
   ensureCsvImportIntegration,
   failSyncJob,
   ingestCsvInvoice,
+  recordAuditEvent,
   startSyncJob,
 } from "@signaldesk/persistence";
 
@@ -26,6 +27,7 @@ const mockedStartSyncJob = vi.mocked(startSyncJob);
 const mockedIngestCsvInvoice = vi.mocked(ingestCsvInvoice);
 const mockedCompleteSyncJob = vi.mocked(completeSyncJob);
 const mockedFailSyncJob = vi.mocked(failSyncJob);
+const mockedRecordAuditEvent = vi.mocked(recordAuditEvent);
 
 const SESSION = {
   organizationId: "org-1",
@@ -160,6 +162,25 @@ describe("importCsvInvoicesAction", () => {
       }),
     );
     expect(mockedFailSyncJob).not.toHaveBeenCalled();
+    // Real gap found by review: every real connector's own "Sync Now"
+    // action records this in addition to its sync_jobs row; this action
+    // reused the sync_jobs half of the pattern but not this half.
+    expect(mockedRecordAuditEvent).toHaveBeenCalledWith(
+      undefined,
+      "org-1",
+      expect.objectContaining({
+        userId: "user-1",
+        eventType: "sync.completed",
+        subjectType: "integration",
+        subjectId: "integration-1",
+        outcome: "succeeded",
+        metadata: expect.objectContaining({
+          sourceSystem: "csv_import",
+          imported: 1,
+          duplicates: 1,
+        }),
+      }),
+    );
   });
 
   it("fails the sync job honestly and rethrows a description when a row ingest itself throws", async () => {
@@ -187,5 +208,19 @@ describe("importCsvInvoicesAction", () => {
       }),
     );
     expect(mockedCompleteSyncJob).not.toHaveBeenCalled();
+    expect(mockedRecordAuditEvent).toHaveBeenCalledWith(
+      undefined,
+      "org-1",
+      expect.objectContaining({
+        eventType: "sync.failed",
+        subjectType: "integration",
+        subjectId: "integration-1",
+        outcome: "failed",
+        metadata: expect.objectContaining({
+          sourceSystem: "csv_import",
+          error: "db write failed",
+        }),
+      }),
+    );
   });
 });

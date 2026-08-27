@@ -4,6 +4,7 @@ import { sendEmail } from "@signaldesk/integrations/resend";
 import {
   createDatabasePool,
   createOrganizationInvite,
+  recordAuditEvent,
   type DatabasePool,
   type InviteRole,
 } from "@signaldesk/persistence";
@@ -98,12 +99,26 @@ export async function inviteMemberAction(
       return { error: "Choose a valid role.", message: null };
     }
 
-    const { token } = await createOrganizationInvite(
+    const { invite, token } = await createOrganizationInvite(
       getPool(),
       session.organizationId,
       session.userId,
       { email, role: role as InviteRole },
     );
+
+    // Real gap found by review: no sibling organization-scoped mutation
+    // (disconnect-*.ts, ai-provider connect/disconnect, delete-organization)
+    // skips this — organization_invites controls who can join and access
+    // a tenant's data, making this one of the more security-relevant
+    // mutations to have left unaudited.
+    await recordAuditEvent(getPool(), session.organizationId, {
+      userId: session.userId,
+      eventType: "invite.created",
+      subjectType: "organization_invite",
+      subjectId: invite.id,
+      outcome: "succeeded",
+      metadata: { email, role },
+    });
 
     const origin = await getRequestOrigin();
     const acceptUrl = `${origin}/signup?invite=${token}`;

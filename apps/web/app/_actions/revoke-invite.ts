@@ -2,6 +2,7 @@
 
 import {
   createDatabasePool,
+  recordAuditEvent,
   revokeOrganizationInvite,
   type DatabasePool,
 } from "@signaldesk/persistence";
@@ -54,7 +55,24 @@ export async function revokeInviteAction(
       return { ok: false, error: "Too many requests. Try again shortly." };
     }
 
-    await revokeOrganizationInvite(getPool(), session.organizationId, inviteId);
+    const revoked = await revokeOrganizationInvite(
+      getPool(),
+      session.organizationId,
+      inviteId,
+    );
+
+    // Real gap found by review: same missing pattern as
+    // inviteMemberAction's own — records honestly whether this was a real
+    // state change or a no-op on an already-accepted/revoked invite
+    // (`revoked`), rather than fabricating "revoked" either way.
+    await recordAuditEvent(getPool(), session.organizationId, {
+      userId: session.userId,
+      eventType: "invite.revoked",
+      subjectType: "organization_invite",
+      subjectId: inviteId,
+      outcome: "succeeded",
+      metadata: { revoked },
+    });
 
     return { ok: true };
   } catch (error) {

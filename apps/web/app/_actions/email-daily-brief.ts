@@ -8,6 +8,7 @@ import {
 } from "@signaldesk/persistence";
 
 import { describeActionError } from "../_lib/describe-action-error";
+import { checkRateLimit } from "../_lib/rate-limit";
 import { getResendConfig } from "../_lib/resend-config";
 import { getCurrentOrganization } from "../_lib/session";
 
@@ -63,6 +64,25 @@ export async function emailDailyBriefAction(): Promise<EmailDailyBriefActionResu
       return {
         ok: false,
         error: "Email delivery isn't configured for this deployment yet.",
+      };
+    }
+
+    // Real gap found by review: this is a real, cost-incurring Resend
+    // send with no throttle at all, unlike every other action here that
+    // calls sendEmail (invite-member.ts's own rate limit is the sibling
+    // pattern) — a user could otherwise spam-click "Email me this" for
+    // unlimited sends.
+    const rateLimit = await checkRateLimit(
+      getPool(),
+      `email-daily-brief:${session.organizationId}`,
+      10,
+      60 * 60 * 1000,
+    );
+
+    if (!rateLimit.allowed) {
+      return {
+        ok: false,
+        error: `Please wait ${Math.ceil(rateLimit.retryAfterSeconds / 60)} more minute(s) before emailing the brief again.`,
       };
     }
 

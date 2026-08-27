@@ -7,6 +7,7 @@ import {
   ensureCsvImportIntegration,
   failSyncJob,
   ingestCsvInvoice,
+  recordAuditEvent,
   startSyncJob,
   type DatabasePool,
 } from "@signaldesk/persistence";
@@ -122,6 +123,25 @@ export async function importCsvInvoicesAction(
         itemsSkipped: parsed.errors.length + duplicateRows.length,
         errorMessage: error instanceof Error ? error.message : String(error),
       });
+
+      // Real gap found by review: every real connector's own "Sync Now"
+      // action records a top-level sync.completed/sync.failed audit event
+      // in addition to its sync_jobs row (see sync-hubspot.ts's own
+      // catch block) — this action already reuses the same sync_jobs
+      // observability but was missing this half of the pattern.
+      await recordAuditEvent(db, session.organizationId, {
+        userId: session.userId,
+        eventType: "sync.failed",
+        subjectType: "integration",
+        subjectId: integration.id,
+        outcome: "failed",
+        metadata: {
+          sourceSystem: "csv_import",
+          trigger: "manual",
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+
       throw error;
     }
 
@@ -129,6 +149,21 @@ export async function importCsvInvoicesAction(
       itemsIngested: imported,
       itemsSkipped: parsed.errors.length + duplicateRows.length,
       cursorAfter: null,
+    });
+
+    await recordAuditEvent(db, session.organizationId, {
+      userId: session.userId,
+      eventType: "sync.completed",
+      subjectType: "integration",
+      subjectId: integration.id,
+      outcome: "succeeded",
+      metadata: {
+        sourceSystem: "csv_import",
+        imported,
+        duplicates: duplicateRows.length,
+        rowErrors: parsed.errors.length,
+        trigger: "manual",
+      },
     });
 
     return {

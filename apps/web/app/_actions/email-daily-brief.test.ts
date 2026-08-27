@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../_lib/session");
+vi.mock("../_lib/rate-limit");
 vi.mock("../_lib/resend-config");
 vi.mock("@signaldesk/integrations/resend");
 vi.mock("@signaldesk/persistence");
@@ -8,11 +9,13 @@ vi.mock("@signaldesk/persistence");
 import { sendEmail } from "@signaldesk/integrations/resend";
 import { getLatestArtifact } from "@signaldesk/persistence";
 
+import { checkRateLimit } from "../_lib/rate-limit";
 import { getResendConfig } from "../_lib/resend-config";
 import { getCurrentOrganization } from "../_lib/session";
 import { emailDailyBriefAction } from "./email-daily-brief";
 
 const mockedGetCurrentOrganization = vi.mocked(getCurrentOrganization);
+const mockedCheckRateLimit = vi.mocked(checkRateLimit);
 const mockedGetResendConfig = vi.mocked(getResendConfig);
 const mockedGetLatestArtifact = vi.mocked(getLatestArtifact);
 const mockedSendEmail = vi.mocked(sendEmail);
@@ -44,6 +47,10 @@ const BRIEF = {
 describe("emailDailyBriefAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockedCheckRateLimit.mockResolvedValue({
+      allowed: true,
+      retryAfterSeconds: 0,
+    });
     mockedGetResendConfig.mockReturnValue(RESEND_CONFIG);
     mockedGetLatestArtifact.mockResolvedValue(
       BRIEF as unknown as Awaited<ReturnType<typeof getLatestArtifact>>,
@@ -100,6 +107,22 @@ describe("emailDailyBriefAction", () => {
     expect(result).toEqual({
       ok: false,
       error: "Generate a Daily Brief first, then email it.",
+    });
+    expect(mockedSendEmail).not.toHaveBeenCalled();
+  });
+
+  it("regression: refuses at the rate limit — a real gap found by review since this action had no throttle at all", async () => {
+    mockedGetCurrentOrganization.mockResolvedValue(SESSION);
+    mockedCheckRateLimit.mockResolvedValue({
+      allowed: false,
+      retryAfterSeconds: 300,
+    });
+
+    const result = await emailDailyBriefAction();
+
+    expect(result).toEqual({
+      ok: false,
+      error: "Please wait 5 more minute(s) before emailing the brief again.",
     });
     expect(mockedSendEmail).not.toHaveBeenCalled();
   });
