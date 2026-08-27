@@ -24,6 +24,17 @@ import type {
  * honest text-monogram (`OAuthIcon` below) rather than fabricated or
  * stale path data. `google` and `facebook` were re-verified present in
  * that same v16.28.0 listing.
+ *
+ * Independently re-verified 2026-08-27 the same way as
+ * `connector-icons.tsx`: both hardcoded paths below matched the real,
+ * freshly-downloaded `simple-icons@16.28.0` package byte-for-byte, and
+ * `linkedin`/`slack` were re-confirmed absent from its real
+ * `data/simple-icons.json` (still the latest published version). Also
+ * removed two stale, unreferenced `public/oauth/*.svg` files (slack,
+ * linkedin) left over from before the fix above — see
+ * `connector-icons.tsx`'s own note on the identical cleanup for why
+ * leaving rejected artwork under the "downloaded originals" label was a
+ * real, if latent, risk worth closing.
  */
 const oauthIconPaths: Partial<Record<OAuthProviderId, string>> = {
   google:

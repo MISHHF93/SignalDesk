@@ -41,6 +41,26 @@ import type { ConnectorDefinition } from "@signaldesk/integrations";
  * path strings for a real company's logo without a verified source would
  * risk rendering a wrong or broken brand mark, which is worse than the
  * honest fallback.
+ *
+ * Independently re-verified 2026-08-27, against every one of the 25 real
+ * catalog entries (`@signaldesk/integrations`), not just this file's own
+ * claims: `npm pack simple-icons@16.28.0` (still the latest published
+ * version — nothing newer exists to re-check against) into a scratch
+ * directory, then a byte-for-byte diff of all 15 hardcoded path strings
+ * below against the real downloaded `icons/*.svg` files. All 15 matched
+ * exactly. Independently re-confirmed all 10 fallback slugs (slack,
+ * microsoft-outlook, microsoft-calendar, salesforce, microsoft-teams,
+ * sharepoint, docusign, pipedrive, monday-com, teamwork) genuinely absent
+ * via a title search across the real `data/simple-icons.json` (near-miss
+ * false positives only — "slackware," "steamworks," "teamspeak" — never
+ * the actual brand). Also found and removed three stale, unreferenced
+ * `public/connectors/*.svg` files (slack, microsoft-outlook,
+ * microsoft-calendar) left over from before the 2026-08-25 fix above —
+ * nothing in the app ever served them (confirmed by a repo-wide search),
+ * but keeping rejected/unverifiable brand artwork sitting in the repo
+ * under the same "downloaded originals" label as the 15 real ones was a
+ * real, if latent, risk of exactly this file's own rationale: someone
+ * later assuming a file's presence means it was verified.
  */
 const connectorIconPaths: Partial<Record<ConnectorDefinition["slug"], string>> =
   {
