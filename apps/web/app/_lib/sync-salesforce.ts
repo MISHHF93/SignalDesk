@@ -16,6 +16,7 @@ import {
   listRecentSyncJobsForConnection,
   startSyncJob,
   storeSalesforceTokens,
+  withAdvisoryLock,
   type DatabasePool,
   type SyncJobTrigger,
 } from "@signaldesk/persistence";
@@ -29,6 +30,8 @@ import { getSalesforceOAuthConfig } from "./salesforce-config";
 // comment) — bounds a single synchronous sync run, not the org's real
 // opportunity count.
 const MAX_OPPORTUNITY_PAGES = 20;
+const TOKEN_REFRESH_LOCK_MAX_ATTEMPTS = 5;
+const TOKEN_REFRESH_LOCK_RETRY_DELAY_MS = 300;
 
 export interface SalesforceSyncResult {
   readonly ingested: number;
@@ -41,31 +44,95 @@ export interface SalesforceSyncResult {
 }
 
 /**
- * Refreshes the stored access token unconditionally and re-persists it —
- * unlike `ensureFreshHubSpotAccessToken`, there's no stored `expiresAt` to
- * check against (Salesforce's OAuth response never discloses a token
- * lifetime; see `SalesforceTokenResponse`'s doc comment). Used only to
- * recover after a real `SalesforceSessionExpiredError`, not called
- * proactively before every sync — Salesforce sessions commonly last hours
- * to a full day, so refreshing on every "Sync Now" click would be
- * wasteful for no real benefit.
+ * Refreshes the stored access token and re-persists it — unlike
+ * `ensureFreshHubSpotAccessToken`, there's no stored `expiresAt` to check
+ * against (Salesforce's OAuth response never discloses a token lifetime;
+ * see `SalesforceTokenResponse`'s doc comment). Used only to recover after
+ * a real `SalesforceSessionExpiredError`, not called proactively before
+ * every sync — Salesforce sessions commonly last hours to a full day, so
+ * refreshing on every "Sync Now" click would be wasteful for no real
+ * benefit.
+ *
+ * Real gap found by review: this used to refresh-and-store completely
+ * unlocked — the exact race already fixed for Xero/HubSpot/Jira/Zendesk/
+ * Asana/QuickBooks/Gmail (`sync-xero.ts`'s doc comment describes the
+ * identical shape). Two concurrent callers hitting a session expiry at
+ * the same time (a scheduled sync and a manual "Sync Now" double-click,
+ * same reasoning already used for Asana/Gmail's defensive locks) could
+ * both refresh and race `storeSalesforceTokens`'s unconditional overwrite.
+ * Fixed with the same `withAdvisoryLock`-backed retry shape as every
+ * sibling — but the "is this still fresh" re-check inside the lock has to
+ * differ from theirs: there's no `expiresAt` to compare against, and
+ * Salesforce doesn't rotate refresh tokens the way QuickBooks/Zendesk/
+ * Jira do (confirmed in `salesforce/client.ts`'s own doc comment), so a
+ * changed `refreshToken` would never signal a concurrent win here. The
+ * signal used instead is simpler and still correct: if the currently
+ * stored access token no longer matches the one that just failed with
+ * `SalesforceSessionExpiredError`, a concurrent caller already refreshed
+ * it while this caller waited for the lock, and that fresh token can be
+ * reused without hitting Salesforce's token endpoint again.
  */
-async function refreshAndPersistSalesforceToken(
+export async function refreshAndPersistSalesforceToken(
   pool: DatabasePool,
   organizationId: string,
   integrationId: string,
   origin: string,
+  failedAccessToken: string,
   refreshToken: string,
+  attempt = 0,
 ): Promise<string> {
-  const config = getSalesforceOAuthConfig(origin);
-  const refreshed = await refreshSalesforceAccessToken(config, refreshToken);
+  const refreshedAccessToken = await withAdvisoryLock(
+    pool,
+    `salesforce-token-refresh:${integrationId}`,
+    async (): Promise<string> => {
+      const currentTokens = await getSalesforceTokens(
+        pool,
+        organizationId,
+        integrationId,
+      );
 
-  await storeSalesforceTokens(pool, organizationId, integrationId, {
-    accessToken: refreshed.accessToken,
-    refreshToken: refreshed.refreshToken,
-  });
+      if (currentTokens && currentTokens.accessToken !== failedAccessToken) {
+        return currentTokens.accessToken;
+      }
 
-  return refreshed.accessToken;
+      const config = getSalesforceOAuthConfig(origin);
+      const refreshed = await refreshSalesforceAccessToken(
+        config,
+        refreshToken,
+      );
+
+      await storeSalesforceTokens(pool, organizationId, integrationId, {
+        accessToken: refreshed.accessToken,
+        refreshToken: refreshed.refreshToken,
+      });
+
+      return refreshed.accessToken;
+    },
+  );
+
+  if (refreshedAccessToken !== null) {
+    return refreshedAccessToken;
+  }
+
+  if (attempt >= TOKEN_REFRESH_LOCK_MAX_ATTEMPTS) {
+    throw new Error(
+      "Could not refresh the Salesforce access token — another refresh for this connection was already in progress.",
+    );
+  }
+
+  await new Promise((resolve) =>
+    setTimeout(resolve, TOKEN_REFRESH_LOCK_RETRY_DELAY_MS),
+  );
+
+  return refreshAndPersistSalesforceToken(
+    pool,
+    organizationId,
+    integrationId,
+    origin,
+    failedAccessToken,
+    refreshToken,
+    attempt + 1,
+  );
 }
 
 async function fetchPageWithSessionRecovery(
@@ -102,6 +169,7 @@ async function fetchPageWithSessionRecovery(
       organizationId,
       integrationId,
       origin,
+      accessToken,
       tokens.refreshToken,
     );
 
