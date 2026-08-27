@@ -14,6 +14,7 @@ import {
   listRecentSyncJobsForConnection,
   startSyncJob,
   storeGmailTokens,
+  withAdvisoryLock,
   type DatabasePool,
   type SyncJobTrigger,
 } from "@signaldesk/persistence";
@@ -29,6 +30,8 @@ import { logger } from "./logger";
 // equivalent duplication.
 const GMAIL_CALLBACK_PATH = "/integrations/gmail/callback";
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
+const TOKEN_REFRESH_LOCK_MAX_ATTEMPTS = 5;
+const TOKEN_REFRESH_LOCK_RETRY_DELAY_MS = 300;
 
 // Bounds a single synchronous sync run (Phase 4b, implementation
 // roadmap) — list is cheap (id/threadId only), a real `format=full` body
@@ -52,19 +55,33 @@ export interface GmailSyncResult {
 /**
  * Returns a valid access token for this integration, refreshing and
  * re-persisting it first if it's expired or expiring within 5 minutes.
- * Mirrors `ensureFreshHubSpotAccessToken` exactly, using the real Google
- * refresh grant added alongside this phase
+ * Uses the real Google refresh grant added alongside this phase
  * (`refreshGoogleAccessToken`/`refreshGmailAccessToken`,
  * `@signaldesk/integrations`) — without it, "Sync Now" run more than
  * ~1 hour after connecting would simply fail, a real gap this phase
  * closes for Gmail (and, incidentally, Google Calendar, which shares the
  * same OAuth mechanics but has no sync of its own yet).
+ *
+ * Real gap found by review: this doc comment used to claim it "mirrors
+ * `ensureFreshHubSpotAccessToken` exactly," but had no `withAdvisoryLock`
+ * protection at all — unlike every other connector's equivalent function.
+ * Google's own refresh token is confirmed non-rotating (this function
+ * reuses `tokens.refreshToken`, the stored value, rather than persisting
+ * whatever `refreshed` returns), so the specific "resends an already-
+ * rotated token" failure mode doesn't apply here — but two concurrent
+ * callers (a scheduled sync and a manual "Sync Now") could still race on
+ * the read-modify-write to `gmail_tokens`, doing the same real refresh
+ * call twice for no reason. The same lock is applied defensively, same
+ * reasoning as `ensureFreshAsanaAccessToken`'s own doc comment: it costs
+ * nothing when nothing is actually rotating, and now this comment's own
+ * claim is true.
  */
 export async function ensureFreshGmailAccessToken(
   pool: DatabasePool,
   organizationId: string,
   integrationId: string,
   origin: string,
+  attempt = 0,
 ): Promise<string> {
   const tokens = await getGmailTokens(pool, organizationId, integrationId);
 
@@ -76,16 +93,60 @@ export async function ensureFreshGmailAccessToken(
     return tokens.accessToken;
   }
 
-  const config = getGoogleOAuthConfig(origin, GMAIL_CALLBACK_PATH);
-  const refreshed = await refreshGmailAccessToken(config, tokens.refreshToken);
+  const refreshedAccessToken = await withAdvisoryLock(
+    pool,
+    `gmail-token-refresh:${integrationId}`,
+    async (): Promise<string> => {
+      // Re-read inside the lock — a concurrent caller may have already
+      // refreshed and stored a fresh token while we were waiting to
+      // acquire it.
+      const currentTokens =
+        (await getGmailTokens(pool, organizationId, integrationId)) ?? tokens;
 
-  await storeGmailTokens(pool, organizationId, integrationId, {
-    accessToken: refreshed.accessToken,
-    refreshToken: tokens.refreshToken,
-    expiresAt: new Date(Date.now() + refreshed.expiresIn * 1000),
-  });
+      if (
+        currentTokens.expiresAt.getTime() - Date.now() >
+        TOKEN_REFRESH_BUFFER_MS
+      ) {
+        return currentTokens.accessToken;
+      }
 
-  return refreshed.accessToken;
+      const config = getGoogleOAuthConfig(origin, GMAIL_CALLBACK_PATH);
+      const refreshed = await refreshGmailAccessToken(
+        config,
+        currentTokens.refreshToken,
+      );
+
+      await storeGmailTokens(pool, organizationId, integrationId, {
+        accessToken: refreshed.accessToken,
+        refreshToken: currentTokens.refreshToken,
+        expiresAt: new Date(Date.now() + refreshed.expiresIn * 1000),
+      });
+
+      return refreshed.accessToken;
+    },
+  );
+
+  if (refreshedAccessToken !== null) {
+    return refreshedAccessToken;
+  }
+
+  if (attempt >= TOKEN_REFRESH_LOCK_MAX_ATTEMPTS) {
+    throw new Error(
+      "Could not refresh the Gmail access token — another refresh for this connection was already in progress.",
+    );
+  }
+
+  await new Promise((resolve) =>
+    setTimeout(resolve, TOKEN_REFRESH_LOCK_RETRY_DELAY_MS),
+  );
+
+  return ensureFreshGmailAccessToken(
+    pool,
+    organizationId,
+    integrationId,
+    origin,
+    attempt + 1,
+  );
 }
 
 function buildGmailQuery(cursorAfter: string | null): string {

@@ -132,14 +132,31 @@ interface RawHubSpotTokenResponse {
   readonly hub_id: number;
 }
 
+/**
+ * Real gap found by review: this used to retry a 5xx here like any other
+ * read, but `sync-hubspot.ts`'s own `ensureFreshHubSpotAccessToken` doc
+ * comment already states HubSpot's developer documentation confirms a
+ * refresh call "potentially" returns a new refresh token — the identical
+ * rotation risk QuickBooks/Xero/Jira/Zendesk/Salesforce's own token
+ * endpoints already opt out of retrying for (see
+ * `FetchWithRetryOptions.retryable`'s doc comment): a 5xx here is not
+ * proof the exchange never completed server-side, so blindly retrying
+ * risks resending an already-rotated refresh token (or an already-
+ * consumed single-use authorization code), permanently losing the one
+ * real new token pair that was already issued but never received.
+ */
 async function requestHubSpotToken(
   body: URLSearchParams,
 ): Promise<HubSpotTokenResponse> {
-  const response = await fetchWithRetry(TOKEN_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-  });
+  const response = await fetchWithRetry(
+    TOKEN_URL,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    },
+    { retryable: false },
+  );
 
   if (!response.ok) {
     await throwUpstreamError("HubSpot token request", response);

@@ -6,7 +6,7 @@
   question, not yet decided" in that backlog's Master product/engineering
   charter entry. Decided here: yes, formalize it, because a real audit
   now has enough real subsystems to be worth auditing.
-- Date: 2026-08-20, rows updated 2026-08-21 where this session had fresh, direct evidence (see the "Third pass" entry below), again 2026-08-23 for the Frontend row's file path and the test-count evidence run (see the "Fourth pass" entry), again 2026-08-26 for a real `pnpm check` run that found and fixed two genuine regressions plus the Connectors/Credential-encryption/Rate-limiting/Observability rows (see the "Fifth pass" entry), again the same day for an owner-requested dev-database cleanup plus a second real RLS grant/policy gap found and fixed (see the "Sixth pass" entry), again 2026-08-27 for the QuickBooks reconciliation cron, guest full-entitlements fix, and connector/OAuth logo re-verification (see the "Seventh pass" entry), and again the same day for 4 more stray `console.*` sites, a missing Xero audit-visibility gap, and a confirmed unlocked token-refresh race in 3 more connectors (see the "Eighth pass" entry) — untouched rows are still the second pass's evidence, not re-verified this pass.
+- Date: 2026-08-20, rows updated 2026-08-21 where this session had fresh, direct evidence (see the "Third pass" entry below), again 2026-08-23 for the Frontend row's file path and the test-count evidence run (see the "Fourth pass" entry), again 2026-08-26 for a real `pnpm check` run that found and fixed two genuine regressions plus the Connectors/Credential-encryption/Rate-limiting/Observability rows (see the "Fifth pass" entry), again the same day for an owner-requested dev-database cleanup plus a second real RLS grant/policy gap found and fixed (see the "Sixth pass" entry), again 2026-08-27 for the QuickBooks reconciliation cron, guest full-entitlements fix, and connector/OAuth logo re-verification (see the "Seventh pass" entry), again the same day for 4 more stray `console.*` sites, a missing Xero audit-visibility gap, and a confirmed unlocked token-refresh race in 3 more connectors (see the "Eighth pass" entry), and again the same day for an agent-driven sibling-file sweep that found a mismatched doc comment on Gmail's token refresh, a missing retry opt-out on HubSpot's token endpoint, and a missing due-date audit log in Jira/Xero (see the "Ninth pass" entry) — untouched rows are still the second pass's evidence, not re-verified this pass.
 - Scope: this is a repository-state audit, not a penetration test or a
   compliance certification. It reports what was inspected and what real
   evidence supports each classification — not a claim that SignalDesk has
@@ -280,6 +280,42 @@ confirmed loaded this time (a prior same-session check had silently run
 `packages/persistence` and 7 `apps/web` tests skipped rather than passing
 because this shell lacked it — caught and re-run properly rather than
 left uncorrected): **2,151 tests passing (582 persistence, live)**,
+typecheck/lint/format/db:check/build all clean.
+
+**Ninth pass** (2026-08-27, same day, a dedicated agent-driven sweep of
+every OAuth connector's sync/mapper/client files for the same class of
+sibling inconsistency the Eighth pass closed for Zendesk/HubSpot/Asana —
+findings independently re-verified against the actual source before
+fixing, not taken on the sweep's word): (1) `ensureFreshGmailAccessToken`'s
+own doc comment claimed it "mirrors `ensureFreshHubSpotAccessToken`
+exactly," but had no `withAdvisoryLock` protection at all — confirmed by
+direct read, fixed with the same lock (Google's refresh token is confirmed
+non-rotating, so this closes a wasted-duplicate-refresh race rather than a
+token-loss race, but the doc comment's own claim is now actually true).
+(2) HubSpot's `requestHubSpotToken` (the function backing both
+`exchangeHubSpotAuthorizationCode` and `refreshHubSpotAccessToken`) was
+retried on a 5xx like an ordinary read — confirmed by direct read that it
+was the only one of 6 providers with the identical rotation risk
+(QuickBooks/Xero/Jira/Zendesk/Salesforce all already pass
+`{ retryable: false }` on their own token endpoints, each with a matching
+regression test) missing that protection, even though `sync-hubspot.ts`'s
+own doc comment already states HubSpot's docs confirm this exact risk.
+Fixed with `{ retryable: false }` plus 3 new tests (`hubspot/client.test.ts`
+had zero prior coverage of either token function at all). (3) Confirmed by
+direct read that `sync-jira.ts`/`sync-xero.ts` silently drop a
+no-usable-due-date record (a real, non-error case their own mappers
+already return `null` for) with no log at all, unlike `sync-asana.ts`'s/
+`sync-quickbooks.ts`'s identical case — added the matching
+`logger.log("info", ...)` call to both. One flagged-but-not-fixed item:
+Gmail's mapper has a silent subject fallback with no matching
+`detect{X}DefaultedFields` companion the way every other mapper's fallback
+has — evaluated directly against `hubspot/mapper.ts`'s own stated
+criterion (a genuine anomaly worth flagging vs. an honest normal absence)
+and judged a real normal case, not a gap: many real emails legitimately
+carry no subject, so a detector here would fire constantly and drown out
+the signal the pattern exists to surface elsewhere — deliberately not
+built. `pnpm check` re-run clean after all changes, `DATABASE_URL`
+confirmed loaded: **2,160 tests passing (582 persistence, live)**,
 typecheck/lint/format/db:check/build all clean.
 
 ## What this audit deliberately did not do

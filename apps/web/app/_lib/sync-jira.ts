@@ -214,6 +214,22 @@ export async function syncJiraIssues(
         const mapped = mapJiraIssueToSourceTaskRecord(rawIssue, now);
 
         if (mapped === null) {
+          // Not a sync failure — a real issue with no due date set in
+          // Jira. Logged (not counted in `skipped`) so it doesn't fold
+          // into `completeSyncJob`'s `itemsSkipped > 0` check and wrongly
+          // mark a perfectly healthy connection "degraded" — mirrors
+          // sync-asana.ts's/sync-quickbooks.ts's identical case, which
+          // this function was missing.
+          logger.log(
+            "info",
+            `Jira issue ${rawIssue.key} has no due date; not ingested.`,
+            {
+              operation: "sync_jira.issue_no_due_date",
+              connectorSlug: "jira",
+              organizationId,
+              correlationId: integrationId,
+            },
+          );
           continue;
         }
 

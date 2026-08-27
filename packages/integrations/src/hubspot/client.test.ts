@@ -2,10 +2,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createHubSpotDealNote,
+  exchangeHubSpotAuthorizationCode,
   fetchHubSpotDealsModifiedSince,
   fetchHubSpotOwners,
+  refreshHubSpotAccessToken,
   revokeHubSpotRefreshToken,
 } from "./client";
+
+const CONFIG = {
+  clientId: "client-1",
+  clientSecret: "secret-1",
+  redirectUri: "https://app.example.com/integrations/hubspot/callback",
+};
 
 function jsonResponse(
   status: number,
@@ -121,6 +129,86 @@ describe("HubSpot client retry/backoff", () => {
 
     // 1 initial attempt + 3 retries = 4 total calls.
     expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe("refreshHubSpotAccessToken / exchangeHubSpotAuthorizationCode", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it("exchanges an authorization code for a real token response", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        access_token: "hs-access",
+        refresh_token: "hs-refresh",
+        expires_in: 1800,
+        hub_id: 12345,
+      }),
+    );
+
+    const result = await exchangeHubSpotAuthorizationCode(CONFIG, "auth-code");
+
+    expect(result).toEqual({
+      accessToken: "hs-access",
+      refreshToken: "hs-refresh",
+      expiresIn: 1800,
+      hubId: "12345",
+    });
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = new URLSearchParams(init.body as string);
+    expect(body.get("grant_type")).toBe("authorization_code");
+    expect(body.get("code")).toBe("auth-code");
+  });
+
+  it("refreshes an access token, surfacing whatever refresh token HubSpot returns", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(200, {
+        access_token: "hs-new-access",
+        refresh_token: "hs-rotated-refresh",
+        expires_in: 1800,
+        hub_id: 12345,
+      }),
+    );
+
+    const result = await refreshHubSpotAccessToken(CONFIG, "hs-refresh");
+
+    expect(result.accessToken).toBe("hs-new-access");
+    expect(result.refreshToken).toBe("hs-rotated-refresh");
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = new URLSearchParams(init.body as string);
+    expect(body.get("grant_type")).toBe("refresh_token");
+    expect(body.get("refresh_token")).toBe("hs-refresh");
+  });
+
+  it("regression: does not retry on a 5xx — HubSpot's own docs confirm a refresh can rotate the refresh token, so a retry could resend an already-consumed one", async () => {
+    // Real bug found by review: this used to retry a 5xx here via
+    // fetchWithRetry's default policy, unlike every sibling connector with
+    // the identical rotation risk (QuickBooks/Xero/Jira/Zendesk/
+    // Salesforce all opt out via `{ retryable: false }` on their own token
+    // endpoints). HubSpot's own developer documentation states a refresh
+    // call "potentially" returns a new refresh token, so a 5xx here is not
+    // proof the rotation never happened server-side — a blind retry risks
+    // resending an already-rotated refresh token, which HubSpot would
+    // correctly reject, permanently losing the one real new token pair
+    // that was already issued but never received.
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(503, { message: "unavailable" }),
+    );
+
+    await expect(
+      refreshHubSpotAccessToken(CONFIG, "hs-refresh"),
+    ).rejects.toThrow(/HubSpot token request failed/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

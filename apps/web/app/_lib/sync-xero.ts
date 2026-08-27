@@ -199,6 +199,22 @@ export async function syncXeroInvoices(
         const mapped = mapXeroInvoiceToSourceInvoiceRecord(rawInvoice, now);
 
         if (mapped === null) {
+          // Not a sync failure — a real invoice with no usable/parseable
+          // due date in Xero. Logged (not counted in `skipped`) so it
+          // doesn't fold into `completeSyncJob`'s `itemsSkipped > 0` check
+          // and wrongly mark a perfectly healthy connection "degraded" —
+          // mirrors sync-asana.ts's/sync-quickbooks.ts's identical case,
+          // which this function was missing.
+          logger.log(
+            "info",
+            `Xero invoice ${rawInvoice.InvoiceID} has no usable due date; not ingested.`,
+            {
+              operation: "sync_xero.invoice_no_due_date",
+              connectorSlug: "xero",
+              organizationId,
+              correlationId: integrationId,
+            },
+          );
           continue;
         }
 
