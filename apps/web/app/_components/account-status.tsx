@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { signOutAction } from "../_actions/auth";
 import type { CurrentSession } from "../_lib/session";
+import { SignOutButton } from "./sign-out-button";
 
 /**
  * Real, session-derived account status shown in the persistent header on
@@ -31,9 +32,7 @@ export function AccountStatus({ session }: { session: CurrentSession | null }) {
       <span>
         <strong>{session.isAnonymous ? "Guest" : session.email}</strong>
         <form action={signOutAction}>
-          <button type="submit" className="signOutButton">
-            Sign out
-          </button>
+          <SignOutButton />
         </form>
       </span>
     </div>

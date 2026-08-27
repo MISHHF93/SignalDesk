@@ -151,8 +151,9 @@ const filterFieldLabel: Record<FilterDefinition["field"], string> = {
 function describeCommandTaskResult(
   created: number,
   alreadyExisted: number,
+  failed: number,
 ): string {
-  if (created === 0 && alreadyExisted === 0) {
+  if (created === 0 && alreadyExisted === 0 && failed === 0) {
     return "No tasks were created.";
   }
 
@@ -166,6 +167,16 @@ function describeCommandTaskResult(
     parts.push(
       `${alreadyExisted} ${alreadyExisted === 1 ? "was" : "were"} already created`,
     );
+  }
+
+  if (failed > 0) {
+    // Real gap found by review: this branch didn't exist at all — a
+    // failed createTaskAction call was silently dropped, indistinguishable
+    // from the user having selected zero targets. Mirrors
+    // handleDraftForMatter's own count-based partial-failure reporting for
+    // a batch operation, rather than concatenating each target's raw error
+    // string.
+    parts.push(`${failed} failed`);
   }
 
   return `${parts.join("; ")}.`;
@@ -449,6 +460,7 @@ export function CommandCenterBoard({
         );
         let created = 0;
         let alreadyExisted = 0;
+        let failed = 0;
 
         for (const card of targets) {
           const taskResult = await createTaskAction({
@@ -463,10 +475,14 @@ export function CommandCenterBoard({
             } else {
               alreadyExisted += 1;
             }
+          } else {
+            failed += 1;
           }
         }
 
-        setStatusMessage(describeCommandTaskResult(created, alreadyExisted));
+        setStatusMessage(
+          describeCommandTaskResult(created, alreadyExisted, failed),
+        );
 
         if (created > 0) {
           // Same gap CardActions' own router.refresh() closes: "Your

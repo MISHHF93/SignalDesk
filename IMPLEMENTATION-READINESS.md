@@ -6,7 +6,7 @@
   question, not yet decided" in that backlog's Master product/engineering
   charter entry. Decided here: yes, formalize it, because a real audit
   now has enough real subsystems to be worth auditing.
-- Date: 2026-08-20, rows updated 2026-08-21 where this session had fresh, direct evidence (see the "Third pass" entry below), again 2026-08-23 for the Frontend row's file path and the test-count evidence run (see the "Fourth pass" entry), again 2026-08-26 for a real `pnpm check` run that found and fixed two genuine regressions plus the Connectors/Credential-encryption/Rate-limiting/Observability rows (see the "Fifth pass" entry), again the same day for an owner-requested dev-database cleanup plus a second real RLS grant/policy gap found and fixed (see the "Sixth pass" entry), again 2026-08-27 for the QuickBooks reconciliation cron, guest full-entitlements fix, and connector/OAuth logo re-verification (see the "Seventh pass" entry), again the same day for 4 more stray `console.*` sites, a missing Xero audit-visibility gap, and a confirmed unlocked token-refresh race in 3 more connectors (see the "Eighth pass" entry), again the same day for an agent-driven sibling-file sweep that found a mismatched doc comment on Gmail's token refresh, a missing retry opt-out on HubSpot's token endpoint, and a missing due-date audit log in Jira/Xero (see the "Ninth pass" entry), again the same day for the last two open P1 items — one a real fix (deferred invite acceptance), one a stale-doc correction (the Stripe webhook ordering guard already existed) — bringing the open P1 count to zero (see the "Tenth pass" entry), again the same day for an agent-driven sweep of ~40 Server Action files that found 3 more real sibling-pattern gaps: a real email send with no rate limit, two organization-membership mutations with no audit trail, and a CSV-import action missing half of the sync-observability pattern it otherwise already follows (see the "Eleventh pass" entry), again the same day for a sweep of the Agent Fabric and Intelligence Core packages that found an entirely untested coordinator function and thin test coverage on the two lead-oriented capabilities, while confirming the `canExecute` safety invariant itself is solid (see the "Twelfth pass" entry), and again the same day for a sweep of every OAuth callback route, the QuickBooks webhook, and all 3 cron routes — which came back clean across CSRF/PKCE/error-handling/HMAC verification, plus one real timing-side-channel hardening item found and fixed on the cron `CRON_SECRET` check (see the "Thirteenth pass" entry) — untouched rows are still the second pass's evidence, not re-verified this pass.
+- Date: 2026-08-20, rows updated 2026-08-21 where this session had fresh, direct evidence (see the "Third pass" entry below), again 2026-08-23 for the Frontend row's file path and the test-count evidence run (see the "Fourth pass" entry), again 2026-08-26 for a real `pnpm check` run that found and fixed two genuine regressions plus the Connectors/Credential-encryption/Rate-limiting/Observability rows (see the "Fifth pass" entry), again the same day for an owner-requested dev-database cleanup plus a second real RLS grant/policy gap found and fixed (see the "Sixth pass" entry), again 2026-08-27 for the QuickBooks reconciliation cron, guest full-entitlements fix, and connector/OAuth logo re-verification (see the "Seventh pass" entry), again the same day for 4 more stray `console.*` sites, a missing Xero audit-visibility gap, and a confirmed unlocked token-refresh race in 3 more connectors (see the "Eighth pass" entry), again the same day for an agent-driven sibling-file sweep that found a mismatched doc comment on Gmail's token refresh, a missing retry opt-out on HubSpot's token endpoint, and a missing due-date audit log in Jira/Xero (see the "Ninth pass" entry), again the same day for the last two open P1 items — one a real fix (deferred invite acceptance), one a stale-doc correction (the Stripe webhook ordering guard already existed) — bringing the open P1 count to zero (see the "Tenth pass" entry), again the same day for an agent-driven sweep of ~40 Server Action files that found 3 more real sibling-pattern gaps: a real email send with no rate limit, two organization-membership mutations with no audit trail, and a CSV-import action missing half of the sync-observability pattern it otherwise already follows (see the "Eleventh pass" entry), again the same day for a sweep of the Agent Fabric and Intelligence Core packages that found an entirely untested coordinator function and thin test coverage on the two lead-oriented capabilities, while confirming the `canExecute` safety invariant itself is solid (see the "Twelfth pass" entry), again the same day for a sweep of every OAuth callback route, the QuickBooks webhook, and all 3 cron routes — which came back clean across CSRF/PKCE/error-handling/HMAC verification, plus one real timing-side-channel hardening item found and fixed on the cron `CRON_SECRET` check (see the "Thirteenth pass" entry), and again the same day for a sweep of every `_components`/`_cards` frontend file — 2 real gaps found and fixed (a missing pending-state on the sign-out button, a silently-dropped batch-task-creation failure), everything else confirmed clean (see the "Fourteenth pass" entry) — untouched rows are still the second pass's evidence, not re-verified this pass.
 - Scope: this is a repository-state audit, not a penetration test or a
   compliance certification. It reports what was inspected and what real
   evidence supports each classification — not a claim that SignalDesk has
@@ -445,6 +445,46 @@ the side channel and removes a 3-way copy-paste drift risk in one move.
 re-run unchanged and still green. `pnpm check` re-run clean, `DATABASE_URL`
 confirmed loaded: **2,183 tests passing (587 persistence, live)**,
 typecheck/lint/format/db:check/build all clean.
+
+**Fourteenth pass** (2026-08-27, same day, extending the sweep into the
+frontend — `apps/web/app/_components/*.tsx` and `apps/web/app/_cards/*.tsx`,
+21 and 18 files respectively, evaluated against this file's own stated
+priority — "user comprehension/accessibility," not cosmetic polish):
+2 real gaps found and fixed, everything else confirmed clean. (1)
+`AccountStatus`'s sign-out button had no pending/disabled state, unlike
+the only two other places in the app binding a real Server Action
+directly to a form (`GuestButton`/`OAuthButtons`) — double-clickable
+while `signOutAction` was in flight. Fixed with `useFormStatus`
+specifically, not `useActionState` like its siblings: `signOutAction`
+returns `void` with no `(prevState, formData)` arguments, so reshaping
+it just to fit `useActionState` would be a pointless change to a
+function with no state to report, only a pending phase — split into a
+new `SignOutButton` client component, since `useFormStatus` must run in
+a component nested inside the `<form>`, never the component rendering
+the form itself. (2) `command-center-board.tsx`'s `create_internal_task`
+command handler only branched on success in its per-target loop — a
+failed `createTaskAction` call was silently dropped, indistinguishable
+from selecting zero targets. Fixed by tracking and reporting a `failed`
+count, mirroring `handleDraftForMatter`'s own established count-based
+partial-failure convention elsewhere in the same file. Confirmed
+genuinely clean otherwise: icon-only-button accessibility, card
+empty-state honesty (no fabricated placeholder data anywhere), and
+destructive-action confirmation (no disconnect/revoke/delete buttons
+exist in the audited scope at all). Honest verification-depth note: this
+codebase has no React component-rendering test infrastructure anywhere
+(no `@testing-library/react`/jsdom, confirmed by search — consistent
+with zero `.tsx` files in either directory having a test file), so no
+net-new test infra was introduced for these two fixes alone, matching
+the repo's existing boundary; verified via `tsc` (clean) and confirming
+the live local dev server (already running on port 3001) still served
+every page without a build/runtime error after the change, but did not
+click-test the live authenticated sign-out flow or force a real
+task-creation failure in a browser — no interactive browser tool or
+session credentials were available in this environment, stated plainly
+rather than glossed over. `pnpm check` re-run clean, `DATABASE_URL`
+confirmed loaded: **2,183 tests passing (587 persistence, live)**,
+unchanged from the prior pass since no new tests were added, exactly as
+disclosed above. typecheck/lint/format/db:check/build all clean.
 
 ## What this audit deliberately did not do
 
