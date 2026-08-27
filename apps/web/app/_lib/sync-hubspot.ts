@@ -1,6 +1,5 @@
 import {
   detectHubSpotDealDefaultedFields,
-  fetchHubSpotDeals,
   fetchHubSpotDealsModifiedSince,
   fetchHubSpotOwners,
   mapHubSpotDealToSourceLeadRecord,
@@ -29,6 +28,12 @@ import { logger } from "./logger";
 // — bounds a single synchronous sync run, not the account's real deal
 // count.
 const MAX_DEAL_PAGES = 20;
+// HubSpot's basic list endpoint (previously used for the initial sync)
+// carries no ordering guarantee at all — see the real bug this constant's
+// own use fixes, in this file's doc comment below. This sentinel makes
+// the initial sync reuse the incremental fetch's `GTE hs_lastmodifieddate`
+// filter with a bound old enough to match every real deal.
+const EPOCH_ISO = "1970-01-01T00:00:00.000Z";
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
 const TOKEN_REFRESH_LOCK_MAX_ATTEMPTS = 5;
 const TOKEN_REFRESH_LOCK_RETRY_DELAY_MS = 300;
@@ -140,14 +145,28 @@ export async function ensureFreshHubSpotAccessToken(
  * Fetches and ingests HubSpot deals, up to `MAX_DEAL_PAGES` pages. Shared
  * by the OAuth callback's initial sync and the "Sync Now" action so the
  * two can never silently drift into different behavior. Wraps the run in
- * a real `sync_jobs` row (`entityType: "lead"`, ADR 0021/0023): an
- * initial sync (no prior cursor) pulls the full deal set via the plain
- * list endpoint, same as before; an incremental run (a stored
- * `cursorBefore`) switches to `fetchHubSpotDealsModifiedSince`, HubSpot's
- * Search API filtered by `hs_lastmodifieddate > cursorBefore`
- * (`incrementalSyncImplemented: true`, ADR 0023) — either way, the newest
- * `hs_lastmodifieddate` seen this run is computed and stored as the next
- * cursor.
+ * a real `sync_jobs` row (`entityType: "lead"`, ADR 0021/0023): both an
+ * initial sync (no prior cursor) and an incremental run go through
+ * `fetchHubSpotDealsModifiedSince`, HubSpot's Search API filtered by
+ * `hs_lastmodifieddate >= cursorBefore` and explicitly sorted
+ * `hs_lastmodifieddate ASCENDING` (`incrementalSyncImplemented: true`,
+ * ADR 0023) — the newest `hs_lastmodifieddate` seen this run is computed
+ * and stored as the next cursor.
+ *
+ * Real bug found by review: the initial sync used to call
+ * `fetchHubSpotDeals`, the plain `GET /crm/v3/objects/deals` list — which
+ * HubSpot's own API reference confirms has no `sort` parameter at all
+ * (only the Search API does). `maxCursor` was still computed as the
+ * *maximum* `hs_lastmodifieddate` seen across that unordered page
+ * sequence. Once `MAX_DEAL_PAGES` cut a large initial pull short, any
+ * deal processed with a newer `hs_lastmodifieddate` than an
+ * *unprocessed* one pushed `maxCursor` past that unprocessed deal's own
+ * timestamp — permanently failing the incremental path's `>=` filter on
+ * every future run, with no error, no skipped-count signal, nothing.
+ * Fixed by using the same ascending-sorted Search API call for the
+ * initial sync too, anchored at `EPOCH_ISO` (matches everything) instead
+ * of a real cursor — now every page, initial or incremental, is
+ * genuinely a lower bound the next run can safely resume from.
  */
 export async function syncHubSpotDeals(
   pool: DatabasePool,
@@ -195,9 +214,11 @@ export async function syncHubSpotDeals(
 
   try {
     for (let page = 0; page < MAX_DEAL_PAGES; page += 1) {
-      const dealsPage = cursorBefore
-        ? await fetchHubSpotDealsModifiedSince(accessToken, cursorBefore, after)
-        : await fetchHubSpotDeals(accessToken, after);
+      const dealsPage = await fetchHubSpotDealsModifiedSince(
+        accessToken,
+        cursorBefore ?? EPOCH_ISO,
+        after,
+      );
 
       for (const deal of dealsPage.results as readonly HubSpotDeal[]) {
         const seenAt = deal.properties.hs_lastmodifieddate ?? deal.updatedAt;

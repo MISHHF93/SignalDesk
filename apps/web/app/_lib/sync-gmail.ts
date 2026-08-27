@@ -187,6 +187,25 @@ function buildGmailQuery(cursorAfter: string | null): string {
  * mapper, which uses it for both `direction` and the external-
  * correspondence-only filter (see `mapGmailMessageToSourceMessageRecord`'s
  * doc comment, `@signaldesk/integrations/gmail`).
+ *
+ * Real gap found by review: `listGmailMessages` (`users.messages.list`)
+ * has no sort parameter — Gmail returns results newest-first by
+ * convention, with no documented ordering guarantee this app can rely on.
+ * Advancing the cursor to the *maximum* `internalDate` seen this run is
+ * only safe if the run actually reached every message at or after that
+ * point — with a newest-first, capped fetch, `maxCursor` locks onto (near
+ * enough) the very first message read and barely moves, while a run that
+ * hits either cap leaves real, older messages in the same window
+ * unprocessed. Since `buildGmailQuery`'s `after:` filter is forward-only,
+ * a cursor advanced past those unprocessed messages would permanently
+ * exclude them — some of them real, unanswered inbound messages that can
+ * never surface as `message.awaiting_reply` findings again. Same fix
+ * shape as `sync-asana.ts` (no genuinely safe ordering exists to exploit
+ * here either): a run that hits either cap never advances the cursor past
+ * `cursorBefore`, so the next run re-covers the identical window — safe
+ * (idempotent via `ON CONFLICT DO NOTHING`) and guaranteed to eventually
+ * converge once the window's real message volume drops under one run's
+ * cap.
  */
 export async function syncGmailMessages(
   pool: DatabasePool,
@@ -224,13 +243,19 @@ export async function syncGmailMessages(
   let maxCursor: string | null = cursorBefore;
   let pageToken: string | undefined;
   let bodyFetches = 0;
+  // Set when either real cap below cuts the run short with more data
+  // still available — see this function's own doc comment for why a
+  // truncated run must never advance the cursor.
+  let truncated = false;
+  let page = 0;
 
   try {
-    pageLoop: for (let page = 0; page < MAX_MESSAGE_LIST_PAGES; page += 1) {
+    pageLoop: for (; page < MAX_MESSAGE_LIST_PAGES; page += 1) {
       const listPage = await listGmailMessages(accessToken, query, pageToken);
 
       for (const item of listPage.results) {
         if (bodyFetches >= MAX_MESSAGE_BODY_FETCHES) {
+          truncated = true;
           break pageLoop;
         }
 
@@ -315,6 +340,13 @@ export async function syncGmailMessages(
 
       pageToken = listPage.nextPageToken;
     }
+
+    // The loop above only reaches page === MAX_MESSAGE_LIST_PAGES without
+    // breaking when the very last fetched page still had a truthy
+    // nextPageToken — i.e. real, unprocessed messages remain.
+    if (page === MAX_MESSAGE_LIST_PAGES) {
+      truncated = true;
+    }
   } catch (error) {
     await failSyncJob(pool, organizationId, job.id, {
       itemsIngested: ingested,
@@ -327,8 +359,21 @@ export async function syncGmailMessages(
   await completeSyncJob(pool, organizationId, job.id, {
     itemsIngested: ingested,
     itemsSkipped: skipped + filtered,
-    cursorAfter: maxCursor,
+    cursorAfter: truncated ? cursorBefore : maxCursor,
   });
+
+  if (truncated) {
+    logger.log(
+      "warn",
+      "Gmail sync: hit a real page/fetch cap with more messages remaining; cursor left unchanged so the next run re-covers this window.",
+      {
+        operation: "sync_gmail.message_truncated",
+        connectorSlug: "gmail",
+        organizationId,
+        correlationId: integrationId,
+      },
+    );
+  }
 
   if (skipped > 0) {
     logger.log(

@@ -4,16 +4,25 @@ vi.mock("@signaldesk/persistence");
 vi.mock("@signaldesk/integrations/gmail");
 vi.mock("./google-config");
 
-import { refreshGmailAccessToken } from "@signaldesk/integrations/gmail";
 import {
+  getGmailMessage,
+  listGmailMessages,
+  mapGmailMessageToSourceMessageRecord,
+  refreshGmailAccessToken,
+} from "@signaldesk/integrations/gmail";
+import {
+  completeSyncJob,
   getGmailTokens,
+  listRecentSyncJobsForConnection,
+  startSyncJob,
   storeGmailTokens,
   withAdvisoryLock,
   type DatabasePool,
+  type SyncJob,
 } from "@signaldesk/persistence";
 
 import { getGoogleOAuthConfig } from "./google-config";
-import { ensureFreshGmailAccessToken } from "./sync-gmail";
+import { ensureFreshGmailAccessToken, syncGmailMessages } from "./sync-gmail";
 
 const POOL = undefined as unknown as DatabasePool;
 
@@ -22,6 +31,16 @@ const mockedStoreGmailTokens = vi.mocked(storeGmailTokens);
 const mockedWithAdvisoryLock = vi.mocked(withAdvisoryLock);
 const mockedRefreshGmailAccessToken = vi.mocked(refreshGmailAccessToken);
 const mockedGetGoogleOAuthConfig = vi.mocked(getGoogleOAuthConfig);
+const mockedListGmailMessages = vi.mocked(listGmailMessages);
+const mockedGetGmailMessage = vi.mocked(getGmailMessage);
+const mockedMapGmailMessageToSourceMessageRecord = vi.mocked(
+  mapGmailMessageToSourceMessageRecord,
+);
+const mockedListRecentSyncJobsForConnection = vi.mocked(
+  listRecentSyncJobsForConnection,
+);
+const mockedStartSyncJob = vi.mocked(startSyncJob);
+const mockedCompleteSyncJob = vi.mocked(completeSyncJob);
 
 const FRESH_TOKENS = {
   accessToken: "at-fresh",
@@ -180,5 +199,127 @@ describe("ensureFreshGmailAccessToken", () => {
     await assertion;
 
     expect(mockedRefreshGmailAccessToken).not.toHaveBeenCalled();
+  });
+});
+
+function fakeSyncJob(overrides: Partial<SyncJob> = {}): SyncJob {
+  return {
+    id: "job-1",
+    organizationId: "org-1",
+    integrationId: "integration-1",
+    sourceSystem: "gmail",
+    entityType: "message",
+    trigger: "manual",
+    status: "running",
+    itemsIngested: 0,
+    itemsSkipped: 0,
+    cursorBefore: null,
+    cursorAfter: null,
+    errorMessage: null,
+    startedAt: new Date(),
+    completedAt: null,
+    ...overrides,
+  };
+}
+
+function fakeGmailMessage(id: string, internalDate: string) {
+  return {
+    id,
+    threadId: `thread-${id}`,
+    internalDate,
+    payload: { headers: [] },
+  };
+}
+
+/**
+ * Real behavioral coverage for a function that had none: proves the fix
+ * for a real bug found by review — Gmail's `users.messages.list` has no
+ * sort parameter and is documented/known to return results newest-first,
+ * so advancing the cursor to the maximum `internalDate` seen in a
+ * page-capped or body-fetch-capped run could permanently skip older,
+ * unprocessed messages in the same window with no signal. A truncated
+ * run must leave the cursor unchanged instead.
+ */
+describe("syncGmailMessages", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedStartSyncJob.mockResolvedValue(fakeSyncJob());
+    // No due-date-shaped concept for messages — mapped to null (filtered,
+    // not a failure) so this test only exercises the cursor-truncation
+    // logic, not the full ingestion pipeline.
+    mockedMapGmailMessageToSourceMessageRecord.mockReturnValue(null);
+  });
+
+  it("regression: does not advance the cursor when the body-fetch cap is hit with more messages remaining in the same page", async () => {
+    mockedListRecentSyncJobsForConnection.mockResolvedValue([
+      fakeSyncJob({
+        status: "succeeded",
+        cursorAfter: "1700000000000",
+      }),
+    ]);
+    // 301 items in one page — Gmail returns newest-first, so item 0 is
+    // the newest and would (wrongly, pre-fix) become maxCursor even
+    // though items past the 300th body fetch are never even read.
+    const results = Array.from({ length: 301 }, (_, i) => ({
+      id: `msg-${i}`,
+      threadId: `thread-${i}`,
+    }));
+    mockedListGmailMessages.mockResolvedValue({
+      results,
+      nextPageToken: null,
+    });
+    mockedGetGmailMessage.mockImplementation(async (_at, id) =>
+      fakeGmailMessage(id, "1700099999999"),
+    );
+
+    await syncGmailMessages(
+      POOL,
+      "org-1",
+      "integration-1",
+      "at-1",
+      "me@example.com",
+      "manual",
+    );
+
+    // Capped at MAX_MESSAGE_BODY_FETCHES (300), not all 301.
+    expect(mockedGetGmailMessage).toHaveBeenCalledTimes(300);
+    expect(mockedCompleteSyncJob).toHaveBeenCalledWith(
+      POOL,
+      "org-1",
+      "job-1",
+      expect.objectContaining({ cursorAfter: "1700000000000" }),
+    );
+  });
+
+  it("advances the cursor normally when the run completes within both caps", async () => {
+    mockedListRecentSyncJobsForConnection.mockResolvedValue([
+      fakeSyncJob({
+        status: "succeeded",
+        cursorAfter: "1700000000000",
+      }),
+    ]);
+    mockedListGmailMessages.mockResolvedValue({
+      results: [{ id: "msg-1", threadId: "thread-1" }],
+      nextPageToken: null,
+    });
+    mockedGetGmailMessage.mockResolvedValue(
+      fakeGmailMessage("msg-1", "1700050000000"),
+    );
+
+    await syncGmailMessages(
+      POOL,
+      "org-1",
+      "integration-1",
+      "at-1",
+      "me@example.com",
+      "manual",
+    );
+
+    expect(mockedCompleteSyncJob).toHaveBeenCalledWith(
+      POOL,
+      "org-1",
+      "job-1",
+      expect.objectContaining({ cursorAfter: "1700050000000" }),
+    );
   });
 });

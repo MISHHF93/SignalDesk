@@ -112,4 +112,19 @@ describe("messageFollowUpIntelligence", () => {
 
     expect(findings).toHaveLength(1);
   });
+
+  it("regression: formats a fractional elapsed-hours value in observedValue rather than an unrounded raw float", async () => {
+    // Real bug found by review: this used to interpolate the raw
+    // fractional-hours float directly (e.g. "76.61666666666667 hours
+    // elapsed") — ticket-risk.ts/lead-risk.ts already format the
+    // identical field via formatHours, this one just never got the same
+    // treatment.
+    const findings = await messageFollowUpIntelligence.evaluate({
+      ...BASE_CONTEXT,
+      now: new Date("2026-08-20T13:37:00.000Z"),
+      recentUnansweredMessages: [message()],
+    });
+
+    expect(findings[0]?.explanation.observedValue).toBe("73.6 hours elapsed");
+  });
 });

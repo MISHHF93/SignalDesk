@@ -9,7 +9,7 @@ import type {
 } from "../capability";
 import { CONFIDENCE_DETERMINISTIC_RULE } from "../confidence";
 import type { IntelligenceFinding } from "../finding";
-import { freshnessStatus } from "../format";
+import { formatHours, freshnessStatus } from "../format";
 
 /**
  * The real, visible consumer of Gmail message ingestion (Phase 4b,
@@ -60,6 +60,12 @@ export const messageFollowUpIntelligence: IntelligenceCapability = {
       );
       const counterparty =
         message.counterpartyName ?? message.counterpartyEmail;
+      // Real bug found by review: this used to interpolate the raw
+      // fractional-hours float directly (e.g. "76.61666666666667 hours
+      // elapsed") — ticket-risk.ts/lead-risk.ts already format the
+      // identical field via formatHours, this one just never got the
+      // same treatment.
+      const elapsedLabel = formatHours(signal.elapsedHours);
 
       findings.push({
         id: `message-follow-up:${message.organizationId}:${message.id}`,
@@ -85,7 +91,7 @@ export const messageFollowUpIntelligence: IntelligenceCapability = {
         explanation: {
           trigger:
             "Inbound message exceeded the response-time threshold with no outbound reply.",
-          observedValue: `${signal.elapsedHours} hours elapsed`,
+          observedValue: `${elapsedLabel} hours elapsed`,
           expectedBaseline: `${signal.thresholdHours}-hour response threshold`,
           confidence: "high",
         },

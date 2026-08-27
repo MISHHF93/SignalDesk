@@ -143,6 +143,27 @@ export async function ensureFreshAsanaAccessToken(
  * (`incrementalSyncImplemented: true`, ADR 0024) — either way, the newest
  * `modified_at` seen across every workspace this run is computed and
  * stored as the next cursor.
+ *
+ * Real gap found by review: unlike HubSpot's equivalent (which has a
+ * genuinely sorted Search API to fall back on — see `sync-hubspot.ts`'s
+ * own fix), Asana's `GET /tasks` has no `sort_by`/ordering parameter at
+ * all, confirmed against Asana's own API reference. Advancing the cursor
+ * to the *maximum* `modified_at` seen this run is only safe if every task
+ * modified before that point was actually processed — with no ordering
+ * guarantee, a page-capped run for a workspace with more overdue tasks
+ * than `MAX_TASK_PAGES_PER_WORKSPACE` covers could compute a `maxCursor`
+ * that's already past some unprocessed task's real `modified_at`,
+ * permanently excluding it from every future `modified_since` fetch with
+ * no error or signal. Since there is no way to fetch this data in a
+ * genuinely safe order, the fix instead never trusts a cursor computed
+ * from a truncated run: if any workspace's fetch hit
+ * `MAX_TASK_PAGES_PER_WORKSPACE` with more pages still available, this
+ * run's `cursorAfter` stays at `cursorBefore` unchanged (never advances),
+ * so the next run re-scans the identical window — safe (idempotent via
+ * `ON CONFLICT DO NOTHING`) and guaranteed to eventually converge once
+ * the backlog shrinks under one run's cap, the same "the safe direction
+ * for a signal to be wrong" discipline `endOfDateOnlyDayUtc`
+ * (`@signaldesk/domain`) already established for date-only due fields.
  */
 export async function syncAsanaTasks(
   pool: DatabasePool,
@@ -176,14 +197,19 @@ export async function syncAsanaTasks(
   let skipped = 0;
   let defaultedNameCount = 0;
   let maxCursor: string | null = cursorBefore;
+  // Set when any workspace's fetch hits MAX_TASK_PAGES_PER_WORKSPACE with
+  // more pages still available — see this function's own doc comment for
+  // why a truncated run must never advance the cursor.
+  let truncated = false;
 
   try {
     const workspaces = await fetchAsanaWorkspaces(accessToken);
 
     for (const workspace of workspaces) {
       let offset: string | undefined;
+      let page = 0;
 
-      for (let page = 0; page < MAX_TASK_PAGES_PER_WORKSPACE; page += 1) {
+      for (; page < MAX_TASK_PAGES_PER_WORKSPACE; page += 1) {
         const taskPage = await fetchAsanaTasks(
           accessToken,
           asanaUserId,
@@ -270,6 +296,14 @@ export async function syncAsanaTasks(
 
         offset = taskPage.nextOffset;
       }
+
+      // The loop above only reaches page === MAX_TASK_PAGES_PER_WORKSPACE
+      // without breaking when the very last fetched page still had a
+      // truthy nextOffset — i.e. real, unprocessed data remains for this
+      // workspace.
+      if (page === MAX_TASK_PAGES_PER_WORKSPACE) {
+        truncated = true;
+      }
     }
   } catch (error) {
     await failSyncJob(pool, organizationId, job.id, {
@@ -283,8 +317,21 @@ export async function syncAsanaTasks(
   await completeSyncJob(pool, organizationId, job.id, {
     itemsIngested: ingested,
     itemsSkipped: skipped,
-    cursorAfter: maxCursor,
+    cursorAfter: truncated ? cursorBefore : maxCursor,
   });
+
+  if (truncated) {
+    logger.log(
+      "warn",
+      "Asana sync: hit the per-workspace page cap with more data remaining; cursor left unchanged so the next run re-covers this window.",
+      {
+        operation: "sync_asana.task_truncated",
+        connectorSlug: "asana",
+        organizationId,
+        correlationId: integrationId,
+      },
+    );
+  }
 
   if (skipped > 0) {
     logger.log(

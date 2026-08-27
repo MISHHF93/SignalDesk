@@ -237,45 +237,21 @@ const DEAL_PROPERTIES = [
   "hs_lastmodifieddate",
 ] as const;
 
-export async function fetchHubSpotDeals(
-  accessToken: string,
-  after?: string,
-): Promise<HubSpotDealsPage> {
-  const url = new URL(`${API_BASE_URL}/crm/v3/objects/deals`);
-  url.searchParams.set("limit", "100");
-  url.searchParams.set("properties", DEAL_PROPERTIES.join(","));
-
-  if (after) {
-    url.searchParams.set("after", after);
-  }
-
-  const response = await fetchWithRetry(url, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-
-  if (!response.ok) {
-    await throwUpstreamError("HubSpot deals fetch", response);
-  }
-
-  const payload = (await response.json()) as {
-    results: HubSpotDeal[];
-    paging?: { next?: { after: string } };
-  };
-
-  return {
-    results: payload.results,
-    nextAfter: payload.paging?.next?.after ?? null,
-  };
-}
-
 /**
  * Fetches one page of deals modified since `sinceCursorIso` (an ISO
  * timestamp — HubSpot's own response shape, e.g. the cursor this app
  * already computes from `hs_lastmodifieddate`/`updatedAt`), oldest-
- * modified-first. Unlike `fetchHubSpotDeals` (the plain list GET used for
- * a full/initial pull), incremental filtering requires HubSpot's Search
- * API (`POST /crm/v3/objects/deals/search`) — the basic list endpoint has
- * no filter parameter. Verified against HubSpot's current CRM Search API
+ * modified-first. The only deal-listing call this connector makes —
+ * `sync-hubspot.ts` uses this for the initial sync too (anchored at a
+ * beginning-of-time sentinel instead of a real cursor), not the basic
+ * `GET /crm/v3/objects/deals` list this file used to also export for
+ * that: real bug found by review, that endpoint has no `sort` parameter
+ * at all (only the Search API used here does), so a page-capped initial
+ * pull through it could silently and permanently drop deals — see
+ * `syncHubSpotDeals`'s own doc comment for the full explanation. This
+ * Search API call requires it regardless: filtering by
+ * `hs_lastmodifieddate` needs it — the basic list endpoint has no filter
+ * parameter either. Verified against HubSpot's current CRM Search API
  * docs this session (developers.hubspot.com/docs/api/crm/search), not
  * assumed: filter values must be Unix milliseconds even though response
  * timestamps are ISO strings, so `sinceCursorIso` is converted here; the
