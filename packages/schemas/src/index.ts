@@ -252,7 +252,15 @@ export function parseSourcePaymentRecord(
 export const sourceTaskRecordSchema = z.strictObject({
   id: z.uuid(),
   name: z.string().trim().min(1).max(500),
-  assigneeName: z.string().trim().min(1).max(200).nullable(),
+  // Real gap found by review: this used to be capped at max(200), the
+  // sole outlier among every other person/entity-name field in this file
+  // (contactName/companyName/customerName/counterpartyName/requesterName,
+  // and sourceSupportTicketRecordSchema's own assigneeName below, whose
+  // own doc comment says it's deliberately modeled on this field's
+  // division of labor) — all max(500). No comment ever explained the
+  // narrower bound, and nothing about a task assignee's display name is
+  // structurally different from a ticket assignee's.
+  assigneeName: z.string().trim().min(1).max(500).nullable(),
   dueAt: isoTimestampSchema,
   completed: z.boolean(),
   source: z.strictObject({

@@ -6,7 +6,7 @@
   question, not yet decided" in that backlog's Master product/engineering
   charter entry. Decided here: yes, formalize it, because a real audit
   now has enough real subsystems to be worth auditing.
-- Date: 2026-08-20, rows updated 2026-08-21 where this session had fresh, direct evidence (see the "Third pass" entry below), again 2026-08-23 for the Frontend row's file path and the test-count evidence run (see the "Fourth pass" entry), again 2026-08-26 for a real `pnpm check` run that found and fixed two genuine regressions plus the Connectors/Credential-encryption/Rate-limiting/Observability rows (see the "Fifth pass" entry), again the same day for an owner-requested dev-database cleanup plus a second real RLS grant/policy gap found and fixed (see the "Sixth pass" entry), again 2026-08-27 for the QuickBooks reconciliation cron, guest full-entitlements fix, and connector/OAuth logo re-verification (see the "Seventh pass" entry), again the same day for 4 more stray `console.*` sites, a missing Xero audit-visibility gap, and a confirmed unlocked token-refresh race in 3 more connectors (see the "Eighth pass" entry), again the same day for an agent-driven sibling-file sweep that found a mismatched doc comment on Gmail's token refresh, a missing retry opt-out on HubSpot's token endpoint, and a missing due-date audit log in Jira/Xero (see the "Ninth pass" entry), again the same day for the last two open P1 items — one a real fix (deferred invite acceptance), one a stale-doc correction (the Stripe webhook ordering guard already existed) — bringing the open P1 count to zero (see the "Tenth pass" entry), again the same day for an agent-driven sweep of ~40 Server Action files that found 3 more real sibling-pattern gaps: a real email send with no rate limit, two organization-membership mutations with no audit trail, and a CSV-import action missing half of the sync-observability pattern it otherwise already follows (see the "Eleventh pass" entry), again the same day for a sweep of the Agent Fabric and Intelligence Core packages that found an entirely untested coordinator function and thin test coverage on the two lead-oriented capabilities, while confirming the `canExecute` safety invariant itself is solid (see the "Twelfth pass" entry), again the same day for a sweep of every OAuth callback route, the QuickBooks webhook, and all 3 cron routes — which came back clean across CSRF/PKCE/error-handling/HMAC verification, plus one real timing-side-channel hardening item found and fixed on the cron `CRON_SECRET` check (see the "Thirteenth pass" entry), and again the same day for a sweep of every `_components`/`_cards` frontend file — 2 real gaps found and fixed (a missing pending-state on the sign-out button, a silently-dropped batch-task-creation failure), everything else confirmed clean (see the "Fourteenth pass" entry) — untouched rows are still the second pass's evidence, not re-verified this pass.
+- Date: 2026-08-20, rows updated 2026-08-21 where this session had fresh, direct evidence (see the "Third pass" entry below), again 2026-08-23 for the Frontend row's file path and the test-count evidence run (see the "Fourth pass" entry), again 2026-08-26 for a real `pnpm check` run that found and fixed two genuine regressions plus the Connectors/Credential-encryption/Rate-limiting/Observability rows (see the "Fifth pass" entry), again the same day for an owner-requested dev-database cleanup plus a second real RLS grant/policy gap found and fixed (see the "Sixth pass" entry), again 2026-08-27 for the QuickBooks reconciliation cron, guest full-entitlements fix, and connector/OAuth logo re-verification (see the "Seventh pass" entry), again the same day for 4 more stray `console.*` sites, a missing Xero audit-visibility gap, and a confirmed unlocked token-refresh race in 3 more connectors (see the "Eighth pass" entry), again the same day for an agent-driven sibling-file sweep that found a mismatched doc comment on Gmail's token refresh, a missing retry opt-out on HubSpot's token endpoint, and a missing due-date audit log in Jira/Xero (see the "Ninth pass" entry), again the same day for the last two open P1 items — one a real fix (deferred invite acceptance), one a stale-doc correction (the Stripe webhook ordering guard already existed) — bringing the open P1 count to zero (see the "Tenth pass" entry), again the same day for an agent-driven sweep of ~40 Server Action files that found 3 more real sibling-pattern gaps: a real email send with no rate limit, two organization-membership mutations with no audit trail, and a CSV-import action missing half of the sync-observability pattern it otherwise already follows (see the "Eleventh pass" entry), again the same day for a sweep of the Agent Fabric and Intelligence Core packages that found an entirely untested coordinator function and thin test coverage on the two lead-oriented capabilities, while confirming the `canExecute` safety invariant itself is solid (see the "Twelfth pass" entry), again the same day for a sweep of every OAuth callback route, the QuickBooks webhook, and all 3 cron routes — which came back clean across CSRF/PKCE/error-handling/HMAC verification, plus one real timing-side-channel hardening item found and fixed on the cron `CRON_SECRET` check (see the "Thirteenth pass" entry), again the same day for a sweep of every `_components`/`_cards` frontend file — 2 real gaps found and fixed (a missing pending-state on the sign-out button, a silently-dropped batch-task-creation failure), everything else confirmed clean (see the "Fourteenth pass" entry), and again the same day for a sweep of the remaining unaudited packages and API routes that found 2 real `packages/schemas` gaps — an inconsistent field-length bound and two entirely untested source-record schemas on live sync paths, both fixed (see the "Fifteenth pass" entry) — untouched rows are still the second pass's evidence, not re-verified this pass.
 - Scope: this is a repository-state audit, not a penetration test or a
   compliance certification. It reports what was inspected and what real
   evidence supports each classification — not a claim that SignalDesk has
@@ -485,6 +485,32 @@ rather than glossed over. `pnpm check` re-run clean, `DATABASE_URL`
 confirmed loaded: **2,183 tests passing (587 persistence, live)**,
 unchanged from the prior pass since no new tests were added, exactly as
 disclosed above. typecheck/lint/format/db:check/build all clean.
+
+**Fifteenth pass** (2026-08-27, same day, sweeping the last unaudited
+territory — `packages/domain`/`goals`/`semantics`/`csv-import`/
+`data-quality`, and the 3 remaining non-cron/webhook API routes): 2 real
+gaps found and fixed in `packages/schemas`, everything else confirmed
+clean. (1) `sourceTaskRecordSchema.assigneeName` was capped at
+`max(200)`, the sole outlier among every other person/entity-name field
+in the same file — all `max(500)`, including
+`sourceSupportTicketRecordSchema`'s own `assigneeName`, whose own doc
+comment says it's deliberately modeled on this field's division of
+labor — with no comment ever explaining the narrower bound. Widened to
+`max(500)`; a real assignee display name over 200 characters would
+otherwise have been silently rejected at ingest. (2)
+`sourceMessageRecordSchema`/`sourceSupportTicketRecordSchema` — real
+validation on the live Gmail/Zendesk sync paths — had zero test coverage
+anywhere in the repo, unlike the other four source-record schemas in the
+same file, each with a dedicated test file. Added two new test files
+mirroring `source-task-record.test.ts`'s exact structure. `packages/domain`
+(already extensively self-documented with prior "found by review"
+fixes), the four smaller packages, and the 3 remaining API routes
+(`business/snapshot`, `health`, `agents/investigations/[id]/steps`) were
+all confirmed genuinely clean. 44 new tests across the 2 new files, plus
+the existing boundary test updated to match the widened bound; full
+`packages/schemas` suite 186/186 passing. `pnpm check` re-run clean,
+`DATABASE_URL` confirmed loaded: **2,227 tests passing (587 persistence,
+live)**, typecheck/lint/format/db:check/build all clean.
 
 ## What this audit deliberately did not do
 

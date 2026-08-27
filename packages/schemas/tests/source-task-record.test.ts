@@ -51,7 +51,7 @@ describe("sourceTaskRecordSchema", () => {
   it.each([
     ["id", { id: "task-001" }],
     ["name", { name: "a".repeat(501) }],
-    ["assigneeName", { assigneeName: "a".repeat(201) }],
+    ["assigneeName", { assigneeName: "a".repeat(501) }],
     ["completed", { completed: "false" }],
   ])("rejects an invalid canonical %s", (_caseName, override) => {
     const result = sourceTaskRecordSchema.safeParse({
