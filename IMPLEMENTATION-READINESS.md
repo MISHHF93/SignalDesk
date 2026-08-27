@@ -347,10 +347,15 @@ same-session with a second migration (0072) before moving on. 5 new
 live-database tests cover the actual regression (an abandoned signup no
 longer burns the invite), successful deferred acceptance, an
 expired-by-confirmation-time fallback, idempotency, and a mismatched-email
-rejection. Both migrations applied to the dev database only so far —
-**not yet applied to production**, and not end-to-end verified against a
-real Supabase Auth confirmation-email click (no way to simulate that from
-this test environment; documented as the same limitation this codebase's
+rejection. Given the blast radius (every future signup), applied to the
+dev database first and paused for explicit owner sign-off before touching
+production rather than proceeding automatically — approved, then applied
+to both dev and production; a fresh security-advisor scan came back
+clean on both (zero findings), and a direct `pg_trigger` query against
+production confirmed both `on_auth_user_created`/`on_auth_user_confirmed`
+exist and are enabled. Still not end-to-end verified against a real
+Supabase Auth confirmation-email click (no way to simulate that from this
+test environment; documented as the same limitation this codebase's
 existing identity tests already accept for the trigger they stand in
 for). `pnpm check` re-run clean, `DATABASE_URL` confirmed loaded:
 **2,165 tests passing (587 persistence, live)**, typecheck/lint/format/
