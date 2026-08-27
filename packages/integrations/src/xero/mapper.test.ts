@@ -6,7 +6,11 @@ import { describe, expect, it } from "vitest";
 import { parseSourceInvoiceRecord } from "@signaldesk/schemas";
 import { randomUUID } from "node:crypto";
 
-import { mapXeroInvoiceToSourceInvoiceRecord, parseXeroDate } from "./mapper";
+import {
+  detectXeroInvoiceDefaultedFields,
+  mapXeroInvoiceToSourceInvoiceRecord,
+  parseXeroDate,
+} from "./mapper";
 import type { XeroInvoice } from "./client";
 
 const NOW = new Date("2026-08-18T14:00:00.000Z");
@@ -113,5 +117,32 @@ describe("mapXeroInvoiceToSourceInvoiceRecord", () => {
     ) as Record<string, unknown>;
 
     expect(record.amountCents).toBe(125_000);
+  });
+});
+
+// Real gap found by review: this mapper already had the same
+// silently-defaulted customer-name fallback HubSpot/QuickBooks/Asana's
+// mappers do, but never gained the matching audit-visibility companion
+// function those three (and Salesforce/Jira/Zendesk) already have —
+// mirrors quickbooks/mapper.test.ts's own equivalent coverage.
+describe("detectXeroInvoiceDefaultedFields", () => {
+  it("reports nothing for a real, complete invoice", () => {
+    expect(detectXeroInvoiceDefaultedFields(invoice())).toEqual([]);
+  });
+
+  it("flags a missing Contact.Name as defaulted", () => {
+    expect(
+      detectXeroInvoiceDefaultedFields(
+        invoice({ Contact: { ContactID: "contact-9" } }),
+      ),
+    ).toEqual(["Contact.Name"]);
+  });
+
+  it("flags a blank Contact.Name as defaulted, not just a missing one", () => {
+    expect(
+      detectXeroInvoiceDefaultedFields(
+        invoice({ Contact: { ContactID: "contact-9", Name: "   " } }),
+      ),
+    ).toEqual(["Contact.Name"]);
   });
 });

@@ -1,4 +1,5 @@
 import {
+  detectXeroInvoiceDefaultedFields,
   fetchXeroInvoices,
   fetchXeroPaidInvoices,
   mapXeroInvoiceToSourceInvoiceRecord,
@@ -40,6 +41,12 @@ export interface XeroSyncResult {
    * transitioned to `status: "paid"` — always 0 on an initial sync,
    * mirroring `QuickBooksSyncResult.closed` exactly. */
   readonly closed: number;
+  /** Records whose `Contact.Name` was missing and fell back to a
+   * placeholder (`detectXeroInvoiceDefaultedFields`) — mirrors
+   * `QuickBooksSyncResult.defaultedNameCount` exactly: logged for
+   * visibility, deliberately never folded into `skipped`, since the
+   * record still ingested successfully. */
+  readonly defaultedNameCount: number;
 }
 
 /**
@@ -176,6 +183,7 @@ export async function syncXeroInvoices(
   let ingested = 0;
   let skipped = 0;
   let closed = 0;
+  let defaultedNameCount = 0;
   let maxCursor: string | null = cursorBefore;
 
   try {
@@ -192,6 +200,10 @@ export async function syncXeroInvoices(
 
         if (mapped === null) {
           continue;
+        }
+
+        if (detectXeroInvoiceDefaultedFields(rawInvoice).length > 0) {
+          defaultedNameCount += 1;
         }
 
         let invoiceRecord: ReturnType<typeof parseSourceInvoiceRecord>;
@@ -319,5 +331,18 @@ export async function syncXeroInvoices(
     );
   }
 
-  return { ingested, skipped, closed };
+  if (defaultedNameCount > 0) {
+    logger.log(
+      "warn",
+      `Xero sync: ${defaultedNameCount} invoice(s) had no usable Contact.Name and fell back to a placeholder.`,
+      {
+        operation: "sync_xero.invoice_defaulted_name",
+        connectorSlug: "xero",
+        organizationId,
+        correlationId: integrationId,
+      },
+    );
+  }
+
+  return { ingested, skipped, closed, defaultedNameCount };
 }

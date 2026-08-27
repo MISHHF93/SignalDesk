@@ -25,6 +25,33 @@ const DEFAULT_CURRENCY = "USD";
 
 const XERO_DATE_PATTERN = /^\/Date\((-?\d+)(?:[+-]\d{4})?\)\/$/;
 
+// Real gap found by review: this mapper already had the same
+// silently-defaulted-name fallback HubSpot's `dealname`/QuickBooks'
+// `CustomerRef.name`/Asana's task `name` do (`Xero contact
+// ${ContactID}` below), but — unlike those three, and unlike
+// Salesforce/Jira/Zendesk's own equivalents — never gained the matching
+// audit-visibility companion function (`docs/25-issue-audit.md` issue
+// 5's own extension point). A blank `Contact.Name` on a real invoice is
+// exactly the same class of upstream data drift those other connectors
+// already surface as a counted, logged signal rather than silently
+// swallowing it.
+function isContactNameMissing(contact: XeroInvoice["Contact"]): boolean {
+  return !contact.Name?.trim();
+}
+
+/**
+ * Reports which critical fields this invoice would need a fallback for,
+ * without performing the mapping itself — same schema-drift-visibility
+ * extension point as `detectQuickBooksInvoiceDefaultedFields`
+ * (`quickbooks/mapper.ts`). Deliberately additive; never changes mapping
+ * behavior itself.
+ */
+export function detectXeroInvoiceDefaultedFields(
+  invoice: XeroInvoice,
+): readonly string[] {
+  return isContactNameMissing(invoice.Contact) ? ["Contact.Name"] : [];
+}
+
 /**
  * Parses Xero's legacy .NET wire-format DateTime string. Throws on a
  * genuinely malformed value rather than silently returning an invalid
@@ -76,9 +103,9 @@ export function mapXeroInvoiceToSourceInvoiceRecord(
 
   return {
     id: randomUUID(),
-    customerName:
-      invoice.Contact.Name?.trim() ||
-      `Xero contact ${invoice.Contact.ContactID}`,
+    customerName: isContactNameMissing(invoice.Contact)
+      ? `Xero contact ${invoice.Contact.ContactID}`
+      : invoice.Contact.Name!.trim(),
     amountCents: Math.round(invoice.AmountDue * 100),
     currency: DEFAULT_CURRENCY,
     dueAt: dueAt.toISOString(),
