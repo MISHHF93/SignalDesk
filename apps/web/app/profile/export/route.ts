@@ -6,8 +6,9 @@ import {
   type DatabasePool,
 } from "@signaldesk/persistence";
 
-import { getCurrentOrganization } from "../../_lib/session";
+import { checkRateLimit } from "../../_lib/rate-limit";
 import { getRequestOrigin } from "../../_lib/request-origin";
+import { getCurrentOrganization } from "../../_lib/session";
 
 let pool: DatabasePool | undefined;
 
@@ -27,12 +28,40 @@ function getPool(): DatabasePool {
  * back — wrapped in a try/catch that redirects to `/profile` with an
  * honest failure banner instead, matching how `/billing` already reports
  * its own action outcomes via a `?billing=` query param.
+ *
+ * Real gap found by review: this had no rate limit at all — a second,
+ * previously-overlooked instance of the exact gap `business/snapshot/
+ * route.ts`'s own doc comment once called "the one authenticated endpoint
+ * with no bound on repeat calls" (already fixed there). `exportOrganizationData`
+ * is a full multi-table dump (leads/invoices/tasks/messages/support
+ * tickets/artifacts/audit events/subscription) — heavier than a single
+ * snapshot read, so bounded more tightly: 5/hour, matching
+ * `delete-organization.ts`'s own bound for a comparably heavy,
+ * infrequent-by-design real operation. Keyed by organization, matching
+ * every other post-authentication rate limit in this codebase.
  */
 export async function GET() {
   const session = await getCurrentOrganization();
 
   if (!session) {
     return NextResponse.json({ error: "Sign in to do this." }, { status: 401 });
+  }
+
+  const rateLimit = await checkRateLimit(
+    getPool(),
+    `profile-export:${session.organizationId}`,
+    5,
+    60 * 60 * 1000,
+  );
+
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "Too many requests. Please slow down." },
+      {
+        status: 429,
+        headers: { "Retry-After": String(rateLimit.retryAfterSeconds) },
+      },
+    );
   }
 
   try {

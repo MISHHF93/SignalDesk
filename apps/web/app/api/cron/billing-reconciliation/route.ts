@@ -19,6 +19,7 @@ import {
 import { verifyCronSecret } from "../../../_lib/cron-auth";
 import { errorReporter } from "../../../_lib/error-reporter";
 import { logger } from "../../../_lib/logger";
+import { recordAuditEventSafely } from "../../../_lib/safe-audit-event";
 import {
   getStripeSecretKey,
   isBillingConfigured,
@@ -118,6 +119,22 @@ export function findDrift(
  * completely untouched — no write, no `updated_at` bump — so this sweep
  * is silent by default and only ever visible in the log/response when it
  * actually corrects something.
+ *
+ * Real gap found by review: a real correction here used to leave no trace
+ * in `audit_events` at all — this route calls the exact same
+ * `updateSubscriptionFromStripe` the Stripe webhook does (which has no
+ * audit trail of its own), but unlike the webhook (fixed the same day —
+ * see `billing/webhooks/stripe/route.ts`) and this route's own sibling
+ * cron (`quickbooks-reconciliation/route.ts`, which records `sync.completed`
+ * for every real correction), a silently corrected `active` → `canceled`
+ * drift — this app's own doc comment calls out exactly that scenario —
+ * left no record anywhere except a `warn` log line. Fixed with
+ * `recordAuditEventSafely`, not a bare call: this runs inside a per-
+ * organization try/catch that treats any throw as "this organization
+ * failed to reconcile this run," but the real DB correction has already
+ * committed by that point — a transient audit-write failure must not get
+ * misreported as a failed reconciliation for a correction that actually
+ * succeeded.
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
   if (
@@ -170,12 +187,26 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         continue;
       }
 
-      await updateSubscriptionFromStripe(
+      const updated = await updateSubscriptionFromStripe(
         db,
         local.organizationId,
         local.stripeSubscriptionId,
         desired,
       );
+
+      if (updated) {
+        await recordAuditEventSafely(db, local.organizationId, {
+          actorKind: "integration",
+          eventType: "subscription.drift_corrected",
+          subjectType: "organization_subscription",
+          subjectId: updated.id,
+          outcome: "succeeded",
+          metadata: {
+            stripeSubscriptionId: local.stripeSubscriptionId,
+            driftedFields,
+          },
+        });
+      }
 
       reconciled += 1;
       corrections.push({

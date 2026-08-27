@@ -25,8 +25,10 @@ function getPool(): DatabasePool {
  * would only add latency for no benefit.
  *
  * Rate-limited like every other real write/action in this app (a
- * disclosed, previously-unaddressed gap: this was the one authenticated
- * endpoint with no bound on repeat calls). `useBusinessSnapshot` has no
+ * disclosed, previously-unaddressed gap: at the time this was fixed, this
+ * was believed to be the one authenticated endpoint with no bound on
+ * repeat calls — later found to have a second, missed instance,
+ * `profile/export/route.ts`, since fixed there too). `useBusinessSnapshot` has no
  * automatic polling — only a manual `refresh()` — so 30/minute is
  * generous for real usage while still bounding a scripted hammering of
  * the endpoint. Keyed by organization, matching every other
