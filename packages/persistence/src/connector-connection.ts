@@ -107,6 +107,17 @@ export async function getConnectorConnection(
  * (`integration-status.ts`, distinct slugs or id+system only), this
  * returns the full real row a trust-disclosure surface needs: status,
  * external account label, and when the connection was actually made.
+ *
+ * Deliberately unbounded (no `LIMIT`), unlike every other "real set" list
+ * in this package: `delete-organization.ts` also calls this to find every
+ * connection to revoke and disconnect during account deletion, and a
+ * capped read there would silently leave some integrations connected —
+ * a vault-secret and tenant-data-lifecycle correctness bug, not a
+ * performance optimization. Real row count stays naturally small in
+ * practice: `findOrCreateXIntegration` upserts on
+ * `(organization_id, source_system, external_account_id)`, so it's
+ * bounded by distinct external accounts ever connected per connector
+ * catalog entry, not by sync volume.
  */
 export async function listConnectorConnections(
   pool: DatabasePool,

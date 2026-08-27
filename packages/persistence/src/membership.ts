@@ -88,12 +88,17 @@ interface OrganizationMemberRow {
   readonly status: string;
 }
 
+const MAX_ORGANIZATION_MEMBERS = 500;
+
 /**
  * Every real member of one organization (Phase 3, implementation
  * roadmap) — the team roster a real invite flow needs a place to render.
  * Before this phase every real org had exactly one row here (the
  * auto-provisioned owner); this is the first real caller with a genuine
- * reason to expect more than one.
+ * reason to expect more than one. Capped like every other "real set" list
+ * in this app (`listGoals`, `listOverdueInvoices`) — oldest-joined first,
+ * so a roster this large would truncate newer joins rather than silently
+ * hide the founding members.
  */
 export async function listOrganizationMembers(
   pool: DatabasePool,
@@ -106,7 +111,8 @@ export async function listOrganizationMembers(
        from memberships m
        join users u on u.id = m.user_id
        where m.organization_id = $1
-       order by m.created_at asc`,
+       order by m.created_at asc
+       limit ${MAX_ORGANIZATION_MEMBERS}`,
       [organizationId],
     );
 
