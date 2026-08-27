@@ -147,15 +147,36 @@ export function AgentRecommendationCard({
       setReconnectSlug(null);
 
       startTransition(async () => {
-        const result = await sendAction(card.id);
+        try {
+          const result = await sendAction(card.id);
 
-        if (result.ok) {
-          setStatus("success");
-          setMessage(result.alreadySent ? labels.alreadyDone : labels.done);
-        } else {
+          if (result.ok) {
+            setStatus("success");
+            setMessage(result.alreadySent ? labels.alreadyDone : labels.done);
+            // Mirrors the create_internal_task branch below: a real send
+            // (not a no-op re-click of an already-sent proposal) can
+            // leave a sibling deterministic card server-rendered before
+            // this entity's state changed — router.refresh() re-syncs it
+            // instead of leaving it stale until the next 45s poll.
+            if (!result.alreadySent) {
+              router.refresh();
+            }
+          } else {
+            setStatus("error");
+            setMessage(`Action failed. ${result.error}`);
+            setReconnectSlug(result.reconnectSlug ?? null);
+          }
+        } catch {
+          // A transport-level failure (dropped connection, aborted
+          // request) rejects rather than resolving — unlike every
+          // in-action failure, which each approve action's own try/catch
+          // already turns into a returned `{ ok: false }`. Without this,
+          // the button silently re-enables with no message at all,
+          // indistinguishable from the click never registering.
           setStatus("error");
-          setMessage(`Action failed. ${result.error}`);
-          setReconnectSlug(result.reconnectSlug ?? null);
+          setMessage(
+            "Action failed. A network error occurred — please try again.",
+          );
         }
       });
 
@@ -173,25 +194,36 @@ export function AgentRecommendationCard({
     setReconnectSlug(null);
 
     startTransition(async () => {
-      const result = await approveAgentActionProposalAction(card.id);
+      try {
+        const result = await approveAgentActionProposalAction(card.id);
 
-      if (result.ok) {
-        setStatus("success");
-        setMessage(
-          result.created
-            ? "Task created."
-            : "Already created — no duplicate was made.",
-        );
-        // Same gap CardActions' own router.refresh() closes: "Your
-        // tasks" is server-rendered from data fetched before this
-        // approval, so the newly created task needs a refresh to
-        // actually appear there.
-        if (result.created) {
-          router.refresh();
+        if (result.ok) {
+          setStatus("success");
+          setMessage(
+            result.created
+              ? "Task created."
+              : "Already created — no duplicate was made.",
+          );
+          // Same gap CardActions' own router.refresh() closes: "Your
+          // tasks" is server-rendered from data fetched before this
+          // approval, so the newly created task needs a refresh to
+          // actually appear there.
+          if (result.created) {
+            router.refresh();
+          }
+        } else {
+          setStatus("error");
+          setMessage(`Action failed. ${result.error}`);
         }
-      } else {
+      } catch {
+        // See the send-action branch above for why this is needed: a
+        // rejected (not resolved-with-error) promise from a
+        // transport-level failure must still surface something, not
+        // silently re-enable the button.
         setStatus("error");
-        setMessage(`Action failed. ${result.error}`);
+        setMessage(
+          "Action failed. A network error occurred — please try again.",
+        );
       }
     });
   }
@@ -208,14 +240,21 @@ export function AgentRecommendationCard({
     setReconnectSlug(null);
 
     startTransition(async () => {
-      const result = await dismissAgentActionProposalAction(card.id);
+      try {
+        const result = await dismissAgentActionProposalAction(card.id);
 
-      if (result.ok) {
-        setStatus("success");
-        setMessage("Dismissed.");
-      } else {
+        if (result.ok) {
+          setStatus("success");
+          setMessage("Dismissed.");
+        } else {
+          setStatus("error");
+          setMessage(`Action failed. ${result.error}`);
+        }
+      } catch {
         setStatus("error");
-        setMessage(`Action failed. ${result.error}`);
+        setMessage(
+          "Action failed. A network error occurred — please try again.",
+        );
       }
     });
   }

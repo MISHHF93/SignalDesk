@@ -75,6 +75,18 @@ export function DraftActionButton({
 
         setStatus("idle");
         setMessage(result.message);
+      } catch {
+        // A transport-level failure (dropped connection, aborted
+        // request) rejects rather than resolving `action(...)` — unlike
+        // an in-action failure, which is already caught server-side and
+        // returned as `{ ok: false }`. Without this, `status` stays
+        // stuck at "pending" with no message, and the button silently
+        // reverts to its idle label once React clears isPending —
+        // indistinguishable from the click never registering.
+        setStatus("error");
+        setMessage(
+          `${errorPrefix} A network error occurred — please try again.`,
+        );
       } finally {
         setActiveDraftId(null);
       }
