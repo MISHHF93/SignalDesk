@@ -16,7 +16,11 @@ import {
   validateInviteToken,
 } from "../src/invites";
 import { withTenantContext } from "../src/tenant-context";
-import { getTestPool, seedMembership } from "./support";
+import {
+  getTestPool,
+  queryWithoutTenantContext,
+  seedMembership,
+} from "./support";
 
 // Exercises the real Phase 3 multi-member invite flow end to end against
 // the live database: create → validate → accept (via
@@ -326,6 +330,41 @@ describe.skipIf(!process.env.DATABASE_URL)(
       expect(invitesAfterAccept.find((i) => i.email === email)?.status).toBe(
         "accepted",
       );
+    });
+
+    // Real gap found by review (drizzle/0072c): the invite-consuming
+    // SELECT took no row lock, so two concurrent redemptions of the same
+    // token could both pass the pending-status check before either
+    // committed — both would insert a real membership from one
+    // single-use token, discovered too late by the second UPDATE (which
+    // only guards the invite's own bookkeeping columns, not the
+    // already-inserted duplicate membership). Fixed with `for update` on
+    // the initial SELECT so a second concurrent caller blocks on
+    // Postgres's own row lock until the first transaction commits, then
+    // correctly re-reads the now-'accepted' status and falls through to
+    // a solo org instead.
+    //
+    // Not tested by actually racing two calls: this function's whole
+    // SELECT-INSERT-UPDATE body runs as one fast, atomic top-level
+    // statement, so a plain client-side Promise.all() essentially never
+    // overlaps mid-function against a real (even local) Postgres
+    // instance — confirmed empirically (5 consecutive runs against the
+    // pre-fix function, 0 failures) — a test built that way would pass
+    // whether or not the fix is present, which is worse than no test at
+    // all. Verified instead the same way the earlier production apply of
+    // 0072b was independently confirmed (via execute_sql against
+    // pg_proc.prosrc): the live function's own deployed source actually
+    // contains `for update`, not just this migration file's source.
+    it("regression: the deployed invite-consuming functions actually lock the invite row, not just this migration file", async () => {
+      const def = await queryWithoutTenantContext(
+        pool,
+        `select
+           pg_get_functiondef('public.provision_identity_and_organization'::regproc) as provision_def,
+           pg_get_functiondef('public.complete_deferred_identity_provisioning'::regproc) as deferred_def`,
+      );
+
+      expect(def.rows[0].provision_def).toContain("for update");
+      expect(def.rows[0].deferred_def).toContain("for update");
     });
 
     it("a mismatched email never accepts the invite — provisions a normal solo org instead", async () => {

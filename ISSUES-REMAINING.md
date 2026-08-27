@@ -66,6 +66,8 @@ doc for those).
 
 | `listOrganizationMembers` had no cap at all, unlike every sibling "real set" list in the package (found + fixed 2026-08-27, a new list/pagination-boundary-correctness sweep of the app's own read APIs, distinct from the third-party connector-sync pagination already fixed) | The sweep's headline result is structural, not a fix: this app has no page-by-page or cursor-based pagination anywhere on a user-facing read — every list is a small, fixed-`LIMIT` "top N" dashboard read, refetched and replaced wholesale by its client hook rather than paged, so the entire off-by-one/duplicate-at-boundary/non-unique-cursor bug class cannot occur by construction (confirmed by reading every `list*` function in `packages/persistence/src` and both `app/api` routes returning list data, plus a repo-wide grep confirming zero `OFFSET` usages). Of the one bug class that does apply here — missing default limits — `listOrganizationMembers` (`membership.ts`) had no `LIMIT` clause, the one place this package's own "real set" list convention was dropped; an organization that invites many members over time (the real invite flow is still recent, Phase 3) would have its team-roster query grow unbounded. Fixed with a `MAX_ORGANIZATION_MEMBERS = 500` cap, oldest-joined first. A second candidate, `listConnectorConnections`, is also unbounded but verified deliberately correct: `delete-organization.ts` needs the complete set to revoke and disconnect every real connection during account deletion, so a cap there would leave some integrations silently still connected — a worse bug than the one it would "fix." Left unbounded with a doc comment now explaining why. | No new regression test for the cap boundary itself — seeding 500+ live rows (each requiring a full `provisionIdentityAndOrganization` round trip) would be prohibitively slow, and no sibling `MAX_*` cap elsewhere in this package is boundary-tested against real seeded volume either; the existing 3 live-DB tests on `membership.test.ts` still cover ordering and tenant isolation unchanged. Full `pnpm check` clean, `DATABASE_URL` confirmed loaded: 2,325 tests passing (626 persistence, live). |
 
+| A guest who "created an account" permanently lost their guest workspace, contradicting the profile page's own promise; a real TOCTOU race in invite redemption; a password reset that never revoked an attacker's already-stolen session (found + fixed 2026-08-27, a new session/authentication-edge-case sweep — concurrent logins, guest-to-real-account upgrade, invite/account-linking) | (1) The single most consequential bug found this session: the profile page tells a guest (Supabase anonymous sign-in, ADR 0009) "create an account to keep this workspace," but `signUpAction` always called plain `signUp()`, unconditionally minting a brand-new `auth.users` row and a second, separate organization — the guest's real organization (connections, goals, tasks) wasn't deleted, but became permanently unreachable, since a guest session has no credentials to ever sign back into it. Fixed by detecting an anonymous session with no invite token and calling Supabase's documented anonymous-upgrade flow, `updateUser({ email, password })`, instead — converting the same identity in place. A new migration (`0072c`) syncs the guest's real email into `public.users` (permanently null before) and — critically — clears `organizations.is_guest` (the flag granting unmetered entitlements, migration 0070) on that same transition, since preserving the org without clearing it would have opened a permanent free-tier bypass (guest → immediate conversion → unmetered access forever on a real paying identity). (2) The same migration hardens both invite-redemption functions' real TOCTOU race: the invite-consuming `SELECT` took no row lock, so two concurrent redemptions of one token could both pass the pending check and both insert a real membership before either committed. A `status = 'pending'` guard on the `UPDATE` alone (the fix's own first draft) would only protect the invite's bookkeeping, not the already-inserted duplicate membership — the actual fix adds `for update` to the initial `SELECT`, closing the race before the membership insert. Not currently reachable in production (both functions only run from triggers gated on one `auth.users` row transitioning once) but hardened to match this codebase's own advisory-lock/row-lock discipline. (3) `updatePasswordAction` now calls `signOut({ scope: "others" })` after a successful change — a reset's whole point in the compromise scenario that motivates it is cutting off an attacker's already-stolen session, which `updateUser()` alone never touched. Two further real gaps were found and deliberately left unfixed, disclosed rather than silently dropped: an invited signup that authenticates via OAuth instead of the password form silently drops its invite token (currently inert — no OAuth provider is enabled in production yet); and a user who already has an account and receives an invite to a second organization hits a functional dead end with no account-linking path — a real multi-org product-scope question, not a narrow bug. | 6 new tests on `auth.test.ts` (guest conversion, invite-token exclusion, sign-out-others), 1 new test on `invites.test.ts` verifying the deployed function source directly (`pg_get_functiondef`) rather than racing `Promise.all`, which was empirically confirmed across 5 consecutive runs to pass identically whether or not the fix was present — a non-discriminating test would have been worse than none. Migration applied to dev first (security-advisor scan clean), full check re-run clean, then approved and applied to production (owner sign-off both times); production verified clean on `get_advisors` (zero findings) and by directly querying the deployed function source confirming both row locks, the guest-flag clear, the new trigger, and its `EXECUTE` grant restricted to `identity_provisioner`/`service_role` only. Full `pnpm check` clean, `DATABASE_URL` confirmed loaded: 2,332 tests passing (627 persistence, live). |
+
 ## P0 — could cause incorrect business information, unauthorized action, tenant leakage, connector data loss, or misleading UI
 
 **None found.** Every candidate in this severity band was either already
@@ -86,9 +88,41 @@ coverage; `canExecute: false` confirmed hard-enforced; OAuth CSRF `state`
 
 ## P1 — real, disclosed, bounded-impact gaps; fix when next touching the affected area
 
-**None open.** The one item previously listed here (invite-token race on
-unconfirmed signup) is fixed — see the Fixed table above
-(drizzle/0071/0072).
+Found by the Thirty-first pass's session/authentication-edge-case sweep
+(2026-08-27), both deliberately left unfixed since neither is currently
+live/reachable and each needs a larger, separately-scoped decision rather
+than a narrow patch:
+
+1. **An invited signup that authenticates via OAuth instead of the
+   password form silently drops its invite token.** `/signup?invite=TOKEN`
+   correctly shows "You've been invited to join X," but the invite token
+   only reaches `signUpAction`'s hidden form field — the OAuth buttons
+   rendered on the same page (`oauth-buttons.tsx`) have no way to carry
+   it, and `signInWithOAuthAction` never attaches it to
+   `options.data`/the redirect state. An invited user who clicks "Continue
+   with Google" instead of typing a password gets signed in with a fresh
+   solo organization; the invite is left `pending` and silently expires,
+   with no error shown. Currently inert: no OAuth provider is enabled in
+   `NEXT_PUBLIC_ENABLED_OAUTH_PROVIDERS` in production yet (the profile
+   page's own copy honestly says social sign-in is "planned but not
+   available"), so this cannot fire today — but it will the moment one is
+   turned on, with zero warning. Needs the invite token threaded through
+   the OAuth redirect (e.g. as signed state or `options.data`) and
+   consumed on the callback side before that flag flips.
+2. **No account-linking path for a user who already has a SignalDesk
+   account and receives an invite to a second organization.** Invite
+   acceptance is wired exclusively into the `on_auth_user_created`/
+   `on_auth_user_confirmed` triggers, both gated on a **new** `auth.users`
+   row — `resolveOrganizationForIdentity`'s own doc comment states the
+   current model plainly: "one auto-provisioned solo org per user."
+   Someone invited to a second org who already has an account gets
+   Supabase's generic "User already registered" error with no explanation
+   and no path to accept from their existing session; the invite just
+   expires after 7 days. A functional dead end, not a corruption or
+   security bug — but a real one for any invite sent to an existing user.
+   Fixing it is a genuine multi-org-membership product decision (does
+   this app ever support one identity in more than one organization
+   simultaneously?), not a quick patch.
 
 ## P2 — low severity, correctly deferred, or genuinely blocked on missing prerequisites
 

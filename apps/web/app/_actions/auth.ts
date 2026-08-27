@@ -99,6 +99,50 @@ export async function signUpAction(
   // function's original, unchanged solo-organization path.
   const inviteToken = String(formData.get("inviteToken") ?? "").trim();
   const supabase = await createClient();
+
+  // A guest (Supabase anonymous sign-in, ADR 0009) submitting this form
+  // with no invite token is doing exactly what the profile page promises:
+  // "create an account to keep this workspace." Plain signUp() below
+  // would silently mint a brand-new auth.users row instead, permanently
+  // orphaning the guest's real organization — guest sessions have no
+  // credentials, so there'd be no way back into it. updateUser() instead
+  // converts the SAME anonymous identity in place (Supabase's documented
+  // anonymous-user-upgrade flow); drizzle/0072c's is_anonymous-transition
+  // trigger picks that up to sync the real email and clear the org's
+  // guest entitlement bypass.
+  //
+  // Deliberately excluded: a guest holding a real invite token. Accepting
+  // a specific invite is a deliberate "join this other organization"
+  // choice, incompatible with "keep my current org" — the unmodified
+  // signUp() path below (new identity, invite consumed normally) is
+  // correct there, same as any other invited signup.
+  if (!inviteToken) {
+    const { data: claimsData } = await supabase.auth.getClaims();
+
+    if (claimsData?.claims?.is_anonymous === true) {
+      const { data: updateData, error: updateError } =
+        await supabase.auth.updateUser({ email, password });
+
+      if (updateError) {
+        return { error: updateError.message };
+      }
+
+      // updateUser() applies an email change immediately only when the
+      // project doesn't require confirming it; otherwise the address
+      // (and the conversion) stays pending until the emailed link is
+      // followed, exactly like a normal signup's own two branches below.
+      if (updateData.user?.email) {
+        redirect(next);
+      }
+
+      return {
+        error: null,
+        message:
+          "Check your email to confirm the new address, then you're all set — your existing workspace and data are preserved.",
+      };
+    }
+  }
+
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
@@ -209,6 +253,17 @@ export async function updatePasswordAction(
   if (error) {
     return { error: error.message };
   }
+
+  // A password reset's whole point, in the scenario that actually
+  // motivates it, is cutting off an attacker who already has a stolen
+  // session — updateUser() alone only saves the *current* (recovery)
+  // session locally and never touches any other device's still-valid
+  // refresh token. `scope: "others"` explicitly revokes every other
+  // session for this user server-side while leaving this one untouched.
+  // Best-effort: the password change above already succeeded, so a
+  // failure here must not be rolled back or reported as this action's
+  // own error.
+  await supabase.auth.signOut({ scope: "others" });
 
   redirect("/login?reset=1");
 }

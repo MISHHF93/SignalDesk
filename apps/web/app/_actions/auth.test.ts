@@ -50,6 +50,10 @@ function mockSupabaseAuth(overrides: Record<string, unknown> = {}) {
       data: { url: "https://provider.example/authorize" },
       error: null,
     }),
+    getClaims: vi.fn().mockResolvedValue({
+      data: { claims: { is_anonymous: false } },
+      error: null,
+    }),
     ...overrides,
   };
   mockedCreateClient.mockResolvedValue({ auth } as unknown as Awaited<
@@ -214,6 +218,104 @@ describe("auth actions", () => {
         ),
       ).rejects.toThrow("NEXT_REDIRECT:/");
     });
+
+    it("converts an anonymous guest session in place instead of minting a new account, preserving their organization", async () => {
+      const auth = mockSupabaseAuth({
+        getClaims: vi.fn().mockResolvedValue({
+          data: { claims: { is_anonymous: true } },
+          error: null,
+        }),
+        updateUser: vi.fn().mockResolvedValue({
+          data: { user: { email: "a@example.com" } },
+          error: null,
+        }),
+      });
+
+      await expect(
+        signUpAction(
+          { error: null },
+          formData({ email: "a@example.com", password: "longenough1" }),
+        ),
+      ).rejects.toThrow("NEXT_REDIRECT:/");
+
+      expect(auth.updateUser).toHaveBeenCalledWith({
+        email: "a@example.com",
+        password: "longenough1",
+      });
+      expect(auth.signUp).not.toHaveBeenCalled();
+    });
+
+    it("returns a check-your-email message for a guest conversion pending confirmation, without redirecting", async () => {
+      mockSupabaseAuth({
+        getClaims: vi.fn().mockResolvedValue({
+          data: { claims: { is_anonymous: true } },
+          error: null,
+        }),
+        updateUser: vi
+          .fn()
+          .mockResolvedValue({ data: { user: null }, error: null }),
+      });
+
+      const result = await signUpAction(
+        { error: null },
+        formData({ email: "a@example.com", password: "longenough1" }),
+      );
+
+      expect(result).toEqual({
+        error: null,
+        message:
+          "Check your email to confirm the new address, then you're all set — your existing workspace and data are preserved.",
+      });
+      expect(mockedRedirect).not.toHaveBeenCalled();
+    });
+
+    it("surfaces a real Supabase error from a guest conversion attempt as-is", async () => {
+      mockSupabaseAuth({
+        getClaims: vi.fn().mockResolvedValue({
+          data: { claims: { is_anonymous: true } },
+          error: null,
+        }),
+        updateUser: vi.fn().mockResolvedValue({
+          data: { user: null },
+          error: { message: "Email already registered" },
+        }),
+      });
+
+      const result = await signUpAction(
+        { error: null },
+        formData({ email: "a@example.com", password: "longenough1" }),
+      );
+
+      expect(result).toEqual({ error: "Email already registered" });
+    });
+
+    it("does not treat a guest holding a real invite token as a conversion — joining a specific org takes the normal signUp path", async () => {
+      const auth = mockSupabaseAuth({
+        getClaims: vi.fn().mockResolvedValue({
+          data: { claims: { is_anonymous: true } },
+          error: null,
+        }),
+        signUp: vi
+          .fn()
+          .mockResolvedValue({ data: { session: null }, error: null }),
+      });
+
+      await signUpAction(
+        { error: null },
+        formData({
+          email: "a@example.com",
+          password: "longenough1",
+          inviteToken: "invite-abc",
+        }),
+      );
+
+      expect(auth.updateUser).not.toHaveBeenCalled();
+      expect(auth.signUp).toHaveBeenCalledWith(
+        expect.objectContaining({
+          options: { data: { invite_token: "invite-abc" } },
+        }),
+      );
+    });
   });
 
   describe("signOutAction", () => {
@@ -315,6 +417,34 @@ describe("auth actions", () => {
     });
 
     it("redirects to /login?reset=1 on success", async () => {
+      await expect(
+        updatePasswordAction(
+          { error: null },
+          formData({ password: "longenough1" }),
+        ),
+      ).rejects.toThrow("NEXT_REDIRECT:/login?reset=1");
+    });
+
+    it("signs out every other session after a successful password change", async () => {
+      const auth = mockSupabaseAuth();
+
+      await expect(
+        updatePasswordAction(
+          { error: null },
+          formData({ password: "longenough1" }),
+        ),
+      ).rejects.toThrow("NEXT_REDIRECT:/login?reset=1");
+
+      expect(auth.signOut).toHaveBeenCalledWith({ scope: "others" });
+    });
+
+    it("still redirects on success even when revoking other sessions fails", async () => {
+      mockSupabaseAuth({
+        signOut: vi
+          .fn()
+          .mockResolvedValue({ error: { message: "network error" } }),
+      });
+
       await expect(
         updatePasswordAction(
           { error: null },
