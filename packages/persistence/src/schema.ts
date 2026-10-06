@@ -2951,3 +2951,83 @@ export const aiProviderConnections = pgTable(
     ),
   ],
 );
+
+// =========================================================================
+// SignalDesk Sovereign Tenant Business Graph & Operational State Persistence
+// Authoritative tables for instance-loss durable enterprise operation
+// =========================================================================
+
+export const tenantBusinessGraphNodes = pgTable(
+  "tenant_business_graph_nodes",
+  {
+    tenantId: text("tenant_id").notNull(),
+    nodeId: text("node_id").primaryKey().notNull(),
+    entityType: text("entity_type").notNull(),
+    name: text("name").notNull(),
+    sourceSystem: text("source_system").notNull(),
+    sourceRecordId: text("source_record_id").notNull(),
+    properties: jsonb("properties").notNull(),
+    provenance: jsonb("provenance").notNull(),
+    provenanceDigest: text("provenance_digest"),
+    authorityLevel: text("authority_level"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("uq_tenant_source_record").on(
+      table.tenantId,
+      table.sourceSystem,
+      table.sourceRecordId,
+    ),
+  ],
+);
+
+export const tenantConnectors = pgTable(
+  "tenant_connectors",
+  {
+    tenantId: text("tenant_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    instanceId: text("instance_id").primaryKey().notNull(),
+    status: text("status").notNull(),
+    authenticatedPrincipal: jsonb("authenticated_principal"),
+    scopes: jsonb("scopes"),
+    encryptedCredentialRef: text("encrypted_credential_ref"),
+    lastAttemptedSync: timestamp("last_attempted_sync", { withTimezone: true }),
+    lastSuccessfulSync: timestamp("last_successful_sync", { withTimezone: true }),
+    freshness: text("freshness"),
+    reconnectRequired: boolean("reconnect_required"),
+    health: jsonb("health"),
+    eventCount24h: integer("event_count_24h"),
+    recentEventsLog: jsonb("recent_events_log"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("uq_tenant_provider").on(
+      table.tenantId,
+      table.providerId,
+    ),
+  ],
+);
+
+export const tenantOperationalState = pgTable(
+  "tenant_operational_state",
+  {
+    tenantId: text("tenant_id").primaryKey().notNull(),
+    organization: jsonb("organization").notNull(),
+    signals: jsonb("signals").notNull(),
+    situations: jsonb("situations").notNull(),
+    waitingOnMe: jsonb("waiting_on_me").notNull(),
+    metrics: jsonb("metrics").notNull(),
+    missions: jsonb("missions").notNull(),
+    auditLogs: jsonb("audit_logs").notNull(),
+    commitments: jsonb("commitments").notNull(),
+    decisions: jsonb("decisions").notNull(),
+    edges: jsonb("edges"),
+    documents: jsonb("documents"),
+    workspaceActions: jsonb("workspace_actions"),
+    processedWebhookIds: jsonb("processed_webhook_ids"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+);
+

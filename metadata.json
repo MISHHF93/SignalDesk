@@ -1,0 +1,10 @@
+{
+  "name": "SignalDesk",
+  "description": "AI-orchestrated business operating system delivering one unified command center across email, CRM, billing, projects, calendar, and support.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

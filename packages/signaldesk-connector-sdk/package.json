@@ -1,0 +1,14 @@
+{
+  "name": "@signaldesk/connector-sdk",
+  "version": "1.0.0",
+  "description": "Open-source typed Connector SDK for SignalDesk and Model Context Protocol (MCP) integrations",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc"
+  },
+  "keywords": ["signaldesk", "mcp", "connector-sdk", "integrations"],
+  "author": "SignalDesk Platform Team",
+  "license": "MIT"
+}

@@ -1,0 +1,14 @@
+{
+  "name": "@signaldesk/mcp-testkit",
+  "version": "1.0.0",
+  "description": "Conformance testing framework for Model Context Protocol (MCP) connectors and tools",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc"
+  },
+  "keywords": ["signaldesk", "mcp", "testkit", "conformance", "testing"],
+  "author": "SignalDesk Platform Team",
+  "license": "MIT"
+}

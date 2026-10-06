@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover" />
+    <title>SignalDesk — Unified Business Command Center</title>
+    <meta name="description" content="AI-orchestrated business operating system delivering one unified command center across email, CRM, billing, projects, calendar, and support." />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://signaldesk.ai/" />
+    <meta property="og:title" content="SignalDesk — Unified Business Command Center" />
+    <meta property="og:description" content="AI-orchestrated business operating system delivering one unified command center across email, CRM, billing, projects, calendar, and support." />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="SignalDesk" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="SignalDesk — Unified Business Command Center" />
+    <meta name="twitter:description" content="AI-orchestrated business operating system delivering one unified command center across email, CRM, billing, projects, calendar, and support." />
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "SignalDesk",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "All",
+      "description": "AI-orchestrated business operating system delivering one unified command center across email, CRM, billing, projects, calendar, and support.",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      }
+    }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400;1,600&display=swap" rel="stylesheet">
+    <script>
+      (function() {
+        // Suppress benign browser extension service worker disconnects & unresponded message channels
+        var benignPatterns = [
+          'Could not establish connection',
+          'Receiving end does not exist',
+          'Extension context invalidated',
+          'message port closed',
+          'message channel closed',
+          'A listener indicated an asynchronous response by returning true',
+          'asynchronous response by returning true',
+          'The message port closed before a response was received',
+          'message port closed before a response was received'
+        ];
+
+        function isBenign(str) {
+          if (typeof str !== 'string') return false;
+          for (var i = 0; i < benignPatterns.length; i++) {
+            if (str.indexOf(benignPatterns[i]) !== -1) return true;
+          }
+          return false;
+        }
+
+        window.addEventListener('unhandledrejection', function(event) {
+          var reason = event && (event.reason ? (event.reason.message || event.reason) : '');
+          if (isBenign(reason)) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+          }
+        }, true);
+
+        window.addEventListener('error', function(event) {
+          var message = event && (event.message || '');
+          if (isBenign(message)) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+          }
+        }, true);
+
+        // Filter benign extension errors from console.error without affecting application errors
+        var originalConsoleError = console.error;
+        console.error = function() {
+          for (var i = 0; i < arguments.length; i++) {
+            var arg = arguments[i];
+            var str = typeof arg === 'string' ? arg : (arg && arg.message ? arg.message : '');
+            if (isBenign(str)) {
+              return;
+            }
+          }
+          return originalConsoleError.apply(console, arguments);
+        };
+      })();
+    </script>
+  </head>
+  <body class="bg-[#0c0a09] text-stone-100 antialiased selection:bg-amber-950 selection:text-amber-200">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

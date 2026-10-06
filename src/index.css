@@ -1,0 +1,401 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Outfit', 'Plus Jakarta Sans', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+@layer base {
+  :root {
+    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-display: 'Outfit', 'Plus Jakarta Sans', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+
+    /* Official Obsidian Dark Design System Color Tokens */
+    --canvas-bg: #0c0a09;
+    --surface-primary: #171513;
+    --surface-secondary: #24211e;
+    --surface-tertiary: #2e2a27;
+    --border-subtle: rgba(68, 64, 60, 0.6);
+    --border-strong: #44403c;
+    --text-primary: #f5f5f4;
+    --text-secondary: #d6d3d1;
+    --text-muted: #a8a29e;
+
+    /* Signal Semantic Accents */
+    --signal-indigo: #6366f1;
+    --signal-crimson: #f43f5e;
+    --signal-amber: #f59e0b;
+    --signal-emerald: #10b981;
+  }
+
+  html, body {
+    overflow-x: hidden;
+    max-width: 100%;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    scroll-behavior: smooth;
+    color-scheme: dark;
+    overscroll-behavior-y: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  #root {
+    min-height: 100dvh;
+    height: 100dvh;
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    background-color: #0c0a09;
+    background-image: 
+      radial-gradient(circle at 50% 0%, rgba(245, 158, 11, 0.03), transparent 60%),
+      linear-gradient(to right, rgba(44, 40, 37, 0.45) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(44, 40, 37, 0.45) 1px, transparent 1px);
+    background-size: 100% 100%, 48px 48px, 48px 48px;
+    background-attachment: fixed;
+    color: #f5f5f4;
+    letter-spacing: -0.012em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* ========================================================================= */
+/* SIGNAL PRECISION DESIGN SYSTEM: TYPOGRAPHY HIERARCHY                      */
+/* ========================================================================= */
+.font-display {
+  font-family: 'Outfit', 'Plus Jakarta Sans', system-ui, sans-serif;
+  letter-spacing: -0.028em;
+}
+
+.font-sans-body {
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  letter-spacing: -0.012em;
+  line-height: 1.6;
+}
+
+.font-mono-code {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  letter-spacing: -0.02em;
+  font-feature-settings: "tnum" 1;
+}
+
+/* ========================================================================= */
+/* SURFACE & CONTAINER ANATOMY (MATHEMATICAL NESTED RADIUS SYSTEM)           */
+/* Formula: Inner Radius = Outer Radius - Distance Between The Two (Padding) */
+/* ========================================================================= */
+.surface-container-shell {
+  background: #ffffff;
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  border-radius: 1rem; /* 16px */
+  padding: 1.5rem; /* 24px */
+  box-shadow: 0 1px 3px 0 rgba(15, 23, 42, 0.02), 0 4px 12px 0 rgba(15, 23, 42, 0.015);
+}
+
+.surface-card-inner {
+  background: #f8fafc;
+  border: 1px solid rgba(226, 232, 240, 0.85);
+  border-radius: 0.75rem; /* 12px (16px - 4px delta) */
+  padding: 1rem; /* 16px */
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.surface-card-inner:hover {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+
+.surface-card {
+  background: #ffffff;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.02), 0 4px 12px 0 rgba(0, 0, 0, 0.015);
+  border-radius: 1rem;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.surface-card-hover:hover {
+  border-color: rgba(203, 213, 225, 1);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.03), 0 10px 24px -4px rgba(0, 0, 0, 0.04);
+  transform: translateY(-1px);
+}
+
+.surface-glass {
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(226, 232, 240, 0.85);
+  box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.03);
+}
+
+/* ========================================================================= */
+/* TRUTH TIERS BADGES (THE 6 AUTHORITATIVE LEVELS)                           */
+/* ========================================================================= */
+.badge-truth-source-fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #065f46;
+  background-color: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  border-radius: 0.375rem;
+  white-space: nowrap;
+}
+
+.badge-truth-deterministic {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #1e40af;
+  background-color: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 0.375rem;
+  white-space: nowrap;
+}
+
+.badge-truth-heuristic {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #854d0e;
+  background-color: #fefce8;
+  border: 1px solid #fef08a;
+  border-radius: 0.375rem;
+  white-space: nowrap;
+}
+
+.badge-truth-ai-inference {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.125rem 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #4338ca;
+  background-color: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 0.375rem;
+  white-space: nowrap;
+}
+
+/* Micro pill and control styles */
+.pill-tab-active {
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.03);
+  font-weight: 600;
+}
+
+/* Custom scrollbars for clean dashboards */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Theme-specific surface treatments */
+.theme-daylight {
+  color-scheme: light;
+  --canvas-bg: #f8fafc;
+  --surface-primary: #ffffff;
+  --surface-secondary: #f1f5f9;
+  --surface-tertiary: #e2e8f0;
+  --border-subtle: #e2e8f0;
+  --border-strong: #cbd5e1;
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --signal-accent: #d97706;
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+.theme-midnight {
+  color-scheme: dark;
+  --canvas-bg: #0c0a09;
+  --surface-primary: #1c1917;
+  --surface-secondary: #292524;
+  --surface-tertiary: #44403c;
+  --border-subtle: #292524;
+  --border-strong: #44403c;
+  --text-primary: #f5f5f4;
+  --text-secondary: #a8a29e;
+  --text-muted: #78716c;
+  --signal-accent: #f59e0b;
+  background-color: #0c0a09;
+  background-image: 
+    radial-gradient(circle at 50% 0%, rgba(245, 158, 11, 0.04), transparent 60%),
+    linear-gradient(to right, rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+  background-size: 100% 100%, 48px 48px, 48px 48px;
+  color: #f5f5f4;
+}
+
+.theme-midnight ::-webkit-scrollbar-thumb {
+  background: #292524;
+}
+
+.theme-midnight ::-webkit-scrollbar-thumb:hover {
+  background: #44403c;
+}
+
+.theme-cobalt {
+  color-scheme: dark;
+  --canvas-bg: #050b18;
+  --surface-primary: #0f172a;
+  --surface-secondary: #1e293b;
+  --surface-tertiary: #334155;
+  --border-subtle: #1e293b;
+  --border-strong: #334155;
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --signal-accent: #38bdf8;
+  background-color: #050b18;
+  background-image: 
+    radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.08), transparent 60%),
+    linear-gradient(to right, rgba(56, 189, 248, 0.02) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(56, 189, 248, 0.02) 1px, transparent 1px);
+  background-size: 100% 100%, 48px 48px, 48px 48px;
+  color: #f8fafc;
+}
+
+.theme-cobalt ::-webkit-scrollbar-thumb {
+  background: #1e293b;
+}
+
+.theme-cobalt ::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
+
+.theme-emerald {
+  color-scheme: dark;
+  --canvas-bg: #021811;
+  --surface-primary: #062c1d;
+  --surface-secondary: #0a3d29;
+  --surface-tertiary: #10593c;
+  --border-subtle: #0a3d29;
+  --border-strong: #10593c;
+  --text-primary: #f0fdf4;
+  --text-secondary: #86efac;
+  --text-muted: #4ade80;
+  --signal-accent: #10b981;
+  background-color: #021811;
+  background-image: 
+    radial-gradient(circle at 50% 0%, rgba(16, 185, 129, 0.09), transparent 60%),
+    linear-gradient(to right, rgba(16, 185, 129, 0.02) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(16, 185, 129, 0.02) 1px, transparent 1px);
+  background-size: 100% 100%, 48px 48px, 48px 48px;
+  color: #f0fdf4;
+}
+
+.theme-emerald ::-webkit-scrollbar-thumb {
+  background: #0a3d29;
+}
+
+.theme-emerald ::-webkit-scrollbar-thumb:hover {
+  background: #10593c;
+}
+
+/* Subtle pulse animations for telemetry indicators */
+@keyframes subtlePulse {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.08); box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2); }
+  60% { transform: scale(1.02); box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.1); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
+}
+
+@keyframes subtlePulseEmerald {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.08); box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.25); }
+  60% { transform: scale(1.02); box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.1); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+.animate-subtle-pulse {
+  animation: subtlePulse 1.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.animate-subtle-pulse-emerald {
+  animation: subtlePulseEmerald 1.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Continuous Marquee Ticker */
+@keyframes marquee {
+  0% { transform: translateX(0%); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-marquee {
+  display: inline-flex;
+  width: max-content;
+  max-width: none;
+  animation: marquee 35s linear infinite;
+  will-change: transform;
+}
+
+.animate-marquee:hover {
+  animation-play-state: paused;
+}
+
+/* Global pill badge alignment guarantee */
+.pill-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  line-height: 1;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+/* Ensure no element blows out viewport */
+*, ::before, ::after {
+  box-sizing: border-box;
+}
+
+img, video, canvas, svg {
+  max-width: 100%;
+}
+

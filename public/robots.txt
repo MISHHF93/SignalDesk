@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /#workspace
+Disallow: /#audit
+
+Sitemap: https://signaldesk.ai/sitemap.xml

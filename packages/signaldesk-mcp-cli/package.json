@@ -1,0 +1,16 @@
+{
+  "name": "@signaldesk/mcp-cli",
+  "version": "1.0.0",
+  "description": "Developer CLI for scaffolding, testing, and publishing MCP connectors for SignalDesk",
+  "bin": {
+    "signaldesk-mcp": "./bin/cli.js"
+  },
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc"
+  },
+  "keywords": ["signaldesk", "mcp", "cli", "scaffolding"],
+  "author": "SignalDesk Platform Team",
+  "license": "MIT"
+}

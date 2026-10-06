@@ -1,0 +1,14 @@
+{
+  "name": "@signaldesk/mcp-sdk",
+  "version": "1.0.0",
+  "description": "Client SDK for the SignalDesk Model Context Protocol (MCP) server & registry",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc"
+  },
+  "keywords": ["signaldesk", "mcp", "sdk", "ai", "gemini", "claude"],
+  "author": "SignalDesk Platform Team",
+  "license": "MIT"
+}

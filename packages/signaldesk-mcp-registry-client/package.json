@@ -1,0 +1,14 @@
+{
+  "name": "@signaldesk/mcp-registry-client",
+  "version": "1.0.0",
+  "description": "Registry client for querying, discovering, and installing official and community MCP servers",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "scripts": {
+    "build": "tsc"
+  },
+  "keywords": ["signaldesk", "mcp", "registry", "discovery"],
+  "author": "SignalDesk Platform Team",
+  "license": "MIT"
+}
