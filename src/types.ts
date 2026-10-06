@@ -183,6 +183,8 @@ export interface WaitingOnMeItem {
   policyNote?: string;
   status?: string;
   requiresDualKey?: boolean;
+  dualKeyRequired?: boolean;
+  secondApprover?: string;
   impactScore?: number;
   impactDescription?: string;
   previewPayload?: {

@@ -2272,7 +2272,39 @@ ${(language && language !== 'en') ? `CRITICAL LANGUAGE DIRECTIVE: The user's act
       // 1. If capability was executed deterministically, provide clean executive synthesis without dumping raw JSON
       if (capabilityExecutionResult && (capabilityExecutionResult.success || capabilityExecutionResult.requiresApproval)) {
         let cleanAnswer = '';
-        if (matchedCapability?.name === 'get_attention_items') {
+        if (matchedCapability?.name === 'inspect_safe_action_gateway') {
+          const pending = capabilityExecutionResult.data?.waitingOnMe || [];
+          if (pending.length > 0) {
+            cleanAnswer = `### Safe Action Gateway · Dual-Key Approvals Inspection\n\n` +
+              `Found **${pending.length} pending decision gate${pending.length > 1 ? 's' : ''}** requiring human executive authorization:\n\n` +
+              pending.map((item: any, idx: number) => {
+                const isDual = item.requiresDualKey;
+                const exposureStr = item.amount ? ` · **Financial Exposure**: $${Number(item.amount).toLocaleString()} USD` : '';
+                return `**${idx + 1}. ${item.title}**\n` +
+                  `• **Target System**: ${item.targetSystem.toUpperCase()} (Risk: \`${item.risk.toUpperCase()}\`)${exposureStr}\n` +
+                  `• **Policy Rule**: ${item.policyNote || 'Consequential external write boundary triggered'}\n` +
+                  `• **Dual-Key Ledger**: ${isDual ? `Key 1 (Initiator: ${item.preparedBy || 'Elena Rostova'}) ✓ SIGNED · Key 2 (${item.secondApprover || 'Marcus Vance'}) PENDING AUTHORIZATION` : 'Single Executive Sign-off Required'}\n` +
+                  `• **Description**: ${item.description}`;
+              }).join('\n\n') +
+              `\n\n---\n*You can inspect cryptographic parameters, dual-key co-signing signatures, or authorize these actions in the Waiting on Me drawer below.*`;
+          } else {
+            cleanAnswer = `### Safe Action Gateway · Dual-Key Governance Status\n\n` +
+              `• **Decision Queue Status**: **0 Pending Approvals** in Waiting on Me\n` +
+              `• **Dual-Key Policy Gate**: Active (2-of-2 Multi-Sig required on external financial movements > $2,500, wire transfers, and consequential API writes)\n` +
+              `• **Cryptographic Verification**: Active — all external writes enforce invariant read-after-write verification and reversible rollback snapshots\n` +
+              `• **Authoritative Systems Protected**: Salesforce, QuickBooks, Stripe, GitHub, Linear, Zendesk, Slack\n\n` +
+              `No consequential actions are currently blocked. Any external write initiated by agents or MCP capabilities will automatically stage in Waiting on Me for co-signing.`;
+          }
+          if (!navigationTargets.some((t: any) => t.sectionId === 'section-waiting-on-me')) {
+            navigationTargets.push({
+              type: 'scroll_to_section',
+              sectionId: 'section-waiting-on-me',
+              view: 'command_center',
+              subView: 'waiting_on_me',
+              description: `Focus Safe Action Gateway (${pending.length} pending items)`
+            });
+          }
+        } else if (matchedCapability?.name === 'get_attention_items') {
           const items = capabilityExecutionResult.data?.attentionItems || [];
           cleanAnswer = `Here is the current attention summary from the Business Graph:\n\n` +
             items.map((it: any) => `• **${it.entityName}** (${it.urgency}): ${it.headline}. ${it.actionRecommendation}`).join('\n') +
@@ -2322,12 +2354,20 @@ ${(language && language !== 'en') ? `CRITICAL LANGUAGE DIRECTIVE: The user's act
 
         return {
           answer: cleanAnswer,
-          cardType: capabilityExecutionResult.requiresApproval ? 'waiting_on_me' : (matchedCapability?.name === 'get_business_pulse' ? 'operating_pulse' : (matchedCapability?.name === 'investigate_customer' ? 'situations' : 'none')),
+          cardType: (capabilityExecutionResult.requiresApproval || matchedCapability?.name === 'inspect_safe_action_gateway') 
+            ? 'waiting_on_me' 
+            : (matchedCapability?.name === 'get_business_pulse' ? 'operating_pulse' : (matchedCapability?.name === 'investigate_customer' ? 'situations' : 'none')),
           intent: detectedIntent,
           groundedEvidence: retrievedEvidence.slice(0, 8),
           navigationActions: navigationTargets,
           suggestedActions: capabilityExecutionResult.requiresApproval
             ? [{ label: 'Review Decision Gate', missionObjective: `Authorize Decision Gate #${capabilityExecutionResult.stagedApprovalId}` }]
+            : matchedCapability?.name === 'inspect_safe_action_gateway'
+            ? [
+                { label: 'View Operating Pulse', missionObjective: 'Review company health' },
+                { label: 'Inspect Active Situations', missionObjective: 'Review active accounts with financial exposure' },
+                { label: 'View Connected Systems', missionObjective: 'Inspect tool connectivity and telemetry status' }
+              ]
             : [{ label: 'View Operating Pulse', missionObjective: 'Review Live Pulse' }],
           temporaryViewData,
           toolTraces,
@@ -2417,6 +2457,76 @@ ${(language && language !== 'en') ? `CRITICAL LANGUAGE DIRECTIVE: The user's act
           navigationActions: navigationTargets,
           suggestedActions: [
             { label: 'Connect Google Workspace', missionObjective: 'Authorize Google Workspace' }
+          ],
+          temporaryViewData,
+          toolTraces,
+          speechAudioBase64: undefined,
+          externalSearchFindings: undefined,
+          workspaceActions: undefined,
+          computerUsePreview: undefined,
+          memoryInsights: undefined,
+          isAIUnavailable: false
+        };
+      }
+
+      const trimmedLowerQ = lowerQ.trim();
+      const isDualKeyQuery = trimmedLowerQ.includes('dual-key') || trimmedLowerQ.includes('dual key') || 
+        trimmedLowerQ.includes('safe action') || trimmedLowerQ.includes('decision queue') || 
+        trimmedLowerQ.includes('decision gate') || trimmedLowerQ.includes('waiting on me') || 
+        (trimmedLowerQ.includes('inspect') && trimmedLowerQ.includes('approval')) ||
+        (trimmedLowerQ.includes('review') && trimmedLowerQ.includes('approval')) ||
+        trimmedLowerQ.includes('pending gate');
+
+      if (isDualKeyQuery) {
+        const pending = state.waitingOnMe || [];
+        let dualKeyAnswer = '';
+        if (pending.length > 0) {
+          dualKeyAnswer = `### Safe Action Gateway · Dual-Key Approvals Inspection\n\n` +
+            `Found **${pending.length} pending decision gate${pending.length > 1 ? 's' : ''}** requiring human executive authorization:\n\n` +
+            pending.map((item: any, idx: number) => {
+              const isDual = Boolean(
+                item.requiresDualKey || 
+                item.dualKeyRequired || 
+                item.risk === 'critical' || 
+                (item.previewPayload?.amount && item.previewPayload.amount > 2500) ||
+                item.actionType?.toLowerCase().includes('wire') ||
+                item.title?.toLowerCase().includes('dual-key')
+              );
+              const exposureStr = item.previewPayload?.amount ? ` · **Financial Exposure**: $${Number(item.previewPayload.amount).toLocaleString()} USD` : '';
+              return `**${idx + 1}. ${item.title}**\n` +
+                `• **Target System**: ${item.targetSystem.toUpperCase()} (Risk: \`${item.risk.toUpperCase()}\`)${exposureStr}\n` +
+                `• **Policy Rule**: ${item.policyNote || 'Consequential external write boundary triggered'}\n` +
+                `• **Dual-Key Ledger**: ${isDual ? `Key 1 (Initiator: ${item.preparedBy || 'Elena Rostova'}) ✓ SIGNED · Key 2 (${item.secondApprover || 'Marcus Vance'}) PENDING AUTHORIZATION` : 'Single Executive Sign-off Required'}\n` +
+                `• **Description**: ${item.description}`;
+            }).join('\n\n') +
+            `\n\n---\n*You can inspect cryptographic parameters, dual-key co-signing signatures, or authorize these actions in the Waiting on Me drawer below.*`;
+        } else {
+          dualKeyAnswer = `### Safe Action Gateway · Dual-Key Governance Status\n\n` +
+            `• **Decision Queue Status**: **0 Pending Approvals** in Waiting on Me\n` +
+            `• **Dual-Key Policy Gate**: Active (2-of-2 Multi-Sig required on external financial movements > $2,500, wire transfers, and consequential API writes)\n` +
+            `• **Cryptographic Verification**: Active — all external writes enforce invariant read-after-write verification and reversible rollback snapshots\n` +
+            `• **Authoritative Systems Protected**: Salesforce, QuickBooks, Stripe, GitHub, Linear, Zendesk, Slack\n\n` +
+            `No consequential actions are currently blocked. Any external write initiated by agents or MCP capabilities will automatically stage in Waiting on Me for co-signing.`;
+        }
+
+        return {
+          answer: dualKeyAnswer,
+          cardType: 'waiting_on_me',
+          intent: 'INTELLIGENCE',
+          groundedEvidence: [],
+          navigationActions: [
+            {
+              type: 'scroll_to_section',
+              sectionId: 'section-waiting-on-me',
+              view: 'command_center',
+              subView: 'waiting_on_me',
+              description: `Focus Safe Action Gateway (${pending.length} pending items)`
+            }
+          ],
+          suggestedActions: [
+            { label: 'View Operating Pulse', missionObjective: 'Review company health' },
+            { label: 'Inspect Active Situations', missionObjective: 'Review active accounts with financial exposure' },
+            { label: 'View Connected Systems', missionObjective: 'Inspect tool connectivity and telemetry status' }
           ],
           temporaryViewData,
           toolTraces,

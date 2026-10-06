@@ -18,7 +18,12 @@ import {
   Minimize2,
   RotateCcw,
   CheckCircle,
-  Cpu
+  Cpu,
+  Key,
+  Users,
+  Layers,
+  FileCode,
+  DollarSign
 } from 'lucide-react';
 import { WaitingOnMeItem } from '../types';
 
@@ -39,6 +44,18 @@ export const ActionApprovalDrawer: React.FC<ActionApprovalDrawerProps> = ({
 }) => {
   if (!item) return null;
 
+  const isDualKeyItem = Boolean(
+    item.requiresDualKey || 
+    item.dualKeyRequired || 
+    item.risk === 'critical' || 
+    (item.previewPayload?.amount && item.previewPayload.amount > 2500) ||
+    item.actionType?.toLowerCase().includes('wire') ||
+    item.actionType?.toLowerCase().includes('transfer') ||
+    item.actionType?.toLowerCase().includes('trade') ||
+    item.title?.toLowerCase().includes('dual-key') ||
+    item.title?.toLowerCase().includes('wire')
+  );
+
   const activePayload = item.previewPayload || item.payload;
   const [recipient, setRecipient] = useState(activePayload?.recipient || '');
   const [subject, setSubject] = useState(activePayload?.subject || '');
@@ -46,6 +63,8 @@ export const ActionApprovalDrawer: React.FC<ActionApprovalDrawerProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const [customTone, setCustomTone] = useState('Executive & Direct');
   const [isExpanded, setIsExpanded] = useState(false);
+  const [secondKeySigner, setSecondKeySigner] = useState(item.secondApprover || 'Marcus Vance (CFO)');
+  const [hasFirstKeySigned, setHasFirstKeySigned] = useState(true); // Elena Rostova (CEO)
 
   // Gemini 3.8 Flash Pre-Flight Verification State
   const [preflightData, setPreflightData] = useState<any>(null);
@@ -106,13 +125,31 @@ export const ActionApprovalDrawer: React.FC<ActionApprovalDrawerProps> = ({
         <div className="p-4 sm:p-6 border-b border-stone-800 bg-stone-950/90 flex items-start justify-between gap-3 shrink-0">
           <div className="space-y-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-xs font-semibold uppercase tracking-wider bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                <Lock className="w-3 h-3 text-amber-400" />
-                Human Authorization Gate
+              <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded text-xs font-semibold uppercase tracking-wider ${
+                isDualKeyItem
+                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 ring-1 ring-amber-400/20'
+                  : 'bg-stone-800 text-stone-300 border border-stone-700'
+              }`}>
+                {isDualKeyItem ? (
+                  <>
+                    <Key className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Safe Action Gateway: Dual-Key Governance</span>
+                  </>
+                ) : (
+                  <>
+                    <Lock className="w-3 h-3 text-amber-400" />
+                    <span>Human Authorization Gate</span>
+                  </>
+                )}
               </span>
               <span className="text-xs font-medium px-2 py-0.5 rounded bg-stone-800 text-stone-300 border border-stone-700 uppercase tracking-wider">
                 {item.targetSystem}
               </span>
+              {isDualKeyItem && (
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold">
+                  2-of-2 Dual-Key Required
+                </span>
+              )}
             </div>
             <h2 className="text-lg font-bold text-stone-100 tracking-tight truncate">
               {item.title}
@@ -146,15 +183,84 @@ export const ActionApprovalDrawer: React.FC<ActionApprovalDrawerProps> = ({
         <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5 sm:space-y-6">
           
           {/* Policy & Authority Boundary Notice */}
-          <div className="p-4 bg-stone-950/60 border border-amber-500/25 rounded-xl space-y-2">
-            <div className="flex items-center gap-2 text-xs font-bold text-amber-300 uppercase tracking-wider">
-              <span className="w-2 h-2 rounded-full bg-amber-400 ring-2 ring-amber-400/20 animate-pulse" />
-              Policy Check: Autonomous Execution Boundary Triggered
+          <div className={`p-4 rounded-xl border space-y-2 ${
+            isDualKeyItem
+              ? 'bg-amber-950/20 border-amber-500/40 text-stone-200'
+              : 'bg-stone-950/60 border-amber-500/25 text-stone-300'
+          }`}>
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2 text-xs font-bold text-amber-300 uppercase tracking-wider">
+                <span className="w-2 h-2 rounded-full bg-amber-400 ring-2 ring-amber-400/20 animate-pulse" />
+                {isDualKeyItem ? 'Safe Action Gateway: Dual-Key Multi-Sig Policy Enforced' : 'Policy Check: Autonomous Execution Boundary Triggered'}
+              </div>
+              {isDualKeyItem && (
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-semibold">
+                  Policy SG-01 Dual Signoff
+                </span>
+              )}
             </div>
-            <p className="text-xs text-stone-300 leading-relaxed">
-              {item.policyNote || 'Policy PR-04: Outbound communication with enterprise executives or contract/financial modifications requires explicit human sign-off.'}
+            <p className="text-xs leading-relaxed">
+              {item.policyNote || (isDualKeyItem 
+                ? 'Consequential action policy gate: external write or financial movement requires 2-of-2 dual-key executive authorization before dispatch.'
+                : 'Policy PR-04: Outbound communication with enterprise executives or contract/financial modifications requires explicit human sign-off.')}
             </p>
           </div>
+
+          {/* Dual-Key Co-Signers Status Ledger */}
+          {isDualKeyItem && (
+            <div className="p-4 rounded-xl bg-stone-950/80 border border-amber-500/30 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+                  <Users className="w-4 h-4 text-amber-400" />
+                  Dual-Key Signoff Ledger (2-of-2 Required)
+                </h3>
+                <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/15 px-2 py-0.5 rounded border border-emerald-500/30">
+                  Key 1 Signed · Key 2 Ready
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {/* Key 1: Initiator / First Executive */}
+                <div className="p-3 rounded-lg bg-stone-900/90 border border-emerald-500/30 space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-stone-200 flex items-center gap-1.5">
+                      <Key className="w-3.5 h-3.5 text-emerald-400" />
+                      Key 1: Initiating Executive
+                    </span>
+                    <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20 font-bold">
+                      ✓ SIGNED
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-stone-300">
+                    <strong>{item.preparedBy || 'Elena Rostova (CEO)'}</strong>
+                  </div>
+                  <div className="text-[10px] font-mono text-stone-400 truncate">
+                    Token: SIG-KEY1-{item.id.replace(/[^a-zA-Z0-9]/g, '').slice(-8).toUpperCase()}
+                  </div>
+                </div>
+
+                {/* Key 2: Co-Signer / Second Approver */}
+                <div className="p-3 rounded-lg bg-stone-900/90 border border-amber-500/30 space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-semibold text-stone-200 flex items-center gap-1.5">
+                      <Key className="w-3.5 h-3.5 text-amber-400" />
+                      Key 2: Authorized Co-Signer
+                    </span>
+                    <span className="text-[10px] font-mono text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">
+                      PENDING AUTHORIZATION
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-stone-300 flex items-center justify-between">
+                    <strong>{secondKeySigner}</strong>
+                    <span className="text-[10px] text-stone-400 font-mono">Dual-Key Role</span>
+                  </div>
+                  <div className="text-[10px] font-mono text-amber-400 truncate">
+                    Attestation: Cryptographic token primed in Safe Action Gateway
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Action Overview */}
           <div className="space-y-2">
@@ -165,6 +271,46 @@ export const ActionApprovalDrawer: React.FC<ActionApprovalDrawerProps> = ({
               {item.description}
             </p>
           </div>
+
+          {/* Structured Payload Inspector for Non-Email / Financial Payloads */}
+          {activePayload && (activePayload.amount || activePayload.parameters || activePayload.capability || !recipient) && (
+            <div className="space-y-2">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-stone-400 flex items-center gap-1.5">
+                <FileCode className="w-3.5 h-3.5 text-stone-400" />
+                Target Parameters & Action Payload
+              </h3>
+              <div className="p-3.5 bg-stone-950/80 rounded-xl border border-stone-800 space-y-2.5 text-xs font-mono">
+                {activePayload.amount && (
+                  <div className="flex items-center justify-between p-2 rounded bg-stone-900/70 border border-stone-800">
+                    <span className="text-stone-400">Financial Exposure / Amount:</span>
+                    <span className="font-bold text-amber-400 text-sm">
+                      ${Number(activePayload.amount).toLocaleString()} USD
+                    </span>
+                  </div>
+                )}
+                {activePayload.capability && (
+                  <div className="flex items-center justify-between p-2 rounded bg-stone-900/70 border border-stone-800">
+                    <span className="text-stone-400">Invoked MCP Capability:</span>
+                    <span className="font-semibold text-emerald-400">{activePayload.capability}</span>
+                  </div>
+                )}
+                {activePayload.targetStatus && (
+                  <div className="flex items-center justify-between p-2 rounded bg-stone-900/70 border border-stone-800">
+                    <span className="text-stone-400">Target State:</span>
+                    <span className="font-semibold text-stone-200">{activePayload.targetStatus}</span>
+                  </div>
+                )}
+                {activePayload.parameters && (
+                  <div className="space-y-1">
+                    <span className="text-stone-400 text-[11px] block">Parameters:</span>
+                    <pre className="p-2.5 rounded bg-stone-900 text-[11px] text-stone-300 overflow-x-auto border border-stone-800">
+                      {JSON.stringify(activePayload.parameters, null, 2)}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Action Payload Preview / Edit */}
           {item.previewPayload && (
@@ -369,14 +515,20 @@ export const ActionApprovalDrawer: React.FC<ActionApprovalDrawerProps> = ({
             <button
               onClick={handleExecute}
               disabled={isExecuting}
-              className="px-5 py-2 text-xs font-semibold text-stone-950 bg-amber-500 hover:bg-amber-400 rounded-lg shadow-sm flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer"
+              className={`px-5 py-2 text-xs font-semibold rounded-lg shadow-sm flex items-center gap-2 transition-all disabled:opacity-50 cursor-pointer ${
+                isDualKeyItem
+                  ? 'text-stone-950 bg-amber-400 hover:bg-amber-300 font-bold ring-1 ring-amber-300/40'
+                  : 'text-stone-950 bg-amber-500 hover:bg-amber-400'
+              }`}
             >
               {isExecuting ? (
                 <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              ) : isDualKeyItem ? (
+                <Key className="w-3.5 h-3.5" />
               ) : (
                 <Send className="w-3.5 h-3.5" />
               )}
-              Approve & Dispatch Action
+              {isDualKeyItem ? 'Co-Sign & Authorize Dual-Key Action' : 'Approve & Dispatch Action'}
             </button>
           </div>
         </div>

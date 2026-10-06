@@ -2112,56 +2112,85 @@ export const AIChatWorkspace: React.FC<AIChatWorkspaceProps> = ({
                               <span className="text-stone-500 font-mono text-[10px]">Dual-Key Enforced</span>
                             </div>
                             <div className="space-y-2">
-                              {pendingWaitingItems.map((item) => (
-                                <div 
-                                  key={item.id}
-                                  className="p-3.5 rounded-lg bg-stone-900/60 border border-amber-500/25 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                                >
-                                  <div className="space-y-1 min-w-0 text-xs">
-                                    <div className="flex items-center gap-2 flex-wrap">
-                                      <span className="font-semibold text-white">{item.title}</span>
-                                      <span className="text-stone-500 font-mono text-[11px] uppercase">
-                                        · {item.targetSystem}
-                                      </span>
-                                      {item.previewPayload?.amount && (
-                                        <span className="font-mono font-bold text-amber-400">
-                                          · ${item.previewPayload.amount.toLocaleString()}
-                                        </span>
-                                      )}
-                                    </div>
-                                    <p className="text-stone-300">{item.description}</p>
-                                    <div className="text-[10px] font-mono text-stone-500">
-                                      Policy: {item.policyNote || `${item.risk.toUpperCase()} Risk Gate`}
-                                    </div>
-                                  </div>
+                              {pendingWaitingItems.map((item) => {
+                                const isDualKey = Boolean(
+                                  item.requiresDualKey || 
+                                  item.dualKeyRequired || 
+                                  item.risk === 'critical' || 
+                                  (item.previewPayload?.amount && item.previewPayload.amount > 2500) ||
+                                  item.actionType?.toLowerCase().includes('wire') ||
+                                  item.actionType?.toLowerCase().includes('transfer') ||
+                                  item.actionType?.toLowerCase().includes('trade') ||
+                                  item.title?.toLowerCase().includes('dual-key') ||
+                                  item.title?.toLowerCase().includes('wire')
+                                );
 
-                                  <div className="flex items-center gap-2 shrink-0 self-end sm:self-center w-full sm:w-auto justify-end">
-                                    <button
-                                      type="button"
-                                      onClick={() => setInspectingItem(item)}
-                                      className="p-1.5 rounded-lg text-stone-400 hover:text-white hover:bg-stone-800 transition cursor-pointer"
-                                      title="View details & payload"
-                                    >
-                                      <MoreHorizontal className="w-4 h-4" />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleCardDecline(item)}
-                                      className="px-3 py-1.5 rounded-lg bg-stone-850 hover:bg-stone-800 text-stone-300 hover:text-white text-xs font-medium transition cursor-pointer"
-                                    >
-                                      Decline
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleCardApprove(item)}
-                                      className="flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-stone-950 text-xs font-bold transition cursor-pointer shadow-xs text-center active:scale-95 flex items-center justify-center gap-1"
-                                    >
-                                      <Zap className="w-3 h-3 fill-current" />
-                                      <span>1-Tap Approve</span>
-                                    </button>
+                                return (
+                                  <div 
+                                    key={item.id}
+                                    className={`p-3.5 rounded-lg border flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                                      isDualKey 
+                                        ? 'bg-amber-950/20 border-amber-500/40 ring-1 ring-amber-400/20' 
+                                        : 'bg-stone-900/60 border-amber-500/25'
+                                    }`}
+                                  >
+                                    <div className="space-y-1 min-w-0 text-xs">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="font-semibold text-white">{item.title}</span>
+                                        <span className="text-stone-500 font-mono text-[11px] uppercase">
+                                          · {item.targetSystem}
+                                        </span>
+                                        {isDualKey && (
+                                          <span className="inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold">
+                                            <Key className="w-3 h-3 text-amber-400" />
+                                            Dual-Key Gate (2-of-2)
+                                          </span>
+                                        )}
+                                        {item.previewPayload?.amount && (
+                                          <span className="font-mono font-bold text-amber-400">
+                                            · ${item.previewPayload.amount.toLocaleString()}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <p className="text-stone-300">{item.description}</p>
+                                      <div className="text-[10px] font-mono text-stone-500">
+                                        Policy: {item.policyNote || `${item.risk.toUpperCase()} Risk Gate`}
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-2 shrink-0 self-end sm:self-center w-full sm:w-auto justify-end">
+                                      <button
+                                        type="button"
+                                        onClick={() => setInspectingItem(item)}
+                                        className="px-2.5 py-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-200 hover:text-white text-xs font-mono font-medium transition cursor-pointer flex items-center gap-1 border border-stone-700"
+                                        title="Inspect action details & dual-key signing ledger"
+                                      >
+                                        <Key className="w-3.5 h-3.5 text-amber-400" />
+                                        <span>Inspect</span>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleCardDecline(item)}
+                                        className="px-3 py-1.5 rounded-lg bg-stone-850 hover:bg-stone-800 text-stone-300 hover:text-white text-xs font-medium transition cursor-pointer"
+                                      >
+                                        Decline
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleCardApprove(item)}
+                                        className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-lg text-stone-950 text-xs font-bold transition cursor-pointer shadow-xs text-center active:scale-95 flex items-center justify-center gap-1 ${
+                                          isDualKey
+                                            ? 'bg-amber-400 hover:bg-amber-300 ring-1 ring-amber-300/40'
+                                            : 'bg-emerald-500 hover:bg-emerald-400'
+                                        }`}
+                                      >
+                                        {isDualKey ? <Key className="w-3 h-3" /> : <Zap className="w-3 h-3 fill-current" />}
+                                        <span>{isDualKey ? 'Co-Sign (Key 2)' : '1-Tap Approve'}</span>
+                                      </button>
+                                    </div>
                                   </div>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           </div>
                         )}
